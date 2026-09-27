@@ -15,11 +15,10 @@ import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import { useAuthRequest, ResponseType } from "expo-auth-session";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, clearGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, setGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const BACKUP_VERSION = 2;
-const AUTO_BACKUP_KEY = "ssm.auto-backup.v2";
 
 type BackupPayload = {
   app: "surgical-store";
@@ -58,29 +57,6 @@ function fileName() {
   return `SurgicalStore-Backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}.json`;
 }
 
-async function saveAutoBackupIfDue() {
-  const now = new Date();
-  const last = await storage.getItem<string | null>(AUTO_BACKUP_KEY, null);
-  const stamp = now.toISOString().slice(0, 10);
-  if (last === stamp || now.getHours() < 6) return;
-  const json = await makeBackup();
-  const name = fileName().replace(".json", "-AUTO.json");
-  if (Platform.OS === "android") {
-    const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
-    if (dir) {
-      const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, name, "application/json");
-      await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
-    } else {
-      const localUri = FileSystem.documentDirectory + name;
-      await FileSystem.writeAsStringAsync(localUri, json, { encoding: FileSystem.EncodingType.UTF8 });
-    }
-  } else {
-    const localUri = FileSystem.documentDirectory + name;
-    await FileSystem.writeAsStringAsync(localUri, json, { encoding: FileSystem.EncodingType.UTF8 });
-  }
-  await storage.setItem(AUTO_BACKUP_KEY, stamp);
-}
-
 export default function BackupRestore() {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -90,7 +66,6 @@ export default function BackupRestore() {
   const [busy, setBusy] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
-  const [showClientIdForm, setShowClientIdForm] = useState(false);
   const [clientId, setClientId] = useState<string | null>(googleDriveClientId());
   const redirectUri = googleDriveRedirectUri();
   const [request, response, promptAsync] = useAuthRequest({
@@ -116,25 +91,14 @@ export default function BackupRestore() {
       try {
         const code = response.params?.code;
         if (!code || !clientId || !request?.codeVerifier) throw new Error("Google Drive authorization was incomplete.");
-        const token = await AuthSession.exchangeCodeAsync({
-          clientId,
-          code,
-          redirectUri,
-          extraParams: { code_verifier: request.codeVerifier },
-        }, { tokenEndpoint: "https://oauth2.googleapis.com/token" });
+        const token = await AuthSession.exchangeCodeAsync({ clientId, code, redirectUri, extraParams: { code_verifier: request.codeVerifier } }, { tokenEndpoint: "https://oauth2.googleapis.com/token" });
         await saveGoogleDriveToken({ accessToken: token.accessToken, refreshToken: token.refreshToken ?? undefined, expiresIn: token.expiresIn, issuedAt: token.issuedAt, tokenType: token.tokenType });
         setDriveConnected(true);
-        toast("Google Drive connected. Automatic backups will also upload there.", "success");
+        toast("Google Drive connected.", "success");
       } catch (e: any) { toast(e?.message || "Google Drive connection failed", "error"); }
     })();
   }, [response]);
 
-  useEffect(() => {
-    // Android background execution cannot be guaranteed by a normal JS timer.
-    // We therefore run the automatic backup when the app is opened/resumed
-    // after 06:00, and reuse the last selected backup folder when available.
-    saveAutoBackupIfDue().catch(() => {});
-  }, []);
 
   const uploadCurrentBackupToDrive = async () => {
     setBusy(true);
@@ -205,34 +169,6 @@ export default function BackupRestore() {
       } catch {}
       throw error;
     }
-  };
-
-  const restoreGoogleDriveBackup = async () => {
-    setBusy(true);
-    try {
-      const files = await listGoogleDriveBackups();
-      if (!files[0]) throw new Error("No Surgical Store backup was found in Google Drive.");
-      const raw = await downloadGoogleDriveBackup(files[0].id);
-      const payload = JSON.parse(raw) as BackupPayload;
-      if (payload?.app !== "surgical-store" || payload?.backup_version !== BACKUP_VERSION || !payload?.storage || typeof payload.storage !== "object") {
-        throw new Error("The Google Drive file is not a valid Surgical Store backup.");
-      }
-      const safety = await makeBackup();
-      const safetyDir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
-      if (Platform.OS === "android") {
-        const dir = safetyDir;
-        if (dir) {
-          const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
-          await FileSystem.writeAsStringAsync(uri, safety, { encoding: FileSystem.EncodingType.UTF8 });
-        }
-      }
-      if (!safetyDir && Platform.OS === "android") throw new Error("Select a backup folder first so a safety copy can be created before restore.");
-      await applyBackupPayload(payload);
-      toast("Latest Google Drive backup restored.", "success");
-      router.replace("/(tabs)");
-    } catch (e: any) {
-      toast(e?.message || "Google Drive restore failed", "error");
-    } finally { setBusy(false); }
   };
 
   const restoreBackup = async () => {
@@ -338,12 +274,8 @@ export default function BackupRestore() {
               <Text style={styles.clientIdLabel}>Google OAuth Client ID</Text>
               <TextInput value={manualClientId} onChangeText={setManualClientId} placeholder="Paste your Google OAuth Client ID" placeholderTextColor={colors.muted} autoCapitalize="none" autoCorrect={false} style={styles.clientIdInput} />
               <Pressable style={[styles.action, styles.restore, (!manualClientId.trim() || busy) && styles.disabled]} disabled={!manualClientId.trim() || busy} onPress={async () => {
-                try {
-                  const id = manualClientId.trim();
-                  await setGoogleDriveClientId(id);
-                  setClientId(id);
-                  toast("Google OAuth Client ID saved on this phone. Tap Connect Google Drive.", "success");
-                } catch (e: any) { toast(e?.message || "Could not save Client ID", "error"); }
+                try { const id = manualClientId.trim(); await setGoogleDriveClientId(id); setClientId(id); toast("Google OAuth Client ID saved on this phone.", "success"); }
+                catch (e: any) { toast(e?.message || "Could not save Client ID", "error"); }
               }}>
                 <MaterialDesignIcons name="content-save-outline" size={24} color={colors.brandPrimary} />
                 <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Save Client ID</Text><Text style={styles.actionSub}>Stored locally on this phone</Text></View>
@@ -364,7 +296,7 @@ export default function BackupRestore() {
           </>
         )}
 
-<Text style={styles.note}>Automatic backup checks at 6:00 AM when the app is opened/resumed. On Android, select the backup folder once above so automatic backups can be written there.
+        <Text style={styles.note}>Automatic backup checks at 6:00 AM when the app is opened/resumed. On Android, select the backup folder once above so automatic backups can be written there.
           Offline changes remain on this phone until the server is available again. Restoring a backup does not delete
           anything from the online server.
         </Text>
