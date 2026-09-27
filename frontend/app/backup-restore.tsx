@@ -213,16 +213,6 @@ export default function BackupRestore() {
     } finally { setBusy(false); }
   };
 
-  const uploadCurrentBackupToDrive = async () => {
-    setBusy(true);
-    try {
-      const json = await makeBackup();
-      await uploadBackupToGoogleDrive(json, fileName());
-      toast("Backup uploaded to Google Drive", "success");
-    } catch (e: any) { toast(e?.message || "Google Drive upload failed", "error"); }
-    finally { setBusy(false); }
-  };
-
   const restoreBackup = async () => {
     setBusy(true);
     try {
