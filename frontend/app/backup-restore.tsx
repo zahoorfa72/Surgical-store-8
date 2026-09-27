@@ -6,7 +6,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { StorageAccessFramework } from "expo-file-system/legacy";
 import { dehydrate, hydrate } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
@@ -70,7 +69,7 @@ async function saveAutoBackupIfDue() {
   if (Platform.OS === "android") {
     const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
     if (dir) {
-      const uri = await StorageAccessFramework.createFileAsync(dir, name, "application/json");
+      const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, name, "application/json");
       await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
     } else {
       const localUri = FileSystem.documentDirectory + name;
@@ -156,15 +155,15 @@ export default function BackupRestore() {
       if (Platform.OS === "android") {
         const dir = directoryUri ?? await storage.getItem<string | null>("ssm.auto-backup-dir", null);
         if (dir) {
-          const uri = await StorageAccessFramework.createFileAsync(dir, name, "application/json");
+          const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, name, "application/json");
           await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
           toast("Backup saved to the selected folder", "success");
           return;
         }
-        const permission = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+        const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
         if (!permission.granted) return;
         await storage.setItem("ssm.auto-backup-dir", permission.directoryUri);
-        const uri = await StorageAccessFramework.createFileAsync(permission.directoryUri, name, "application/json");
+        const uri = await FileSystem.StorageAccessFramework.createFileAsync(permission.directoryUri, name, "application/json");
         await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
         toast("Backup saved to the selected folder", "success");
         return;
@@ -209,7 +208,7 @@ export default function BackupRestore() {
       if (Platform.OS === "android") {
         const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
         if (dir) {
-          const uri = await StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+          const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
           await FileSystem.writeAsStringAsync(uri, safety, { encoding: FileSystem.EncodingType.UTF8 });
         }
       }
@@ -245,7 +244,7 @@ export default function BackupRestore() {
             if (Platform.OS === "android") {
               const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
               if (dir) {
-                const uri2 = await StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+                const uri2 = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
                 await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
               }
             }
@@ -286,7 +285,7 @@ export default function BackupRestore() {
           onPress={async () => {
             let dir: string | undefined;
             if (Platform.OS === "android") {
-              const p = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+              const p = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
               if (!p.granted) return;
               dir = p.directoryUri;
               await storage.setItem("ssm.auto-backup-dir", dir);
