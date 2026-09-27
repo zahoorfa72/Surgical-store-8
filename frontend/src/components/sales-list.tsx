@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
-import { useSales, qk } from "@/src/data";
+import { useSales, useReturns, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Sale } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
@@ -25,9 +25,21 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
   const admin = isAdmin(user?.role);
 
   const { data: sales, isLoading } = useSales();
+  const { data: returns } = useReturns();
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Sale | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Total refunded per sale, computed from the returns cache so the figure is
+  // identical offline and online (the /sales list endpoint omits returns).
+  const refundBySale = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of returns ?? []) {
+      if (!r.sale_id) continue;
+      m[r.sale_id] = (m[r.sale_id] ?? 0) + Number(r.refund_total ?? 0);
+    }
+    return m;
+  }, [returns]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -93,6 +105,8 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
           }
           renderItem={({ item }) => {
             const canModify = admin;
+            const refunded = refundBySale[item.id] ?? 0;
+            const net = Math.max(0, Number(item.total ?? 0) - refunded);
             return (
               <Pressable
                 testID={`receipt-row-${item.id}`}
@@ -111,6 +125,12 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                         <Text style={styles.pendingText}>Pending</Text>
                       </View>
                     )}
+                    {refunded > 0 && (
+                      <View style={styles.returnedTag} testID={`sale-returned-tag-${item.id}`}>
+                        <MaterialDesignIcons name="cash-refund" size={11} color={colors.error} />
+                        <Text style={styles.returnedText}>Refunded</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.meta}>
                     {item.customer_name} · {formatDateTime(item.created_at)}
@@ -120,7 +140,13 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                   </Text>
                 </View>
                 <View style={styles.rowRight}>
-                  <Text style={styles.total}>{money(item.total)}</Text>
+                  <Text style={styles.total} testID={`sale-net-${item.id}`}>{money(net)}</Text>
+                  {refunded > 0 && (
+                    <View style={styles.refundLine} testID={`sale-refund-info-${item.id}`}>
+                      <Text style={styles.origStruck}>{money(item.total)}</Text>
+                      <Text style={styles.refundAmt}>-{money(refunded)}</Text>
+                    </View>
+                  )}
                   {canModify ? (
                     <View style={styles.actions}>
                       <Pressable
@@ -220,6 +246,19 @@ const useStyles = makeStyles((colors) => ({
   sub: { fontSize: 12, color: colors.muted, marginTop: 1 },
   rowRight: { alignItems: "flex-end", gap: 6 },
   total: { fontSize: 16, fontWeight: "800", color: colors.brandPrimary },
+  refundLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  origStruck: { fontSize: 12, color: colors.muted, textDecorationLine: "line-through" },
+  refundAmt: { fontSize: 12, fontWeight: "800", color: colors.error },
+  returnedTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: colors.error + "18",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  returnedText: { fontSize: 10, fontWeight: "700", color: colors.error },
   actions: { flexDirection: "row", gap: 6 },
   actionBtn: {
     width: 34,

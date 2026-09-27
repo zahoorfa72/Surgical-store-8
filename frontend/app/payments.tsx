@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
-import { useParties, usePayments, usePurchases, qk } from "@/src/data";
+import { useParties, usePayments, usePurchases, usePurchaseReturns, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Party, Payment } from "@/src/models";
 import { ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, money, useToast } from "@/src/ui";
@@ -30,8 +30,20 @@ export default function Payments() {
   const { data: parties, isLoading } = useParties(isSupplier ? "supplier" : "customer");
   const { data: payments } = usePayments();
   const { data: purchases } = usePurchases();
+  const { data: purchaseReturns } = usePurchaseReturns();
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
+
+  // Refund total per purchase so the payable ledger shows the net amount owed
+  // to a supplier after any goods were returned (offline + online).
+  const refundByPurchase = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of (purchaseReturns ?? []) as any[]) {
+      if (!r.purchase_id) continue;
+      m[r.purchase_id] = (m[r.purchase_id] ?? 0) + Number(r.refund_total ?? 0);
+    }
+    return m;
+  }, [purchaseReturns]);
 
   const [active, setActive] = useState<Party | null>(null);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -94,6 +106,17 @@ export default function Payments() {
       ? p.kind === "pay" || p.kind === "supplier_refund"
       : p.kind === "receive" || p.kind === "customer_refund",
   );
+  // Group each party's payment history so every supplier/customer is shown
+  // separately, and refunds are clearly labelled.
+  const paymentsByParty = (() => {
+    const groups: Record<string, { name: string; rows: Payment[] }> = {};
+    for (const p of recentPayments) {
+      const key = p.party_id || p.party_name || "—";
+      (groups[key] ||= { name: p.party_name || "—", rows: [] }).rows.push(p);
+    }
+    return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const isRefundKind = (k: string) => k === "supplier_refund" || k === "customer_refund";
   // Supplier purchases are payable ledger entries. They create the supplier
   // balance when purchased; only a recorded Pay entry settles/cuts cash.
   const supplierPurchases = (purchases ?? [])
@@ -180,44 +203,72 @@ export default function Payments() {
               {isSupplier && supplierPurchases.length > 0 && (
                 <>
                   <Text style={styles.sectionTitle}>Purchase payable ledger</Text>
-                  {supplierPurchases.map((p) => (
-                    <View key={`purchase-payable-${p.id}`} style={styles.ledgerRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.ledgerName}>{p.supplier_name}</Text>
-                        <Text style={styles.ledgerMeta}>{p.ref_no} · {formatDate(p.created_at)} · Purchase added to supplier balance</Text>
+                  {supplierPurchases.map((p) => {
+                    const refunded = refundByPurchase[p.id] ?? 0;
+                    const net = Math.max(0, Number(p.total ?? 0) - refunded);
+                    return (
+                      <View key={`purchase-payable-${p.id}`} style={styles.ledgerRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.ledgerName}>{p.supplier_name}</Text>
+                          <Text style={styles.ledgerMeta}>
+                            {p.ref_no} · {formatDate(p.created_at)}
+                            {refunded > 0 ? ` · returned ${money(refunded)}` : " · Purchase added to supplier balance"}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.ledgerAmt}>{money(net)}</Text>
+                          {refunded > 0 && (
+                            <Text style={styles.ledgerStruck}>{money(p.total)}</Text>
+                          )}
+                        </View>
                       </View>
-                      <Text style={styles.ledgerAmt}>{money(p.total)}</Text>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </>
               )}
-              {recentPayments.length > 0 && (
+              {paymentsByParty.length > 0 && (
               <>
-                <Text style={styles.sectionTitle}>Recent {isSupplier ? "payments" : "receipts"}</Text>
-                {recentPayments.slice(0, 12).map((p) => (
-                  <View key={p.id} style={styles.ledgerRow} testID={`payment-${p.id}`}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.ledgerName}>{p.party_name}</Text>
-                      <Text style={styles.ledgerMeta}>
-                        {formatDate(p.created_at)}
-                        {p.adjustment ? ` · adj ${money(p.adjustment)}` : ""}
-                        {p.note ? ` · ${p.note}` : ""}
-                      </Text>
-                    </View>
-                    <Text style={styles.ledgerAmt}>{money(p.amount)}</Text>
-                    {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
-                      setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(p.amount)); setAdjustment(String(p.adjustment||"")); setNote(p.note||"");
-                    }}>
-                      <MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/>
-                    </Pressable>}
-                    {admin && <Pressable
-                      testID={`delete-payment-${p.id}`}
-                      hitSlop={8}
-                      style={styles.deleteBtn}
-                      onPress={() => setDeleting({ id: p.id, party_name: p.party_name })}
-                    >
-                      <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
-                    </Pressable>}
+                <Text style={styles.sectionTitle}>Recent {isSupplier ? "payments" : "receipts"} by {isSupplier ? "supplier" : "customer"}</Text>
+                {paymentsByParty.map((group) => (
+                  <View key={`grp-${group.name}`} style={{ gap: 6 }} testID={`party-payments-${group.name}`}>
+                    <Text style={styles.partyGroupName}>{group.name}</Text>
+                    {group.rows.map((p) => {
+                      const refund = isRefundKind(p.kind);
+                      return (
+                        <View key={p.id} style={styles.ledgerRow} testID={`payment-${p.id}`}>
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.kindLine}>
+                              <View style={[styles.kindTag, refund ? styles.kindTagRefund : styles.kindTagPay]}>
+                                <Text style={[styles.kindTagText, refund ? styles.kindTagTextRefund : styles.kindTagTextPay]}>
+                                  {refund ? "Refund" : isSupplier ? "Payment" : "Receipt"}
+                                </Text>
+                              </View>
+                              <Text style={styles.ledgerMeta}>
+                                {formatDate(p.created_at)}
+                                {p.adjustment ? ` · adj ${money(p.adjustment)}` : ""}
+                                {p.note ? ` · ${p.note}` : ""}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={[styles.ledgerAmt, refund && { color: colors.error }]}>
+                            {refund ? "-" : ""}{money(p.amount)}
+                          </Text>
+                          {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
+                            setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(p.amount)); setAdjustment(String(p.adjustment||"")); setNote(p.note||"");
+                          }}>
+                            <MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/>
+                          </Pressable>}
+                          {admin && <Pressable
+                            testID={`delete-payment-${p.id}`}
+                            hitSlop={8}
+                            style={styles.deleteBtn}
+                            onPress={() => setDeleting({ id: p.id, party_name: p.party_name })}
+                          >
+                            <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
+                          </Pressable>}
+                        </View>
+                      );
+                    })}
                   </View>
                 ))}
               </>
@@ -353,6 +404,15 @@ const useStyles = makeStyles((colors) => ({
   ledgerName: { fontSize: 14, fontWeight: "700", color: colors.onSurface },
   ledgerMeta: { fontSize: 12, color: colors.muted, marginTop: 2 },
   ledgerAmt: { fontSize: 15, fontWeight: "800", color: colors.brandPrimary },
+  ledgerStruck: { fontSize: 11, color: colors.muted, textDecorationLine: "line-through", marginTop: 1 },
+  partyGroupName: { fontSize: 13, fontWeight: "800", color: colors.onSurfaceSecondary, marginTop: 8 },
+  kindLine: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  kindTag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  kindTagPay: { backgroundColor: colors.brandSecondary },
+  kindTagRefund: { backgroundColor: colors.error + "18" },
+  kindTagText: { fontSize: 10, fontWeight: "800" },
+  kindTagTextPay: { color: colors.onBrandSecondary },
+  kindTagTextRefund: { color: colors.error },
   kindRow: { flexDirection: "row", gap: 8, marginVertical: 4 },
   kindBtn: { flex: 1, minHeight: 40, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
   kindBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },

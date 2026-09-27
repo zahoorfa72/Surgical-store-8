@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, SectionList, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
-import { usePurchases, qk } from "@/src/data";
+import { usePurchases, usePurchaseReturns, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Purchase } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
@@ -23,9 +23,21 @@ export default function PurchasesHistory() {
   const admin = isAdmin(user?.role);
 
   const { data: purchases, isLoading } = usePurchases();
+  const { data: purchaseReturns } = usePurchaseReturns();
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Purchase | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Total refunded per purchase, from the purchase-returns cache (works both
+  // offline and online — the /purchases list endpoint omits return data).
+  const refundByPurchase = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of (purchaseReturns ?? []) as any[]) {
+      if (!r.purchase_id) continue;
+      m[r.purchase_id] = (m[r.purchase_id] ?? 0) + Number(r.refund_total ?? 0);
+    }
+    return m;
+  }, [purchaseReturns]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -33,6 +45,23 @@ export default function PurchasesHistory() {
       (p) => !q || p.ref_no.toLowerCase().includes(q) || p.supplier_name.toLowerCase().includes(q),
     );
   }, [purchases, search]);
+
+  // Group purchases by supplier so each supplier is shown separately, each with
+  // its own net (after supplier returns) subtotal.
+  const sections = useMemo(() => {
+    const bySupplier: Record<string, Purchase[]> = {};
+    for (const p of filtered) {
+      const key = p.supplier_name || "—";
+      (bySupplier[key] ||= []).push(p);
+    }
+    return Object.entries(bySupplier)
+      .map(([title, data]) => {
+        const gross = data.reduce((s, p) => s + Number(p.total ?? 0), 0);
+        const refunded = data.reduce((s, p) => s + (refundByPurchase[p.id] ?? 0), 0);
+        return { title, data, gross, refunded, net: Math.max(0, gross - refunded) };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [filtered, refundByPurchase]);
 
   const doDelete = async () => {
     if (!toDelete) return;
@@ -73,9 +102,10 @@ export default function PurchasesHistory() {
       {isLoading ? (
         <Loader />
       ) : (
-        <FlatList
-          data={filtered}
+        <SectionList
+          sections={sections}
           keyExtractor={(p) => p.id}
+          stickySectionHeadersEnabled={false}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 96, gap: 10 }}
           ListEmptyComponent={
             <EmptyState
@@ -85,8 +115,24 @@ export default function PurchasesHistory() {
               testID="purchases-empty"
             />
           }
+          renderSectionHeader={({ section }) => (
+            <View style={styles.supplierHeader} testID={`supplier-group-${section.title}`}>
+              <View style={styles.supplierIcon}>
+                <MaterialDesignIcons name="domain" size={16} color={colors.brandPrimary} />
+              </View>
+              <Text style={styles.supplierName} numberOfLines={1}>{section.title}</Text>
+              <View style={styles.supplierTotals}>
+                <Text style={styles.supplierNet} testID={`supplier-net-${section.title}`}>{money(section.net)}</Text>
+                {section.refunded > 0 && (
+                  <Text style={styles.supplierRefund}>refund -{money(section.refunded)}</Text>
+                )}
+              </View>
+            </View>
+          )}
           renderItem={({ item }) => {
             const canEdit = admin;
+            const refunded = refundByPurchase[item.id] ?? 0;
+            const net = Math.max(0, Number(item.total ?? 0) - refunded);
             return (
               <View style={styles.row} testID={`purchase-row-${item.id}`}>
                 <View style={styles.rowIcon}>
@@ -101,6 +147,12 @@ export default function PurchasesHistory() {
                         <Text style={styles.pendingText}>Pending</Text>
                       </View>
                     )}
+                    {refunded > 0 && (
+                      <View style={styles.returnedTag} testID={`purchase-returned-tag-${item.id}`}>
+                        <MaterialDesignIcons name="undo-variant" size={11} color={colors.error} />
+                        <Text style={styles.returnedText}>Returned</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.meta}>
                     {item.supplier_name} · {formatDateTime(item.created_at)}
@@ -108,7 +160,13 @@ export default function PurchasesHistory() {
                   <Text style={styles.sub}>{item.items.length} item(s) · by {item.user_name}</Text>
                 </View>
                 <View style={styles.rowRight}>
-                  <Text style={styles.total}>{money(item.total)}</Text>
+                  <Text style={styles.total} testID={`purchase-net-${item.id}`}>{money(net)}</Text>
+                  {refunded > 0 && (
+                    <View style={styles.refundLine} testID={`purchase-refund-info-${item.id}`}>
+                      <Text style={styles.origStruck}>{money(item.total)}</Text>
+                      <Text style={styles.refundAmt}>-{money(refunded)}</Text>
+                    </View>
+                  )}
                   {canEdit && (
                     <View style={styles.actions}>
                       <Pressable
@@ -215,6 +273,43 @@ const useStyles = makeStyles((colors) => ({
   sub: { fontSize: 12, color: colors.muted, marginTop: 1 },
   rowRight: { alignItems: "flex-end", gap: 6 },
   total: { fontSize: 16, fontWeight: "800", color: colors.brandPrimary },
+  refundLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  origStruck: { fontSize: 12, color: colors.muted, textDecorationLine: "line-through" },
+  refundAmt: { fontSize: 12, fontWeight: "800", color: colors.error },
+  returnedTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: colors.error + "18",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  returnedText: { fontSize: 10, fontWeight: "700", color: colors.error },
+  supplierHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  supplierIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  supplierName: { flex: 1, fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  supplierTotals: { alignItems: "flex-end" },
+  supplierNet: { fontSize: 15, fontWeight: "800", color: colors.brandPrimary },
+  supplierRefund: { fontSize: 11, fontWeight: "700", color: colors.error, marginTop: 1 },
   actions: { flexDirection: "row", gap: 6 },
   actionBtn: {
     width: 34,
