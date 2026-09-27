@@ -22,6 +22,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 const PREFIX = "ssm."
 const BACKUP_VERSION = 2;
+const GOOGLE_CLIENT_ID_RE = /^\d+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/;
 
 type BackupPayload = {
   app: "surgical-store";
@@ -94,7 +95,8 @@ export default function BackupRestore() {
     setBusy(true);
     try {
       const id = (clientId ?? manualClientId.trim() ?? "").trim();
-      if (!id) throw new Error("Enter your Google OAuth Client ID first.");
+      if (!id) throw new Error("Google Drive OAuth Client ID is not configured.");
+      if (!GOOGLE_CLIENT_ID_RE.test(id)) throw new Error("Invalid Google OAuth Client ID. It must look like 123456789012-xxxxxxxx.apps.googleusercontent.com.");
       await setGoogleDriveClientId(id);
       setClientId(id);
 
@@ -393,6 +395,7 @@ export default function BackupRestore() {
                   try {
                     const id = manualClientId.trim();
                     if (!id) return;
+                    if (!GOOGLE_CLIENT_ID_RE.test(id)) throw new Error("Invalid Google OAuth Client ID. Use the value ending in .apps.googleusercontent.com.");
                     await setGoogleDriveClientId(id);
                     setClientId(id);
                     toast("Client ID saved on this phone.", "success");
