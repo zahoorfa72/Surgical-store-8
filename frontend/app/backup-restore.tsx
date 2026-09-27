@@ -16,7 +16,7 @@ import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import { useAuthRequest, ResponseType } from "expo-auth-session";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup } from "@/src/google-drive";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, clearGoogleDriveClientId } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const BACKUP_VERSION = 2;
@@ -89,7 +89,7 @@ export default function BackupRestore() {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [driveConnected, setDriveConnected] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(false);\n  const [manualClientId, setManualClientId] = useState("");\n  const [showClientIdForm, setShowClientIdForm] = useState(false);
   const clientId = googleDriveClientId();
   const redirectUri = googleDriveRedirectUri();
   const [request, response, promptAsync] = useAuthRequest({
