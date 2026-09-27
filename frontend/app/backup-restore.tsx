@@ -14,10 +14,13 @@ import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
 import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
 
 
-const PREFIX = "ssm.";
+WebBrowser.maybeCompleteAuthSession();
+
+const PREFIX = "ssm."
 const BACKUP_VERSION = 2;
 
 type BackupPayload = {
@@ -113,8 +116,8 @@ export default function BackupRestore() {
       );
       const result = await request.promptAsync(discovery);
       if (result.type !== "success") {
-        if (result.type === "cancel" || result.type === "dismiss") return;
-        throw new Error(result.type === "error" ? (result.params?.error_description || result.params?.error || "Google authorization failed.") : "Google authorization was not completed.");
+        toast("Google Drive sign-in was cancelled or not completed.", "error");
+        return;
       }
       const code = result.params?.code;
       if (!code || !request.codeVerifier) throw new Error("Google authorization did not return a valid code.");
@@ -334,10 +337,15 @@ export default function BackupRestore() {
           onPress={async () => {
             let dir: string | undefined;
             if (Platform.OS === "android") {
-              const p = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-              if (!p.granted) return;
-              dir = p.directoryUri;
-              await storage.setItem("ssm.auto-backup-dir", dir);
+              const savedDir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+              if (savedDir) {
+                dir = savedDir;
+              } else {
+                const p = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+                if (!p.granted) return;
+                dir = p.directoryUri;
+                await storage.setItem("ssm.auto-backup-dir", dir);
+              }
             }
             await exportBackup(dir);
           }}
