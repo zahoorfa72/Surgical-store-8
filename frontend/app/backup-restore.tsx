@@ -13,8 +13,6 @@ import { queryClient } from "@/src/query-client";
 import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import * as AuthSession from "expo-auth-session";
-import { useAuthRequest, ResponseType } from "expo-auth-session";
 import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, setGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
@@ -66,16 +64,9 @@ export default function BackupRestore() {
   const [busy, setBusy] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
+  const [manualClientId, setManualClientId] = useState("");
+  const [driveConnected, setDriveConnected] = useState(false);
   const [clientId, setClientId] = useState<string | null>(googleDriveClientId());
-  const redirectUri = googleDriveRedirectUri();
-  const [request, response, promptAsync] = useAuthRequest({
-    clientId: clientId ?? "missing-client-id",
-    responseType: ResponseType.Code,
-    scopes: [GOOGLE_DRIVE_SCOPE],
-    redirectUri,
-    usePKCE: true,
-    extraParams: { access_type: "offline", prompt: "consent" },
-  }, { authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth", tokenEndpoint: "https://oauth2.googleapis.com/token" });
 
   useEffect(() => {
     Promise.all([hasGoogleDriveConnection(), getStoredGoogleDriveClientId()]).then(([connected, storedId]) => {
@@ -83,26 +74,7 @@ export default function BackupRestore() {
       if (!clientId && storedId) setClientId(storedId);
       if (storedId) setManualClientId(storedId);
     }).catch(() => setDriveConnected(false));
-  }, []);
-
-  useEffect(() => {
-    if (response?.type !== "success") return;
-    (async () => {
-      try {
-        const code = response.params?.code;
-        if (!code || !clientId || !request?.codeVerifier) throw new Error("Google Drive authorization was incomplete.");
-        const token = await AuthSession.exchangeCodeAsync({
-          clientId,
-          code,
-          redirectUri,
-          extraParams: { code_verifier: request.codeVerifier },
-        }, { tokenEndpoint: "https://oauth2.googleapis.com/token" });
-        await saveGoogleDriveToken({ accessToken: token.accessToken, refreshToken: token.refreshToken ?? undefined, expiresIn: token.expiresIn, issuedAt: token.issuedAt, tokenType: token.tokenType });
-        setDriveConnected(true);
-        toast("Google Drive connected. Automatic backups will also upload there.", "success");
-      } catch (e: any) { toast(e?.message || "Google Drive connection failed", "error"); }
-    })();
-  }, [response]);
+  }, [clientId]);
 
   const uploadCurrentBackupToDrive = async () => {
     setBusy(true);
@@ -282,17 +254,14 @@ export default function BackupRestore() {
                   const id = manualClientId.trim();
                   await setGoogleDriveClientId(id);
                   setClientId(id);
-                  toast("Google OAuth Client ID saved on this phone. Tap Connect Google Drive.", "success");
+                  toast("Google OAuth Client ID saved on this phone.", "success");
                 } catch (e: any) { toast(e?.message || "Could not save Client ID", "error"); }
               }}>
                 <MaterialDesignIcons name="content-save-outline" size={24} color={colors.brandPrimary} />
                 <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Save Client ID</Text><Text style={styles.actionSub}>Stored locally on this phone</Text></View>
               </Pressable>
             </View>
-            <Pressable style={[styles.action, styles.restore, (!request || !clientId || busy) && styles.disabled]} onPress={() => promptAsync()} disabled={!request || !clientId || busy}>
-              <MaterialDesignIcons name="google-drive" size={24} color={colors.brandPrimary} />
-              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Connect Google Drive</Text><Text style={styles.actionSub}>{clientId ? "Sign in with your Google account" : "Save the Client ID first"}</Text></View>
-            </Pressable>
+            <Text style={styles.actionSub}>Google Drive connection is configured by the app build. Entering a Client ID here only stores it for this phone.</Text>
           </>
         ) : (
           <>
