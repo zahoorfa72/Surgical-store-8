@@ -4,6 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { StorageAccessFramework } from "expo-file-system/legacy";
 import { dehydrate } from "@tanstack/react-query";
 import { queryClient } from "@/src/query-client";
+import { hasGoogleDriveConnection, uploadBackupToGoogleDrive } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const LAST_AUTO = "ssm.autoBackup.last";
@@ -35,6 +36,14 @@ async function writeAutoBackup() {
   } else {
     const file = AUTO_DIR + `SurgicalStore-Auto-${stamp}.json`;
     await FileSystem.writeAsStringAsync(file, json, {encoding: FileSystem.EncodingType.UTF8});
+  }
+  try {
+    if (await hasGoogleDriveConnection()) {
+      await uploadBackupToGoogleDrive(json, `SurgicalStore-Auto-${stamp}.json`);
+    }
+  } catch (e) {
+    // Local backup remains the source of truth if Drive is unavailable.
+    console.warn("[backup] Google Drive upload skipped", e);
   }
   await AsyncStorage.setItem(LAST_AUTO, d.toISOString().slice(0,10));
   // Keep only the newest 7 automatic backups.
