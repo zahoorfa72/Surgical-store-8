@@ -14,6 +14,7 @@ import { queryClient } from "@/src/query-client";
 import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import * as AuthSession from "expo-auth-session";
 import { useAuthRequest, ResponseType } from "expo-auth-session";
 import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive } from "@/src/google-drive";
 
