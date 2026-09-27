@@ -5,7 +5,7 @@ import { Platform } from "react-native";
 export const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const TOKEN_KEY = "ssm.google-drive.token.v2";
 const FOLDER_KEY = "ssm.google-drive.folder.v2";
-const BACKUP_NAME_PREFIX = "SurgicalStore-";
+const BACKUP_NAME_PREFIX = "SurgicalStore-";\nconst CLIENT_ID_KEY = "ssm.google-drive.client-id.v1";
 
 const discovery = {
   authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
