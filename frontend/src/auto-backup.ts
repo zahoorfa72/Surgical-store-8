@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { storage } from "@/src/utils/storage";
 import * as FileSystem from "expo-file-system/legacy";
-import { StorageAccessFramework } from "expo-file-system/legacy";
 import { dehydrate } from "@tanstack/react-query";
 import { queryClient } from "@/src/query-client";
 import { hasGoogleDriveConnection, uploadBackupToGoogleDrive } from "@/src/google-drive";
@@ -27,7 +26,7 @@ async function writeAutoBackup() {
   const selectedDir = await storage.getItem<string | null>(AUTO_DIR_KEY, null);
   if (selectedDir) {
     try {
-      const uri = await StorageAccessFramework.createFileAsync(selectedDir, `SurgicalStore-Auto-${stamp}.json`, "application/json");
+      const uri = await FileSystem.StorageAccessFramework.createFileAsync(selectedDir, `SurgicalStore-Auto-${stamp}.json`, "application/json");
       await FileSystem.writeAsStringAsync(uri, json, {encoding: FileSystem.EncodingType.UTF8});
     } catch {
       const file = AUTO_DIR + `SurgicalStore-Auto-${stamp}.json`;

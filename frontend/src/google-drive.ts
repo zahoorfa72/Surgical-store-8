@@ -32,6 +32,17 @@ export function googleDriveClientId(): string | null {
   return id?.trim() || null;
 }
 
+async function getEffectiveGoogleDriveClientId(): Promise<string | null> {
+  const envId = googleDriveClientId();
+  if (envId) return envId;
+  try {
+    const stored = await SecureStore.getItemAsync(CLIENT_ID_KEY);
+    return stored?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function googleDriveRedirectUri(): string {
   return AuthSession.makeRedirectUri({ scheme: "frontend" });
 }
@@ -73,7 +84,7 @@ async function getAccessToken(): Promise<string | null> {
   if (token.accessToken && (!expiresIn || now < freshUntil)) return token.accessToken;
 
   if (!token.refreshToken) return token.accessToken ?? null;
-  const clientId = googleDriveClientId();
+  const clientId = await getEffectiveGoogleDriveClientId();
   if (!clientId) return null;
 
   try {

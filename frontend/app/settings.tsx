@@ -177,6 +177,7 @@ export default function Settings() {
           <InfoRow icon="shield-check" label="Access level" value={user?.role ?? ""} />
         </View>
 
+        <PrimaryButton label="Backup & Restore" icon="cloud-upload-outline" tone="brand" onPress={() => router.push("/backup-restore")} testID="backup-restore-button" />
         <PrimaryButton label="Sign out" icon="logout" tone="danger" onPress={() => setConfirm(true)} testID="logout-button" />
       </ScrollView>
 

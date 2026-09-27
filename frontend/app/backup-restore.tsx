@@ -6,7 +6,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { StorageAccessFramework } from "expo-file-system/legacy";
 import { dehydrate, hydrate } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
@@ -66,11 +65,10 @@ async function saveAutoBackupIfDue() {
   if (last === stamp || now.getHours() < 6) return;
   const json = await makeBackup();
   const name = fileName().replace(".json", "-AUTO.json");
-  await storage.setItem(AUTO_BACKUP_KEY, stamp);
   if (Platform.OS === "android") {
     const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
     if (dir) {
-      const uri = await StorageAccessFramework.createFileAsync(dir, name, "application/json");
+      const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, name, "application/json");
       await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
     } else {
       const localUri = FileSystem.documentDirectory + name;
@@ -80,6 +78,7 @@ async function saveAutoBackupIfDue() {
     const localUri = FileSystem.documentDirectory + name;
     await FileSystem.writeAsStringAsync(localUri, json, { encoding: FileSystem.EncodingType.UTF8 });
   }
+  await storage.setItem(AUTO_BACKUP_KEY, stamp);
 }
 
 export default function BackupRestore() {
@@ -156,15 +155,15 @@ export default function BackupRestore() {
       if (Platform.OS === "android") {
         const dir = directoryUri ?? await storage.getItem<string | null>("ssm.auto-backup-dir", null);
         if (dir) {
-          const uri = await StorageAccessFramework.createFileAsync(dir, name, "application/json");
+          const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, name, "application/json");
           await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
           toast("Backup saved to the selected folder", "success");
           return;
         }
-        const permission = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+        const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
         if (!permission.granted) return;
         await storage.setItem("ssm.auto-backup-dir", permission.directoryUri);
-        const uri = await StorageAccessFramework.createFileAsync(permission.directoryUri, name, "application/json");
+        const uri = await FileSystem.StorageAccessFramework.createFileAsync(permission.directoryUri, name, "application/json");
         await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
         toast("Backup saved to the selected folder", "success");
         return;
@@ -186,13 +185,26 @@ export default function BackupRestore() {
   };
 
   const applyBackupPayload = async (payload: BackupPayload) => {
-    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
-    if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
     const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX));
-    if (entries.length) await AsyncStorage.multiSet(entries);
-    queryClient.clear();
-    const cacheRaw = payload.storage["ssm.qcache.v1"];
-    if (cacheRaw) { try { hydrate(queryClient, JSON.parse(cacheRaw)); } catch {} }
+    if (!entries.length) throw new Error("The backup contains no Surgical Store data.");
+    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+    const currentPairs = await AsyncStorage.multiGet(currentKeys);
+    try {
+      if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
+      await AsyncStorage.multiSet(entries);
+      queryClient.clear();
+      const cacheRaw = payload.storage["ssm.qcache.v1"];
+      if (cacheRaw) {
+        try { hydrate(queryClient, JSON.parse(cacheRaw)); } catch {}
+      }
+    } catch (error) {
+      try {
+        const partialKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+        if (partialKeys.length) await AsyncStorage.multiRemove(partialKeys);
+        if (currentPairs.length) await AsyncStorage.multiSet(currentPairs);
+      } catch {}
+      throw error;
+    }
   };
 
   const restoreGoogleDriveBackup = async () => {
@@ -206,13 +218,15 @@ export default function BackupRestore() {
         throw new Error("The Google Drive file is not a valid Surgical Store backup.");
       }
       const safety = await makeBackup();
+      const safetyDir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
       if (Platform.OS === "android") {
-        const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+        const dir = safetyDir;
         if (dir) {
-          const uri = await StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+          const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
           await FileSystem.writeAsStringAsync(uri, safety, { encoding: FileSystem.EncodingType.UTF8 });
         }
       }
+      if (!safetyDir && Platform.OS === "android") throw new Error("Select a backup folder first so a safety copy can be created before restore.");
       await applyBackupPayload(payload);
       toast("Latest Google Drive backup restored.", "success");
       router.replace("/(tabs)");
@@ -242,12 +256,13 @@ export default function BackupRestore() {
         { text: "Restore", style: "destructive", onPress: async () => {
           try {
             const safety = await makeBackup();
-            if (Platform.OS === "android") {
-              const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
-              if (dir) {
-                const uri2 = await StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
-                await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
-              }
+            const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+            if (Platform.OS === "android" && !dir) {
+              throw new Error("First tap “Backup to phone” and select a folder. A safety backup is required before restore.");
+            }
+            if (Platform.OS === "android" && dir) {
+              const uri2 = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+              await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
             }
             await applyBackupPayload(payload);
             toast("Backup restored. Local data is ready.", "success");
@@ -286,7 +301,7 @@ export default function BackupRestore() {
           onPress={async () => {
             let dir: string | undefined;
             if (Platform.OS === "android") {
-              const p = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+              const p = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
               if (!p.granted) return;
               dir = p.directoryUri;
               await storage.setItem("ssm.auto-backup-dir", dir);
