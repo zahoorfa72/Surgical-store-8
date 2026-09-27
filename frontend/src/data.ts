@@ -125,7 +125,7 @@ function localReport(range: string): ReportSummary {
       - supplierPayments
       - cogsExpenses
       - operating
-      + (grossProfit - personal)
+      - grossProfit
     ),
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,

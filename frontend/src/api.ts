@@ -393,14 +393,31 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       }
     } else if (method === "DELETE" && id) {
       const sale = (queryClient.getQueryData<any[]>(["sales"]) ?? []).find((s) => s.id === id);
+      // Cascade: a sale's returns/refunds are removed together with the sale.
+      const linkedReturns = (queryClient.getQueryData<any[]>(["returns"]) ?? []).filter((r: any) => r.sale_id === id);
+      const returnedQty: Record<string, number> = {};
+      let refundSum = 0;
+      for (const r of linkedReturns) {
+        refundSum += Number(r.refund_total ?? 0);
+        for (const it of (r.items ?? [])) returnedQty[it.product_id] = (returnedQty[it.product_id] ?? 0) + Number(it.quantity ?? 0);
+      }
+      queryClient.setQueryData<any[]>(["returns"], (old) => (old ?? []).filter((r: any) => r.sale_id !== id));
       queryClient.setQueryData<any[]>(["sales"], (old) => (old ?? []).filter((s) => s.id !== id));
       queryClient.removeQueries({ queryKey: ["sale", id] });
       if (sale) {
+        // Restore only the net stock still out (sold − already returned).
         queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
-          const qty=(sale.items??[]).filter((x:any)=>x.product_id===p.id).reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
-          return qty ? {...p,quantity:Number(p.quantity??0)+qty}:p;
+          const sold=(sale.items??[]).filter((x:any)=>x.product_id===p.id).reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
+          const back=Number(returnedQty[p.id] ?? 0);
+          const net=sold-back;
+          return net ? {...p,quantity:Number(p.quantity??0)+net}:p;
         }));
-        if (sale.credit && sale.customer_id) queryClient.setQueryData<any[]>(["parties","customer"], rows => (rows??[]).map((p:any)=>p.id===sale.customer_id?{...p,balance:Number(p.balance??0)-Number(sale.total??0)}:p));
+        if (sale.customer_id) {
+          let delta = 0;
+          if (sale.credit) delta -= Number(sale.total ?? 0);
+          delta += refundSum; // undo the balance the returns had removed
+          if (delta) queryClient.setQueryData<any[]>(["parties","customer"], rows => (rows??[]).map((p:any)=>p.id===sale.customer_id?{...p,balance:Number(p.balance??0)+delta}:p));
+        }
       }
     }
   } else if (entity === "purchases") {
@@ -450,13 +467,28 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       }
     } else if (method === "DELETE" && id) {
       const purchase = (queryClient.getQueryData<any[]>(["purchases"]) ?? []).find((p) => p.id === id);
+      // Cascade: a purchase's supplier returns are removed together with it.
+      const linkedReturns = (queryClient.getQueryData<any[]>(["purchase-returns"]) ?? []).filter((r: any) => r.purchase_id === id);
+      const returnedQty: Record<string, number> = {};
+      let refundSum = 0;
+      for (const r of linkedReturns) {
+        refundSum += Number(r.refund_total ?? 0);
+        for (const it of (r.items ?? [])) returnedQty[it.product_id] = (returnedQty[it.product_id] ?? 0) + Number(it.quantity ?? 0);
+      }
+      queryClient.setQueryData<any[]>(["purchase-returns"], (old) => (old ?? []).filter((r: any) => r.purchase_id !== id));
       queryClient.setQueryData<any[]>(["purchases"], (old) => (old ?? []).filter((p) => p.id !== id));
       queryClient.removeQueries({ queryKey: ["purchase", id] });
       if (purchase) {
-        if (purchase.supplier_id) queryClient.setQueryData<any[]>(["parties","supplier"], (old) => (old ?? []).map((p) => p.id === purchase.supplier_id ? { ...p, balance: Number(p.balance ?? 0) - Number(purchase.total ?? 0) } : p));
+        if (purchase.supplier_id) {
+          const delta = -Number(purchase.total ?? 0) + refundSum;
+          if (delta) queryClient.setQueryData<any[]>(["parties","supplier"], (old) => (old ?? []).map((p) => p.id === purchase.supplier_id ? { ...p, balance: Number(p.balance ?? 0) + delta } : p));
+        }
+        // Remove only the net stock still in inventory (bought − returned to supplier).
         queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
-        const it = (purchase.items ?? []).find((x: any) => x.product_id === p.id);
-        return it ? { ...p, quantity: p.quantity - Number(it.quantity || 0) } : p;
+          const bought = (purchase.items ?? []).filter((x:any)=>x.product_id===p.id).reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
+          const back = Number(returnedQty[p.id] ?? 0);
+          const net = bought - back;
+          return net ? { ...p, quantity: Number(p.quantity ?? 0) - net } : p;
         }));
       }
     }

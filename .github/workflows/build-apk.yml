@@ -1,0 +1,65 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - ".github/workflows/build-apk.yml"
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Check Expo environment
+        run: |
+          node --version
+          yarn --version
+          npx expo --version
+
+      - name: Install dependencies
+        run: yarn install --non-interactive
+
+      - name: Generate clean Android project
+        run: |
+          rm -rf android
+          npx expo prebuild --platform android --non-interactive --no-install
+
+      - name: Build release APK
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false"
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew clean --no-daemon --max-workers=2
+          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: surgical-store-apk
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error

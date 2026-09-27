@@ -1,0 +1,29 @@
+{
+  "summary": "Verified all three offline-mode fixes end-to-end on the Expo web preview. (1) Remaining Balance formula now equals net sales − gross profit: after adding a product (pp 60 / sp 100), seeding stock 5, and doing a CASH sale of 1 unit, the Home dashboard stat-remaining-balance tile shows Rs 60 (100 − 40), NOT 140. Confirmed via inner_text 'Rs 60 | Remaining Balance'. (2) Cascade delete SALE: a partial sale return was created (1 unit); Returns & refunds screen showed 1 entry (returns_before_cascade_delete=1). Deleting the sale from Receipts opens a confirm modal whose message mentions returns/refunds (sale_confirm_mentions_returns=True). After confirmation the sale is gone (receipts_remaining_after_delete=0) and the linked return is removed (returns_after_cascade_delete=0, returns-empty visible). (3) Cascade delete PURCHASE: created supplier, purchase (3 units), partial supplier return (1 unit). Deleting the purchase now succeeds — the previous 'Could not delete' block is gone (purchase_delete_blocked_error=False), confirm modal mentions returns (purchase_confirm_mentions_returns=True), and the purchase disappears. Reports/Payments/Receipts/Purchases screens render without crashes after all operations. Success toasts fire but auto-dismiss quickly so were not always captured in DOM snapshot (functional, not a bug — text is defined in sales-list.tsx:67 and purchases-history.tsx:77).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      { "screen": "Global", "issues": ["A 'Syncing N changes…' banner is shown even though the app is intentionally in Offline mode with no Supabase configured. This is cosmetic (queued writes will replay if user switches to Online) but may confuse offline users. Consider hiding when connection mode is 'offline'."] }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "Optional: suppress 'Syncing N changes…' banner while getConnectionMode() === 'offline' (offline.tsx / offline banner component).",
+    "Optional: increase toast duration or add a testID on the toast so future automated regressions can assert the exact message reliably."
+  ],
+  "critical_code_review_comments": [
+    "data.ts localReport() formula: remaining_balance now subtracts grossProfit instead of adding netProfit — matches the spec (opening + cash sales − cash refunds + receipts + supplierRefunds − customerRefunds − supplierPayments − cogsExpenses − operating − grossProfit).",
+    "api.ts applyOptimistic sales DELETE and purchases DELETE now cascade-remove linked returns/purchase-returns, restore only NET stock (sold − returned / bought − supplier-returned), and correctly reverse party balances (credit customer balance and supplier balance). Server mirror should be reviewed similarly.",
+    "Confirm modal messages in sales-list.tsx (line 196) and purchases-history.tsx (line 221) correctly mention that returns/refunds will also be removed. Success toasts at sales-list.tsx:67 and purchases-history.tsx:77 explicitly say 'returns & finance updated'."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (frontend-only test as requested)", "frontend": "100% for the three required fixes" },
+  "seed_data_creation": "In-session offline cache only (React Query). No persistent seed created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login: admin@store.com / Admin786. Connection mode defaults to offline. Cache does NOT persist across full page reloads, so run each scenario in a single session. Use tabBarButtonTestID selectors (tab-index, tab-sell, tab-products, tab-more) via JS click + scrollIntoView because tab links can be visually hidden overlays. In More screen, sub-items require scrollIntoView before click. To dismiss the Sale Receipt after checkout, use page.go_back(). Restock button on Stock tab opens the purchase form which is used both for supplier-linked and no-supplier restocks.",
+  "rca_of_issue": "N/A — all three fixes verified working."
+}

@@ -1291,20 +1291,26 @@ async def delete_purchase(purchase_id: str, _: AdminOnly):
     purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
     if not purchase or purchase.get("deleted"):
         raise HTTPException(status_code=404, detail="Purchase not found")
-    returned = await _purchase_returned_map(purchase_id)
-    if returned:
-        raise HTTPException(status_code=400, detail="This purchase has supplier returns. Handle them before deleting.")
+    returned = await _purchase_returned_map(purchase_id)  # product_id -> qty returned to supplier
+    # Check we can safely reverse the stock still in inventory (bought − returned).
     for it in purchase.get("items", []):
+        net_in = float(it["quantity"]) - float(returned.get(it["product_id"], 0))
+        if net_in <= 0:
+            continue
         prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
         available = float(prod.get("quantity", 0)) if prod else 0
-        if available + 1e-9 < float(it["quantity"]):
+        if available + 1e-9 < net_in:
             raise HTTPException(status_code=400, detail=f"Cannot delete purchase: {it['name']} stock has already been used")
-    # Reverse the stock this purchase added
+    # Reverse the stock still in inventory from this purchase
     for it in purchase.get("items", []):
-        await db.products.update_one(
-            {"_id": ObjectId(it["product_id"])},
-            {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
-        )
+        net_in = float(it["quantity"]) - float(returned.get(it["product_id"], 0))
+        if net_in > 0:
+            await db.products.update_one(
+                {"_id": ObjectId(it["product_id"])},
+                {"$inc": {"quantity": -net_in}, "$set": {"updated_at": now_iso()}},
+            )
+    # Cascade: remove this purchase's supplier returns from the books too.
+    await db.purchase_returns.update_many({"purchase_id": purchase_id}, {"$set": {"deleted": True}})
     await db.purchases.update_one({"_id": ObjectId(purchase_id)}, {"$set": {"deleted": True}})
     return {"ok": True}
 
@@ -1842,12 +1848,13 @@ async def report_summary(_: Staff, range: str = "today"):
     opening_cash = float((budget_doc or {}).get("opening_amount", 0) or 0)
     purchase_return_refunds = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
     # Remaining balance rule (confirmed by store owner):
-    #   subtract every expense EXCEPT personal expenses, then add Net Profit.
+    #   base remaining = net sales − gross profit, then subtract every expense
+    #   EXCEPT personal expenses. Personal expenses only affect Net Profit.
     expenses_except_personal = round(cogs_expenses + operating_expenses, 2)
     remaining_balance = round(
         opening_cash + cash_sales - cash_sale_returns + customer_receipts
         + supplier_refunds - supplier_payments - customer_refunds
-        - expenses_except_personal + net_profit,
+        - expenses_except_personal - gross_profit,
         2,
     )
 

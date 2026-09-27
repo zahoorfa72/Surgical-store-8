@@ -24,13 +24,16 @@ purchases, sales, returns, refunds and expenses — and show it."
 - Do not change/replace the Supabase backend.
 
 ## Implemented (dates)
-- 2026-06: Migrated existing project into workspace; installed deps; verified
-  offline demo login and navigation.
-- 2026-06: Added Reports screen (`app/reports.tsx`) — Daily/Weekly/Monthly/
-  Yearly ranges showing Sales (gross/net/returns/txns/units), Purchases
-  (gross/returns/net), Returns & refunds, Expenses (direct/operating/personal),
-  and Profit (gross/net). Computed fully offline from cache. Linked from the
-  "More" tab (Accounts section) and registered as a modal route.
+- 2026-06: Migrated existing project; verified offline demo login and navigation.
+- 2026-06: Added Reports screen (Daily/Weekly/Monthly/Yearly).
+- 2026-06: Net-after-return amounts in Sales & Purchases history; per-supplier
+  grouping in Purchases; refund labels + per-party grouping in Payments.
+- 2026-06: Remaining Balance formula corrected to "net sales − gross profit"
+  (backend server.py + frontend data.ts, kept identical online/offline).
+- 2026-06: Cascade delete — deleting a sale/purchase now also removes its
+  linked returns/refunds, restores net stock, updates party balances & finance,
+  with a clear confirm message + toast (backend + offline optimistic patch).
+- 2026-06: Added GitHub Actions APK build workflow (.github/workflows/build-apk.yml).
 
 ## Backlog
 - P1: Export/share report as PDF (expo-print is already a dependency).

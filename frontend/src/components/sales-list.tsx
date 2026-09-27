@@ -57,8 +57,14 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
     try {
       await apiRequest(`/sales/${toDelete.id}`, { method: "DELETE" });
       await queryClient.invalidateQueries({ queryKey: qk.sales });
+      await queryClient.invalidateQueries({ queryKey: qk.returns });
       await queryClient.invalidateQueries({ queryKey: qk.products });
-      toast("Sale deleted & stock restored", "success");
+      await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
+      await queryClient.invalidateQueries({ queryKey: ["report"] });
+      await queryClient.invalidateQueries({ queryKey: ["customers"] });
+      await queryClient.invalidateQueries({ queryKey: ["day-close"] });
+      await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      toast("Sale deleted — its returns & finance updated", "success");
     } catch (e: any) {
       toast(e?.message || "Could not delete sale", "error");
     } finally {
@@ -187,7 +193,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
       <ConfirmModal
         visible={!!toDelete}
         title="Delete sale?"
-        message={`This removes ${toDelete?.invoice_no ?? ""} and restores its stock. This cannot be undone.`}
+        message={`This removes ${toDelete?.invoice_no ?? ""}, any returns/refunds linked to it, and restores stock. This cannot be undone.`}
         confirmLabel={busy ? "Deleting…" : "Delete"}
         onConfirm={doDelete}
         onCancel={() => setToDelete(null)}

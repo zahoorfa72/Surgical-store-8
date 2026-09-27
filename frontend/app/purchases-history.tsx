@@ -69,8 +69,12 @@ export default function PurchasesHistory() {
     try {
       await apiRequest(`/purchases/${toDelete.id}`, { method: "DELETE" });
       await queryClient.invalidateQueries({ queryKey: qk.purchases });
+      await queryClient.invalidateQueries({ queryKey: qk.purchaseReturns });
       await queryClient.invalidateQueries({ queryKey: qk.products });
-      toast("Purchase deleted & stock reversed", "success");
+      await queryClient.invalidateQueries({ queryKey: qk.parties("supplier") });
+      await queryClient.invalidateQueries({ queryKey: ["report"] });
+      await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      toast("Purchase deleted — its returns & finance updated", "success");
     } catch (e: any) {
       toast(e?.message || "Could not delete purchase", "error");
     } finally {
@@ -214,7 +218,7 @@ export default function PurchasesHistory() {
       <ConfirmModal
         visible={!!toDelete}
         title="Delete purchase?"
-        message={`This removes ${toDelete?.ref_no ?? ""} and reverses the stock it added. This cannot be undone.`}
+        message={`This removes ${toDelete?.ref_no ?? ""}, any supplier returns linked to it, and reverses stock. This cannot be undone.`}
         confirmLabel={busy ? "Deleting…" : "Delete"}
         onConfirm={doDelete}
         onCancel={() => setToDelete(null)}
