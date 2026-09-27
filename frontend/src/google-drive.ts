@@ -3,8 +3,9 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 export const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-const TOKEN_KEY = "ssm.google-drive.token.v1";
-const FOLDER_KEY = "ssm.google-drive.folder.v1";
+const TOKEN_KEY = "ssm.google-drive.token.v2";
+const FOLDER_KEY = "ssm.google-drive.folder.v2";
+const BACKUP_NAME_PREFIX = "SurgicalStore-";
 
 const discovery = {
   authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -30,6 +31,10 @@ export function googleDriveClientId(): string | null {
   return id?.trim() || null;
 }
 
+export function googleDriveRedirectUri(): string {
+  return AuthSession.makeRedirectUri({ scheme: "frontend" });
+}
+
 export async function saveGoogleDriveToken(token: GoogleDriveToken): Promise<void> {
   await SecureStore.setItemAsync(TOKEN_KEY, JSON.stringify(token));
 }
@@ -40,7 +45,8 @@ export async function clearGoogleDriveConnection(): Promise<void> {
 }
 
 export async function hasGoogleDriveConnection(): Promise<boolean> {
-  return !!(await SecureStore.getItemAsync(TOKEN_KEY));
+  const token = await readToken();
+  return !!token?.refreshToken || !!token?.accessToken;
 }
 
 async function readToken(): Promise<GoogleDriveToken | null> {
@@ -56,16 +62,16 @@ async function readToken(): Promise<GoogleDriveToken | null> {
 
 async function getAccessToken(): Promise<string | null> {
   const token = await readToken();
-  if (!token?.accessToken) return null;
+  if (!token) return null;
 
   const issuedAt = Number(token.issuedAt ?? 0);
   const expiresIn = Number(token.expiresIn ?? 0);
-  const freshUntil = issuedAt + Math.max(0, expiresIn - 300);
   const now = Math.floor(Date.now() / 1000);
+  const freshUntil = issuedAt + Math.max(0, expiresIn - 300);
 
-  if (!expiresIn || now < freshUntil) return token.accessToken;
-  if (!token.refreshToken) return null;
+  if (token.accessToken && (!expiresIn || now < freshUntil)) return token.accessToken;
 
+  if (!token.refreshToken) return token.accessToken ?? null;
   const clientId = googleDriveClientId();
   if (!clientId) return null;
 
@@ -94,7 +100,7 @@ async function getAccessToken(): Promise<string | null> {
 
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const accessToken = await getAccessToken();
-  if (!accessToken) throw new Error("Google Drive is not connected.");
+  if (!accessToken) throw new Error("Google Drive is not connected or the login has expired.");
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${accessToken}`);
   return fetch(url, { ...init, headers });
@@ -102,7 +108,14 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
 
 async function getOrCreateBackupFolder(): Promise<string> {
   const cached = await SecureStore.getItemAsync(FOLDER_KEY);
-  if (cached) return cached;
+  if (cached) {
+    const check = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cached)}?fields=id,trashed`);
+    if (check.ok) {
+      const data = await check.json();
+      if (data?.id && !data?.trashed) return cached;
+    }
+    await SecureStore.deleteItemAsync(FOLDER_KEY);
+  }
 
   const q = encodeURIComponent(
     "name = 'Surgical Store Backups' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
@@ -135,18 +148,11 @@ async function getOrCreateBackupFolder(): Promise<string> {
 
 export async function uploadBackupToGoogleDrive(json: string, filename: string): Promise<string> {
   const folderId = await getOrCreateBackupFolder();
-  const accessToken = await getAccessToken();
-  if (!accessToken) throw new Error("Google Drive is not connected.");
-
   const boundary = `surgical_store_${Date.now()}`;
   const body =
     `--${boundary}\r\n` +
     "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-    JSON.stringify({
-      name: filename,
-      mimeType: "application/json",
-      parents: [folderId],
-    }) +
+    JSON.stringify({ name: filename, mimeType: "application/json", parents: [folderId] }) +
     `\r\n--${boundary}\r\n` +
     "Content-Type: application/json\r\n\r\n" +
     json +
@@ -162,10 +168,37 @@ export async function uploadBackupToGoogleDrive(json: string, filename: string):
   );
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Google Drive backup upload failed (${res.status})${detail ? `: ${detail.slice(0, 180)}` : ""}`);
+    throw new Error(`Google Drive backup upload failed (${res.status})${detail ? `: ${detail.slice(0, 220)}` : ""}`);
   }
   const result = await res.json();
   if (!result?.id) throw new Error("Google Drive did not confirm the backup upload.");
   return result.id as string;
 }
 
+export async function listGoogleDriveBackups(): Promise<Array<{ id: string; name: string; createdTime?: string; size?: string }>> {
+  const folderId = await getOrCreateBackupFolder();
+  const q = encodeURIComponent(
+    `'${folderId}' in parents and trashed = false and mimeType = 'application/json' and name contains '${BACKUP_NAME_PREFIX}'`,
+  );
+  const res = await driveFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&fields=files(id,name,createdTime,size)&pageSize=20`,
+  );
+  if (!res.ok) throw new Error(`Google Drive backup list failed (${res.status}).`);
+  const data = await res.json();
+  return Array.isArray(data?.files) ? data.files : [];
+}
+
+export async function downloadGoogleDriveBackup(fileId: string): Promise<string> {
+  const res = await driveFetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Google Drive backup download failed (${res.status})${detail ? `: ${detail.slice(0, 220)}` : ""}`);
+  }
+  return res.text();
+}
+
+export function getGoogleDriveDiscovery() {
+  return discovery;
+}

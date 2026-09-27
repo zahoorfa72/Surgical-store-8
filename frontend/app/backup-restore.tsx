@@ -16,7 +16,7 @@ import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import { useAuthRequest, ResponseType } from "expo-auth-session";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive } from "@/src/google-drive";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const BACKUP_VERSION = 2;
@@ -91,7 +91,7 @@ export default function BackupRestore() {
   const [busy, setBusy] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);
   const clientId = googleDriveClientId();
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: "frontend" });
+  const redirectUri = googleDriveRedirectUri();
   const [request, response, promptAsync] = useAuthRequest({
     clientId: clientId ?? "missing-client-id",
     responseType: ResponseType.Code,
@@ -177,6 +177,52 @@ export default function BackupRestore() {
     }
   };
 
+  const applyBackupPayload = async (payload: BackupPayload) => {
+    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+    if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
+    const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX));
+    if (entries.length) await AsyncStorage.multiSet(entries);
+    queryClient.clear();
+    const cacheRaw = payload.storage["ssm.qcache.v1"];
+    if (cacheRaw) { try { hydrate(queryClient, JSON.parse(cacheRaw)); } catch {} }
+  };
+
+  const restoreGoogleDriveBackup = async () => {
+    setBusy(true);
+    try {
+      const files = await listGoogleDriveBackups();
+      if (!files[0]) throw new Error("No Surgical Store backup was found in Google Drive.");
+      const raw = await downloadGoogleDriveBackup(files[0].id);
+      const payload = JSON.parse(raw) as BackupPayload;
+      if (payload?.app !== "surgical-store" || payload?.backup_version !== BACKUP_VERSION || !payload?.storage || typeof payload.storage !== "object") {
+        throw new Error("The Google Drive file is not a valid Surgical Store backup.");
+      }
+      const safety = await makeBackup();
+      if (Platform.OS === "android") {
+        const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+        if (dir) {
+          const uri = await StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+          await FileSystem.writeAsStringAsync(uri, safety, { encoding: FileSystem.EncodingType.UTF8 });
+        }
+      }
+      await applyBackupPayload(payload);
+      toast("Latest Google Drive backup restored.", "success");
+      router.replace("/(tabs)");
+    } catch (e: any) {
+      toast(e?.message || "Google Drive restore failed", "error");
+    } finally { setBusy(false); }
+  };
+
+  const uploadCurrentBackupToDrive = async () => {
+    setBusy(true);
+    try {
+      const json = await makeBackup();
+      await uploadBackupToGoogleDrive(json, fileName());
+      toast("Backup uploaded to Google Drive", "success");
+    } catch (e: any) { toast(e?.message || "Google Drive upload failed", "error"); }
+    finally { setBusy(false); }
+  };
+
   const restoreBackup = async () => {
     setBusy(true);
     try {
@@ -186,63 +232,33 @@ export default function BackupRestore() {
         multiple: false,
       });
       if (picked.canceled) return;
-
       const uri = picked.assets[0]?.uri;
       if (!uri) throw new Error("No backup file was selected.");
-
       const raw = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
       const payload = JSON.parse(raw) as BackupPayload;
-
-      if (
-        payload?.app !== "surgical-store" ||
-        payload?.backup_version !== BACKUP_VERSION ||
-        !payload?.storage ||
-        typeof payload.storage !== "object"
-      ) {
+      if (payload?.app !== "surgical-store" || payload?.backup_version !== BACKUP_VERSION || !payload?.storage || typeof payload.storage !== "object") {
         throw new Error("This is not a valid Surgical Store backup.");
       }
-
-      Alert.alert(
-        "Restore backup?",
-        "This will replace the current local Surgical Store data with the data in this backup. Server data is not deleted.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Restore",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
-                if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
-
-                const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX));
-                if (entries.length) await AsyncStorage.multiSet(entries);
-
-                queryClient.clear();
-
-                const cacheRaw = payload.storage["ssm.qcache.v1"];
-                if (cacheRaw) {
-                  try {
-                    hydrate(queryClient, JSON.parse(cacheRaw));
-                  } catch {
-                    // A backup without a readable cache is still a valid data backup.
-                  }
-                }
-
-                toast("Backup restored. Local data is ready.", "success");
-                router.replace("/(tabs)");
-              } catch (e: any) {
-                toast(e?.message || "Restore failed", "error");
+      Alert.alert("Restore backup?", "A safety copy will be created before local data is replaced.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Restore", style: "destructive", onPress: async () => {
+          try {
+            const safety = await makeBackup();
+            if (Platform.OS === "android") {
+              const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+              if (dir) {
+                const uri2 = await StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+                await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
               }
-            },
-          },
-        ],
-      );
-    } catch (e: any) {
-      toast(e?.message || "Could not read this backup", "error");
-    } finally {
-      setBusy(false);
-    }
+            }
+            await applyBackupPayload(payload);
+            toast("Backup restored. Local data is ready.", "success");
+            router.replace("/(tabs)");
+          } catch (e: any) { toast(e?.message || "Restore failed", "error"); }
+        }},
+      ]);
+    } catch (e: any) { toast(e?.message || "Could not read this backup", "error"); }
+    finally { setBusy(false); }
   };
 
   return (
