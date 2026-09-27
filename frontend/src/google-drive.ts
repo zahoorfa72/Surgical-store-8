@@ -43,6 +43,25 @@ async function getEffectiveGoogleDriveClientId(): Promise<string | null> {
   }
 }
 
+export async function getStoredGoogleDriveClientId(): Promise<string | null> {
+  try {
+    const id = await SecureStore.getItemAsync(CLIENT_ID_KEY);
+    return id?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setGoogleDriveClientId(clientId: string): Promise<void> {
+  const id = clientId.trim();
+  if (!id) throw new Error("Google OAuth Client ID cannot be empty.");
+  await SecureStore.setItemAsync(CLIENT_ID_KEY, id);
+}
+
+export async function clearGoogleDriveClientId(): Promise<void> {
+  await SecureStore.deleteItemAsync(CLIENT_ID_KEY);
+}
+
 export function googleDriveRedirectUri(): string {
   return AuthSession.makeRedirectUri({ scheme: "frontend" });
 }
