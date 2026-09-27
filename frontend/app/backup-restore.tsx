@@ -65,7 +65,6 @@ async function saveAutoBackupIfDue() {
   if (last === stamp || now.getHours() < 6) return;
   const json = await makeBackup();
   const name = fileName().replace(".json", "-AUTO.json");
-  await storage.setItem(AUTO_BACKUP_KEY, stamp);
   if (Platform.OS === "android") {
     const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
     if (dir) {
@@ -79,6 +78,7 @@ async function saveAutoBackupIfDue() {
     const localUri = FileSystem.documentDirectory + name;
     await FileSystem.writeAsStringAsync(localUri, json, { encoding: FileSystem.EncodingType.UTF8 });
   }
+  await storage.setItem(AUTO_BACKUP_KEY, stamp);
 }
 
 export default function BackupRestore() {
