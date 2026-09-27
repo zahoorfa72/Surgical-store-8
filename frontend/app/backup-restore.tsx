@@ -14,6 +14,8 @@ import { queryClient } from "@/src/query-client";
 import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useAuthRequest, ResponseType } from "expo-auth-session";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const BACKUP_VERSION = 2;
@@ -86,6 +88,38 @@ export default function BackupRestore() {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const clientId = googleDriveClientId();
+  const redirectUri = AuthSession.makeRedirectUri({ scheme: "frontend" });
+  const [request, response, promptAsync] = useAuthRequest({
+    clientId: clientId ?? "missing-client-id",
+    responseType: ResponseType.Code,
+    scopes: [GOOGLE_DRIVE_SCOPE],
+    redirectUri,
+    usePKCE: true,
+    extraParams: { access_type: "offline", prompt: "consent" },
+  }, { authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth", tokenEndpoint: "https://oauth2.googleapis.com/token" });
+
+  useEffect(() => { hasGoogleDriveConnection().then(setDriveConnected).catch(() => setDriveConnected(false)); }, []);
+
+  useEffect(() => {
+    if (response?.type !== "success") return;
+    (async () => {
+      try {
+        const code = response.params?.code;
+        if (!code || !clientId || !request?.codeVerifier) throw new Error("Google Drive authorization was incomplete.");
+        const token = await AuthSession.exchangeCodeAsync({
+          clientId,
+          code,
+          redirectUri,
+          extraParams: { code_verifier: request.codeVerifier },
+        }, { tokenEndpoint: "https://oauth2.googleapis.com/token" });
+        await saveGoogleDriveToken({ accessToken: token.accessToken, refreshToken: token.refreshToken ?? undefined, expiresIn: token.expiresIn, issuedAt: token.issuedAt, tokenType: token.tokenType });
+        setDriveConnected(true);
+        toast("Google Drive connected. Automatic backups will also upload there.", "success");
+      } catch (e: any) { toast(e?.message || "Google Drive connection failed", "error"); }
+    })();
+  }, [response]);
 
   useEffect(() => {
     // Android background execution cannot be guaranteed by a normal JS timer.
@@ -93,6 +127,16 @@ export default function BackupRestore() {
     // after 06:00, and reuse the last selected backup folder when available.
     saveAutoBackupIfDue().catch(() => {});
   }, []);
+
+  const uploadCurrentBackupToDrive = async () => {
+    setBusy(true);
+    try {
+      const json = await makeBackup();
+      await uploadBackupToGoogleDrive(json, fileName());
+      toast("Backup uploaded to Google Drive", "success");
+    } catch (e: any) { toast(e?.message || "Google Drive upload failed", "error"); }
+    finally { setBusy(false); }
+  };
 
   const exportBackup = async (directoryUri?: string) => {
     setBusy(true);
@@ -251,7 +295,29 @@ export default function BackupRestore() {
           </View>
         </Pressable>
 
-        <Text style={styles.note}>Automatic backup checks at 6:00 AM when the app is opened/resumed. On Android, select the backup folder once above so automatic backups can be written there.
+                <View style={styles.driveCard}>
+          <MaterialDesignIcons name="google-drive" size={28} color={colors.brandPrimary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.actionTitle}>Google Drive backup</Text>
+            <Text style={styles.driveStatus}>{driveConnected ? "Connected — automatic backup will upload to Drive" : "Not connected"}</Text>
+          </View>
+        </View>
+        {!driveConnected ? (
+          <Pressable style={[styles.action, styles.restore, (!request || !clientId || busy) && styles.disabled]} onPress={() => promptAsync()} disabled={!request || !clientId || busy}>
+            <MaterialDesignIcons name="google-drive" size={24} color={colors.brandPrimary} />
+            <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Connect Google Drive</Text><Text style={styles.actionSub}>{clientId ? "Sign in with your Google account" : "Add the Google OAuth client ID first"}</Text></View>
+          </Pressable>
+        ) : (
+          <>
+            <Pressable style={[styles.action, styles.restore, busy && styles.disabled]} onPress={uploadCurrentBackupToDrive} disabled={busy}>
+              <MaterialDesignIcons name="cloud-upload-outline" size={24} color={colors.brandPrimary} />
+              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Backup now to Google Drive</Text><Text style={styles.actionSub}>Creates a separate timestamped cloud backup</Text></View>
+            </Pressable>
+            <Pressable style={[styles.linkButton, busy && styles.disabled]} onPress={async () => { await clearGoogleDriveConnection(); setDriveConnected(false); toast("Google Drive disconnected", "success"); }} disabled={busy}><Text style={styles.linkText}>Disconnect Google Drive</Text></Pressable>
+          </>
+        )}
+
+<Text style={styles.note}>Automatic backup checks at 6:00 AM when the app is opened/resumed. On Android, select the backup folder once above so automatic backups can be written there.
           Offline changes remain on this phone until the server is available again. Restoring a backup does not delete
           anything from the online server.
         </Text>
@@ -282,5 +348,9 @@ const useStyles = makeStyles((colors) => ({
   actionTitle: { fontSize: 16, fontWeight: "800", color: colors.onBrandPrimary },
   actionSub: { fontSize: 12, color: colors.muted, marginTop: 3 },
   disabled: { opacity: 0.55 },
+  driveCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 16, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandSecondary },
+  driveStatus: { fontSize: 12, color: colors.muted, marginTop: 3 },
+  linkButton: { alignItems: "center", paddingVertical: 10 },
+  linkText: { color: colors.error, fontSize: 13, fontWeight: "700" },
   note: { fontSize: 12, lineHeight: 18, color: colors.muted, paddingHorizontal: 4 },
 }));
