@@ -1,0 +1,289 @@
+import { useEffect, useState } from "react";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+
+import { apiRequest } from "@/src/api";
+import { useParties, useSale, qk } from "@/src/data";
+import { Loader, ScreenHeader, money, useToast } from "@/src/ui";
+import { makeStyles, useTheme } from "@/src/theme";
+
+type Line = { id: string; name: string; quantity: number; unit_price: number };
+
+export default function SaleEdit() {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { data: sale, isLoading } = useSale(id ?? "");
+  const { data: customers } = useParties("customer");
+
+  const [lines, setLines] = useState<Line[]>([]);
+  const [discount, setDiscount] = useState("0");
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [custPickerOpen, setCustPickerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [prefilled, setPrefilled] = useState(false);
+
+  useEffect(() => {
+    if (sale && !prefilled) {
+      setLines(
+        sale.items.map((it) => ({
+          id: it.product_id,
+          name: it.name,
+          quantity: it.quantity,
+          unit_price: it.unit_price,
+        })),
+      );
+      setDiscount(String(sale.discount ?? 0));
+      setCustomerId(sale.customer_id ?? null);
+      setPrefilled(true);
+    }
+  }, [sale, prefilled]);
+
+  const setQty = (lid: string, q: number) =>
+    setLines((prev) => prev.map((l) => (l.id === lid ? { ...l, quantity: Math.max(0, q) } : l)));
+  const setPrice = (lid: string, p: number) =>
+    setLines((prev) => prev.map((l) => (l.id === lid ? { ...l, unit_price: Math.max(0, p) } : l)));
+  const removeLine = (lid: string) => setLines((prev) => prev.filter((l) => l.id !== lid));
+
+  const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
+  const discountNum = Math.max(0, parseFloat(discount) || 0);
+  const total = Math.max(0, subtotal - discountNum);
+  const customerName = customers?.find((c) => c.id === customerId)?.name ?? "Walk-in customer";
+
+  const save = async () => {
+    const valid = lines.filter((l) => l.quantity > 0);
+    if (!valid.length) {
+      toast("A sale needs at least one item", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiRequest(`/sales/${id}`, {
+        method: "PUT",
+        body: {
+          items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_price: l.unit_price })),
+          customer_id: customerId,
+          discount: discountNum,
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: qk.sales });
+      await queryClient.invalidateQueries({ queryKey: qk.products });
+      await queryClient.invalidateQueries({ queryKey: qk.sale(id!) });
+      toast("Sale updated", "success");
+      router.back();
+    } catch (e: any) {
+      toast(e?.message || "Could not update sale", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (isLoading || !sale) return <Loader />;
+
+  return (
+    <View style={styles.root}>
+      <ScreenHeader title={`Edit ${sale.invoice_no}`} subtitle="Adjust items, price & discount" topInset={insets.top} onBack={() => router.back()} />
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }} bottomOffset={20}>
+        <Pressable testID="edit-select-customer-button" style={styles.customerRow} onPress={() => setCustPickerOpen(true)}>
+          <MaterialDesignIcons name="account" size={20} color={colors.brandPrimary} />
+          <Text style={styles.customerText}>{customerName}</Text>
+          <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
+        </Pressable>
+
+        {lines.map((l) => (
+          <View key={l.id} style={styles.line} testID={`edit-line-${l.id}`}>
+            <View style={styles.lineHead}>
+              <Text style={styles.lineName}>{l.name}</Text>
+              <Pressable testID={`edit-remove-${l.id}`} hitSlop={8} onPress={() => removeLine(l.id)}>
+                <MaterialDesignIcons name="close" size={20} color={colors.muted} />
+              </Pressable>
+            </View>
+            <View style={styles.lineInputs}>
+              <View style={styles.miniField}>
+                <Text style={styles.miniLabel}>Quantity</Text>
+                <TextInput
+                  testID={`edit-qty-${l.id}`}
+                  style={styles.miniInput}
+                  keyboardType="numeric"
+                  value={String(l.quantity)}
+                  onChangeText={(t) => setQty(l.id, parseInt(t || "0", 10))}
+                />
+              </View>
+              <View style={styles.miniField}>
+                <Text style={styles.miniLabel}>Unit price</Text>
+                <TextInput
+                  testID={`edit-price-${l.id}`}
+                  style={styles.miniInput}
+                  keyboardType="numeric"
+                  value={String(l.unit_price)}
+                  onChangeText={(t) => setPrice(l.id, parseFloat(t || "0"))}
+                />
+              </View>
+              <View style={styles.miniField}>
+                <Text style={styles.miniLabel}>Total</Text>
+                <Text style={styles.lineTotal}>{money(l.quantity * l.unit_price)}</Text>
+              </View>
+            </View>
+          </View>
+        ))}
+
+        <View style={styles.discountRow}>
+          <Text style={styles.discountLabel}>Discount</Text>
+          <TextInput
+            testID="edit-discount-input"
+            style={styles.discountInput}
+            keyboardType="numeric"
+            value={discount}
+            onChangeText={setDiscount}
+          />
+        </View>
+
+        <View style={styles.totalsCard}>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Subtotal</Text>
+            <Text style={styles.totalValue}>{money(subtotal)}</Text>
+          </View>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Discount</Text>
+            <Text style={styles.totalValue}>- {money(discountNum)}</Text>
+          </View>
+          <View style={styles.totalDivider} />
+          <View style={styles.totalRow}>
+            <Text style={styles.totalBold}>Total payable</Text>
+            <Text style={styles.totalBold}>{money(total)}</Text>
+          </View>
+        </View>
+      </KeyboardAwareScrollView>
+
+      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
+        <Pressable testID="save-sale-edit-button" disabled={busy} style={[styles.saveBtn, busy && { opacity: 0.6 }]} onPress={save}>
+          <MaterialDesignIcons name="check-bold" size={20} color={colors.onBrandPrimary} />
+          <Text style={styles.saveText}>{busy ? "Saving…" : "Save changes"}</Text>
+        </Pressable>
+      </View>
+
+      <Modal visible={custPickerOpen} animationType="slide" onRequestClose={() => setCustPickerOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Select customer" topInset={insets.top} onBack={() => setCustPickerOpen(false)} />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 8 }}>
+            <Pressable
+              testID="edit-customer-walkin"
+              style={styles.custOption}
+              onPress={() => { setCustomerId(null); setCustPickerOpen(false); }}
+            >
+              <Text style={styles.custOptionText}>Walk-in customer</Text>
+              {!customerId && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
+            </Pressable>
+            {(customers ?? []).map((c) => (
+              <Pressable
+                key={c.id}
+                testID={`edit-customer-${c.id}`}
+                style={styles.custOption}
+                onPress={() => { setCustomerId(c.id); setCustPickerOpen(false); }}
+              >
+                <Text style={styles.custOptionText}>{c.name}</Text>
+                {customerId === c.id && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const useStyles = makeStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.surface },
+  customerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.brandSecondary,
+  },
+  customerText: { flex: 1, fontSize: 15, fontWeight: "600", color: colors.onSurface },
+  line: { backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 10 },
+  lineHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  lineName: { flex: 1, fontSize: 15, fontWeight: "700", color: colors.onSurface },
+  lineInputs: { flexDirection: "row", gap: 10, alignItems: "flex-end" },
+  miniField: { flex: 1, gap: 4 },
+  miniLabel: { fontSize: 11, color: colors.muted, fontWeight: "600" },
+  miniInput: {
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    height: 44,
+    fontSize: 15,
+    color: colors.onSurface,
+  },
+  lineTotal: { fontSize: 15, fontWeight: "800", color: colors.brandPrimary, paddingVertical: 10 },
+  discountRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  discountLabel: { fontSize: 15, fontWeight: "600", color: colors.onSurface },
+  discountInput: {
+    width: 130,
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    height: 46,
+    fontSize: 15,
+    color: colors.onSurface,
+    textAlign: "right",
+  },
+  totalsCard: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  totalRow: { flexDirection: "row", justifyContent: "space-between" },
+  totalLabel: { fontSize: 14, color: colors.onSurfaceSecondary },
+  totalValue: { fontSize: 14, color: colors.onSurface, fontWeight: "600" },
+  totalBold: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
+  totalDivider: { height: 1, backgroundColor: colors.divider, marginVertical: 4 },
+  bottomBar: {
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: colors.surface,
+  },
+  saveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: 14,
+    minHeight: 54,
+  },
+  saveText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "800" },
+  custOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+  },
+  custOptionText: { fontSize: 15, fontWeight: "600", color: colors.onSurface },
+}));

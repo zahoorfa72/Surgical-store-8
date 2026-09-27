@@ -1,0 +1,2021 @@
+"""Surgical Store Manager — multi-user POS + inventory + accounting backend.
+
+FastAPI + Supabase PostgreSQL. JWT email/password auth with roles:
+  - admin   : everything, including managing users
+  - partner : sell, stock, purchases, parties, expenses, reports
+  - cashier : sell + reprint receipts only
+"""
+
+import os
+import re
+import hashlib
+import hmac
+import ipaddress
+import logging
+import secrets
+import uuid
+import smtplib
+from email.message import EmailMessage
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from html import escape
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Annotated, List, Optional
+from urllib.parse import urlparse
+
+import jwt
+from bson import ObjectId, Binary
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, Form, HTTPException, APIRouter, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jwt.exceptions import InvalidTokenError
+from supabase_store import SupabaseDocumentDB
+from pwdlib import PasswordHash
+from pydantic import BaseModel, EmailStr, Field
+from starlette.middleware.cors import CORSMiddleware
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("surgical-store")
+
+SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL") or os.environ.get("DATABASE_URL")
+if not SUPABASE_DB_URL:
+    raise RuntimeError("SUPABASE_DB_URL (or DATABASE_URL) is required for the Supabase PostgreSQL backend")
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALGORITHM = "HS256"
+JWT_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "43200"))  # 30 days
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@store.com").lower()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Admin786")
+PARTNER_EMAIL = os.environ.get("PARTNER_EMAIL", "partner@store.com").lower()
+PARTNER_PASSWORD = os.environ.get("PARTNER_PASSWORD", "partner123")
+CASHIER_EMAIL = os.environ.get("CASHIER_EMAIL", "cashier@store.com").lower()
+CASHIER_PASSWORD = os.environ.get("CASHIER_PASSWORD", "cashier123")
+
+# Name shown in password-reset emails.
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Surgical Store")
+
+# Password-reset config
+RESET_PEPPER = os.environ.get("RESET_TOKEN_PEPPER", JWT_SECRET)
+RESET_TTL_MINUTES = 15
+
+# Optional self-hosted SMTP for password-reset emails. The core store does not
+# depend on any external provider; leave SMTP_* unset if password-reset email is
+# not needed on the server.
+SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER).strip()
+
+password_hash = PasswordHash.recommended()
+DUMMY_HASH = password_hash.hash("dummy-not-used")
+oauth2 = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+db = SupabaseDocumentDB(SUPABASE_DB_URL)
+
+
+
+# ---------------------------------------------------------------------------
+# Email helpers — used for password reset codes
+# ---------------------------------------------------------------------------
+_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+_CRED_ASK = ("reply with your password", "reply with the code", "send your password", "cvv",
+             "send us your password", "enter your password below", "confirm your card number",
+             "your full card number", "seed phrase", "recovery phrase", "verify your card",
+             "social security number", "confirm your bank details")
+_HOSTISH = re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
+
+
+def _host_ok(host: str) -> bool:
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == s or host.endswith("." + s) for s in _SHORTENERS)
+
+
+def _same_site(shown: str, real: str) -> bool:
+    return shown == real or real.endswith("." + shown) or shown.endswith("." + real)
+
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags, self.urls, self.anchors = set(), [], []
+        self._href, self._text = None, []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k, v in attrs if k.lower() in ("href", "src") and v]
+        if tag.lower() == "a":
+            self._href = dict((k.lower(), v) for k, v in attrs).get("href")
+            self._text = []
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.anchors.append((self._href, "".join(self._text)))
+            self._href, self._text = None, []
+
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan()
+    scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("No forms or input fields in email (G2)")
+    body = f"{subject}\n{html}".lower()
+    for p in _CRED_ASK:
+        if p in body:
+            raise ValueError(f"Email asks the recipient for credentials: {p!r} (G2)")
+    for url in scan.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        if not low.startswith("https://"):
+            raise ValueError(f"Email links/assets must be absolute https: {url!r} (G3)")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError(f"Shortened, numeric-host or credential-bearing URL: {url!r} (G3)")
+    for href, text in scan.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real:
+            continue
+        for m in _HOSTISH.finditer(text):
+            if not _same_site(m.group(1).lower(), real):
+                raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
+
+
+async def send_email(*, to: str, subject: str, html: str) -> Optional[str]:
+    _assert_safe_email(subject, html)
+    if not SMTP_HOST or not SMTP_FROM:
+        logger.warning("SMTP is not configured; skipping password-reset email")
+        return None
+
+    def _send() -> None:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = SMTP_FROM
+        msg["To"] = to
+        msg.set_content("Your email client does not support HTML email. Please use the reset code shown in the message.")
+        msg.add_alternative(html, subtype="html")
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            if SMTP_USER:
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.send_message(msg)
+
+    await run_in_threadpool(_send)
+    return None
+
+def _reset_code_hash(code: str) -> str:
+    return hmac.new(RESET_PEPPER.encode(), code.encode(), hashlib.sha256).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Roles & enums
+# ---------------------------------------------------------------------------
+class Role(str, Enum):
+    admin = "admin"
+    partner = "partner"
+    cashier = "cashier"
+
+
+class PartyType(str, Enum):
+    supplier = "supplier"
+    customer = "customer"
+
+
+class ExpenseBucket(str, Enum):
+    cogs = "cogs"            # cash expense -> Remaining Balance only
+    operating = "operating"  # cash expense -> Remaining Balance only
+    personal = "personal"    # personal expense -> Net Profit only
+
+
+class PaymentKind(str, Enum):
+    pay = "pay"          # money paid to a supplier (settles what we owe)
+    receive = "receive"  # money received from a customer (settles what they owe)
+    supplier_refund = "supplier_refund"  # cash a supplier gave back to us
+    customer_refund = "customer_refund"  # cash we handed back to a customer
+
+
+def oid(v) -> str:
+    return str(v)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ----- Auth models -----
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: str
+    password: str = Field(min_length=4)
+    role: Role
+
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    name: Optional[str] = None
+    role: Optional[Role] = None
+    password: Optional[str] = Field(default=None, min_length=4)
+    disabled: Optional[bool] = None
+
+
+class UserOut(BaseModel):
+    id: str
+    email: EmailStr
+    name: str
+    role: Role
+    disabled: bool = False
+    pending: bool = False
+    created_at: Optional[str] = None
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserOut
+
+
+class SignupIn(BaseModel):
+    email: EmailStr
+    name: str
+    password: str = Field(min_length=4)
+
+
+class ForgotIn(BaseModel):
+    email: EmailStr
+
+
+class ResetIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=4, max_length=10)
+    new_password: str = Field(min_length=4)
+
+
+class SettingsIn(BaseModel):
+    store_name: str = Field(min_length=1, max_length=60)
+
+
+# ----- Product models -----
+class ProductIn(BaseModel):
+    name: str
+    barcode: str = ""
+    purchase_price: float = 0
+    sale_price: float = 0
+    low_stock_threshold: float = 5
+    expiry_date: Optional[str] = None
+
+
+class ProductOut(ProductIn):
+    id: str
+    quantity: float = 0
+    created_at: str
+    updated_at: str
+
+
+# ----- Party models -----
+class PartyIn(BaseModel):
+    name: str
+    type: PartyType
+    phone: str = ""
+    address: str = ""
+
+
+class PartyOut(PartyIn):
+    id: str
+    created_at: str
+    balance: float = 0.0  # supplier: amount we owe; customer: amount they owe us
+
+
+# ----- Payment / ledger models -----
+class PaymentIn(BaseModel):
+    party_id: str
+    kind: PaymentKind
+    amount: float = Field(ge=0)
+    adjustment: float = Field(default=0.0, ge=0)  # discount/extra settled without cash (reduces balance)
+    note: str = ""
+
+
+# ----- Budget model -----
+class BudgetIn(BaseModel):
+    monthly_amount: float = 0.0
+    opening_amount: Optional[float] = None
+
+
+# ----- Sale models -----
+class SaleItemIn(BaseModel):
+    product_id: str
+    quantity: float
+    unit_price: float  # editable sale price at cart time
+
+
+class SaleIn(BaseModel):
+    items: List[SaleItemIn]
+    customer_id: Optional[str] = None
+    discount: float = 0
+    note: str = ""
+    credit: bool = False  # if true (with a customer), adds to customer's owed balance
+
+
+# ----- Purchase models -----
+class PurchaseItemIn(BaseModel):
+    product_id: str
+    quantity: float
+    unit_cost: float  # editable purchase price
+
+
+class PurchaseIn(BaseModel):
+    items: List[PurchaseItemIn]
+    supplier_id: Optional[str] = None
+    note: str = ""
+
+
+
+def _aggregate_item_quantities(items) -> dict:
+    totals = {}
+    for item in items:
+        if item.quantity > 0:
+            totals[item.product_id] = totals.get(item.product_id, 0) + float(item.quantity)
+    return totals
+
+# ----- Expense models -----
+class ExpenseIn(BaseModel):
+    title: str
+    category: str = "Other"
+    bucket: ExpenseBucket = ExpenseBucket.operating
+    amount: float
+    note: str = ""
+
+
+# ----- Return / refund models -----
+class ReturnItemIn(BaseModel):
+    product_id: str
+    quantity: float
+
+
+class ReturnIn(BaseModel):
+    sale_id: str
+    items: List[ReturnItemIn]
+    reason: str = ""
+
+
+class PurchaseReturnIn(BaseModel):
+    purchase_id: str
+    items: List[ReturnItemIn]
+    reason: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: indexes + seed users
+# ---------------------------------------------------------------------------
+async def seed_user(email: str, name: str, pwd: str, role: Role):
+    await db.users.update_one(
+        {"email": email},
+        {"$setOnInsert": {
+            "email": email,
+            "name": name,
+            "password_hash": password_hash.hash(pwd),
+            "role": role.value,
+            "disabled": False,
+            "pending": False,
+            "created_at": now_iso(),
+        }},
+        upsert=True,
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # The store is offline-first on the device. The server is optional and only
+    # used for live sync when a Supabase URL is configured. If the database is
+    # unreachable (e.g. no SUPABASE_DB_URL yet), keep the API process up so the
+    # app can be pointed at it later — endpoints will surface a clear error
+    # instead of the whole server crash-looping.
+    try:
+        await db.connect()
+        await db.users.create_index("email", unique=True)
+        await db.password_resets.create_index("expires_at", expireAfterSeconds=0)
+        await seed_user(ADMIN_EMAIL, "Administrator", ADMIN_PASSWORD, Role.admin)
+        await seed_user(PARTNER_EMAIL, "Store Partner", PARTNER_PASSWORD, Role.partner)
+        await seed_user(CASHIER_EMAIL, "Front Cashier", CASHIER_PASSWORD, Role.cashier)
+        logger.info("Startup complete; users seeded.")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Database unavailable at startup ({e}); running without a live DB.")
+    yield
+    try:
+        await db.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+app = FastAPI(title="Surgical Store Manager API", lifespan=lifespan)
+api = APIRouter(prefix="/api")
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+def user_public(doc: dict) -> UserOut:
+    return UserOut(
+        id=oid(doc["_id"]),
+        email=doc["email"],
+        name=doc.get("name", ""),
+        role=doc["role"],
+        disabled=doc.get("disabled", False),
+        pending=doc.get("pending", False),
+        created_at=doc.get("created_at"),
+    )
+
+
+def make_token(doc: dict) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {"sub": oid(doc["_id"]), "iat": now, "exp": now + timedelta(minutes=JWT_MINUTES)},
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+
+
+async def current_user(token: str = Depends(oauth2)) -> dict:
+    unauthorized = HTTPException(status_code=401, detail="Invalid or expired session",
+                                 headers={"WWW-Authenticate": "Bearer"})
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        uid = payload.get("sub")
+        if not uid or not ObjectId.is_valid(uid):
+            raise unauthorized
+    except (InvalidTokenError, TypeError):
+        raise unauthorized
+    doc = await db.users.find_one({"_id": ObjectId(uid)})
+    if not doc or doc.get("disabled", False):
+        raise unauthorized
+    return doc
+
+
+def require_role(*roles: Role):
+    async def check(user: dict = Depends(current_user)) -> dict:
+        if user["role"] not in [r.value for r in roles]:
+            raise HTTPException(status_code=403, detail="You do not have permission for this action")
+        return user
+    return check
+
+
+CurrentUser = Annotated[dict, Depends(current_user)]
+Staff = Annotated[dict, Depends(require_role(Role.admin, Role.partner))]
+AdminOnly = Annotated[dict, Depends(require_role(Role.admin))]
+AnyUser = Annotated[dict, Depends(require_role(Role.admin, Role.partner, Role.cashier))]
+
+
+async def next_seq(name: str) -> int:
+    doc = await db.counters.find_one_and_update(
+        {"_id": name}, {"$inc": {"seq": 1}}, upsert=True, return_document=True,
+    )
+    return doc["seq"]
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+@api.post("/auth/login", response_model=Token)
+async def login(form: OAuth2PasswordRequestForm = Depends()):
+    email = form.username.lower().strip()
+    doc = await db.users.find_one({"email": email})
+    valid = password_hash.verify(form.password, doc["password_hash"]) if doc else password_hash.verify(form.password, DUMMY_HASH)
+    if not doc or not valid or doc.get("disabled", False):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    return Token(access_token=make_token(doc), token_type="bearer", user=user_public(doc))
+
+
+@api.get("/auth/me", response_model=UserOut)
+async def me(user: CurrentUser):
+    return user_public(user)
+
+
+@api.post("/auth/signup", status_code=202)
+async def signup(body: SignupIn):
+    email = body.email.lower().strip()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    doc = {
+        "email": email,
+        "name": body.name.strip() or email,
+        "password_hash": password_hash.hash(body.password),
+        "role": Role.cashier.value,   # least privilege; admin can change on approval
+        "disabled": True,             # blocked until an admin approves
+        "pending": True,
+        "created_at": now_iso(),
+    }
+    await db.users.insert_one(doc)
+    return {"message": "Account created. An admin must approve it before you can sign in."}
+
+
+@api.post("/auth/forgot-password", status_code=202)
+async def forgot_password(body: ForgotIn):
+    email = body.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    # Generic response either way (no account enumeration).
+    if user and not user.get("disabled", False):
+        code = f"{secrets.randbelow(1000000):06d}"
+        await db.password_resets.delete_many({"email": email})
+        await db.password_resets.insert_one({
+            "email": email,
+            "code_hash": _reset_code_hash(code),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=RESET_TTL_MINUTES),
+            "created_at": now_iso(),
+        })
+        subject = f"Your {EMAIL_FROM_NAME} password reset code"
+        html = (
+            f'<table role="presentation" width="100%"><tr><td style="padding:24px;'
+            f'font-family:Arial,sans-serif;color:#0f172a">'
+            f'<p style="font-size:16px">Hi {escape(user.get("name", ""))},</p>'
+            f'<p>Use this code to reset your {escape(EMAIL_FROM_NAME)} password. '
+            f'It expires in {RESET_TTL_MINUTES} minutes.</p>'
+            f'<p style="font-size:32px;font-weight:800;letter-spacing:6px;margin:16px 0">{code}</p>'
+            f'<p style="font-size:13px;color:#64748b">If you did not request this, ignore this email. '
+            f'We never ask for your password by email.</p>'
+            f'<p style="font-size:12px;color:#94a3b8">Sent by {escape(EMAIL_FROM_NAME)}.</p>'
+            f'</td></tr></table>'
+        )
+        try:
+            await send_email(to=user["email"], subject=subject, html=html)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"reset email failed: {e}")
+    return {"message": "If that account exists, a reset code has been emailed."}
+
+
+@api.post("/auth/reset-password")
+async def reset_password(body: ResetIn):
+    email = body.email.lower().strip()
+    row = await db.password_resets.find_one({
+        "email": email,
+        "code_hash": _reset_code_hash(body.code.strip()),
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
+    if not row:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"password_hash": password_hash.hash(body.new_password)}},
+    )
+    await db.password_resets.delete_many({"email": email})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# User management (admin)
+# ---------------------------------------------------------------------------
+@api.get("/users", response_model=List[UserOut])
+async def list_users(_: AdminOnly):
+    docs = await db.users.find().sort("created_at", 1).to_list(500)
+    return [user_public(d) for d in docs]
+
+
+@api.post("/users", response_model=UserOut, status_code=201)
+async def create_user(body: UserCreate, _: AdminOnly):
+    existing = await db.users.find_one({"email": body.email.lower()})
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already exists")
+    doc = {
+        "email": body.email.lower(),
+        "name": body.name,
+        "password_hash": password_hash.hash(body.password),
+        "role": body.role.value,
+        "disabled": False,
+        "created_at": now_iso(),
+    }
+    res = await db.users.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return user_public(doc)
+
+
+@api.put("/users/{user_id}", response_model=UserOut)
+async def update_user(user_id: str, body: UserUpdate, admin: AdminOnly):
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    update = {}
+    if body.email is not None:
+        new_email = str(body.email).lower().strip()
+        existing = await db.users.find_one({"email": new_email, "_id": {"$ne": ObjectId(user_id)}})
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already exists")
+        update["email"] = new_email
+    if body.name is not None:
+        update["name"] = body.name
+    if body.role is not None:
+        update["role"] = body.role.value
+    if body.disabled is not None:
+        update["disabled"] = body.disabled
+        if body.disabled is False:
+            update["pending"] = False  # approving a pending signup
+    if body.password:
+        update["password_hash"] = password_hash.hash(body.password)
+    if update:
+        await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update})
+    doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user_public(doc)
+
+
+@api.delete("/users/{user_id}")
+async def delete_user(user_id: str, admin: AdminOnly):
+    if str(admin["_id"]) == user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"disabled": True}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Products
+# ---------------------------------------------------------------------------
+def product_public(d: dict) -> ProductOut:
+    return ProductOut(
+        id=oid(d["_id"]), name=d["name"], barcode=d.get("barcode", ""),
+        purchase_price=max(0.0, float(d.get("purchase_price", 0) or 0)),
+        sale_price=max(0.0, float(d.get("sale_price", 0) or 0)),
+        low_stock_threshold=max(0.0, float(d.get("low_stock_threshold", 5) or 0)),
+        expiry_date=d.get("expiry_date"),
+        quantity=max(0.0, float(d.get("quantity", 0) or 0)),
+        created_at=d.get("created_at", ""), updated_at=d.get("updated_at", ""),
+    )
+
+
+@api.get("/products", response_model=List[ProductOut])
+async def list_products(_: AnyUser):
+    docs = await db.products.find({"deleted": {"$ne": True}}).sort("name", 1).to_list(2000)
+    return [product_public(d) for d in docs]
+
+
+@api.get("/products/lookup", response_model=Optional[ProductOut])
+async def lookup_product(_: AnyUser, barcode: str):
+    code = barcode.strip()
+    if not code:
+        return None
+    doc = await db.products.find_one({"barcode": code, "deleted": {"$ne": True}})
+    return product_public(doc) if doc else None
+
+
+@api.post("/products", response_model=ProductOut, status_code=201)
+async def create_product(body: ProductIn, _: Staff):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Product name is required")
+    if any(float(v) < 0 for v in (body.purchase_price, body.sale_price, body.low_stock_threshold)):
+        raise HTTPException(status_code=400, detail="Product prices and stock threshold cannot be negative")
+    barcode = body.barcode.strip()
+    if barcode:
+        duplicate = await db.products.find_one({"barcode": barcode, "deleted": {"$ne": True}})
+        if duplicate:
+            raise HTTPException(status_code=409, detail="A product with this barcode already exists")
+    ts = now_iso()
+    doc = body.model_dump()
+    doc.update({"name": name, "barcode": barcode, "quantity": 0.0, "deleted": False, "created_at": ts, "updated_at": ts})
+    res = await db.products.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return product_public(doc)
+
+
+@api.put("/products/{product_id}", response_model=ProductOut)
+async def update_product(product_id: str, body: ProductIn, _: Staff):
+    if not ObjectId.is_valid(product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+    existing = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Product not found")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Product name is required")
+    if any(float(v) < 0 for v in (body.purchase_price, body.sale_price, body.low_stock_threshold)):
+        raise HTTPException(status_code=400, detail="Product prices and stock threshold cannot be negative")
+    barcode = body.barcode.strip()
+    if barcode:
+        duplicate = await db.products.find_one({"barcode": barcode, "deleted": {"$ne": True}})
+        if duplicate and str(duplicate.get("_id")) != product_id:
+            raise HTTPException(status_code=409, detail="A product with this barcode already exists")
+    update = body.model_dump()
+    update.update({"name": name, "barcode": barcode, "updated_at": now_iso()})
+    # Never overwrite quantity while editing product master data.
+    await db.products.update_one({"_id": ObjectId(product_id)}, {"$set": update})
+    doc = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+    return product_public(doc)
+
+
+@api.delete("/products/{product_id}")
+async def delete_product(product_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+    product = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    await db.products.update_one(
+        {"_id": ObjectId(product_id)}, {"$set": {"deleted": True, "updated_at": now_iso()}}
+    )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Parties (suppliers + customers)
+# ---------------------------------------------------------------------------
+def party_public(d: dict, balance: float = 0.0) -> PartyOut:
+    return PartyOut(
+        id=oid(d["_id"]), name=d["name"], type=d["type"],
+        phone=d.get("phone", ""), address=d.get("address", ""),
+        created_at=d.get("created_at", ""), balance=round(balance, 2),
+    )
+
+
+async def _party_balances() -> dict:
+    """Compute owed balances per party id.
+    supplier payable = purchases total − payments(pay) settled.
+    customer receivable = credit sales total − payments(receive) settled.
+    (settled = cash amount + adjustment)
+    """
+    balances: dict = {}
+    purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
+    for p in purchases:
+        sid = p.get("supplier_id")
+        if sid:
+            balances[sid] = balances.get(sid, 0.0) + p.get("total", 0)
+    # Supplier returns reduce the amount still owed to the supplier.
+    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    for r in purchase_returns:
+        sid = r.get("supplier_id")
+        if sid:
+            balances[sid] = balances.get(sid, 0.0) - r.get("refund_total", 0)
+    credit_sales = await db.sales.find({"deleted": {"$ne": True}, "credit": True}).to_list(20000)
+    for s in credit_sales:
+        cid = s.get("customer_id")
+        if cid:
+            balances[cid] = balances.get(cid, 0.0) + s.get("total", 0)
+    # Customer returns reduce what the customer owes.
+    sales_returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    for r in sales_returns:
+        cid = r.get("customer_id")
+        if cid:
+            balances[cid] = balances.get(cid, 0.0) - r.get("refund_total", 0)
+    payments = await db.payments.find({"deleted": {"$ne": True}}).to_list(20000)
+    for pay in payments:
+        pid = pay.get("party_id")
+        if not pid:
+            continue
+        kind = pay.get("kind")
+        if kind in ("pay", "receive"):
+            # Settling what is owed reduces the outstanding balance.
+            settled = float(pay.get("amount", 0) or 0) + float(pay.get("adjustment", 0) or 0)
+            balances[pid] = balances.get(pid, 0.0) - settled
+        elif kind in ("supplier_refund", "customer_refund"):
+            # A cash refund clears the credit/receivable that a return created
+            # (which had pushed the balance negative), moving it back toward 0.
+            amt = float(pay.get("amount", 0) or 0)
+            balances[pid] = balances.get(pid, 0.0) + amt
+    return balances
+
+
+@api.get("/parties", response_model=List[PartyOut])
+async def list_parties(_: AnyUser, type: Optional[PartyType] = None):
+    q: dict = {"deleted": {"$ne": True}}
+    if type:
+        q["type"] = type.value
+    docs = await db.parties.find(q).sort("name", 1).to_list(2000)
+    balances = await _party_balances()
+    return [party_public(d, balances.get(oid(d["_id"]), 0.0)) for d in docs]
+
+
+@api.post("/parties", response_model=PartyOut, status_code=201)
+async def create_party(body: PartyIn, _: Staff):
+    doc = body.model_dump()
+    doc["type"] = body.type.value
+    doc.update({"deleted": False, "created_at": now_iso()})
+    res = await db.parties.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return party_public(doc)
+
+
+@api.put("/parties/{party_id}", response_model=PartyOut)
+async def update_party(party_id: str, body: PartyIn, _: AdminOnly):
+    if not ObjectId.is_valid(party_id):
+        raise HTTPException(status_code=404, detail="Party not found")
+    update = body.model_dump()
+    update["type"] = body.type.value
+    await db.parties.update_one({"_id": ObjectId(party_id)}, {"$set": update})
+    doc = await db.parties.find_one({"_id": ObjectId(party_id)})
+    return party_public(doc)
+
+
+@api.delete("/parties/{party_id}")
+async def delete_party(party_id: str, _: AdminOnly):
+    await db.parties.update_one({"_id": ObjectId(party_id)}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Payments ledger (supplier "pay" / customer "receive")
+# ---------------------------------------------------------------------------
+def payment_public(d: dict) -> dict:
+    return {
+        "id": oid(d["_id"]),
+        "party_id": d.get("party_id"),
+        "party_name": d.get("party_name", ""),
+        "party_type": d.get("party_type", ""),
+        "kind": d.get("kind"),
+        "amount": d.get("amount", 0),
+        "adjustment": d.get("adjustment", 0),
+        "note": d.get("note", ""),
+        "user_name": d.get("user_name", ""),
+        "created_at": d.get("created_at"),
+    }
+
+
+@api.get("/payments")
+async def list_payments(_: Staff, party_id: Optional[str] = None, limit: int = Query(300, le=1000)):
+    q: dict = {"deleted": {"$ne": True}}
+    if party_id:
+        q["party_id"] = party_id
+    docs = await db.payments.find(q).sort("created_at", -1).to_list(limit)
+    return [payment_public(d) for d in docs]
+
+
+@api.post("/payments", status_code=201)
+async def create_payment(body: PaymentIn, user: Staff):
+    if not ObjectId.is_valid(body.party_id):
+        raise HTTPException(status_code=404, detail="Party not found")
+    party = await db.parties.find_one({"_id": ObjectId(body.party_id), "deleted": {"$ne": True}})
+    if not party:
+        raise HTTPException(status_code=404, detail="Party not found")
+    # PaymentIn enforces non-negative cash and adjustment values.
+    # supplier -> pay, customer -> receive
+    if party["type"] == "supplier" and body.kind not in (PaymentKind.pay, PaymentKind.supplier_refund):
+        raise HTTPException(status_code=400, detail="Use 'pay' or 'supplier_refund' for a supplier")
+    if party["type"] == "customer" and body.kind not in (PaymentKind.receive, PaymentKind.customer_refund):
+        raise HTTPException(status_code=400, detail="Use 'receive' or 'customer_refund' for a customer")
+    doc = {
+        "party_id": body.party_id,
+        "party_name": party["name"],
+        "party_type": party["type"],
+        "kind": body.kind.value,
+        "amount": round(body.amount, 2),
+        "adjustment": round(body.adjustment, 2),
+        "note": body.note,
+        "user_name": user.get("name", user["email"]),
+        "deleted": False,
+        "created_at": now_iso(),
+    }
+    res = await db.payments.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return payment_public(doc)
+
+
+@api.delete("/payments/{payment_id}")
+async def delete_payment(payment_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(payment_id):
+        raise HTTPException(status_code=404, detail="Payment not found")
+    await db.payments.update_one({"_id": ObjectId(payment_id)}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
+
+@api.put("/payments/{payment_id}")
+async def edit_payment(payment_id: str, body: PaymentIn, _: AdminOnly):
+    if not ObjectId.is_valid(payment_id): raise HTTPException(status_code=404, detail="Payment not found")
+    existing = await db.payments.find_one({"_id": ObjectId(payment_id), "deleted": {"$ne": True}})
+    if not existing: raise HTTPException(status_code=404, detail="Payment not found")
+    if not ObjectId.is_valid(body.party_id): raise HTTPException(status_code=404, detail="Party not found")
+    party = await db.parties.find_one({"_id": ObjectId(body.party_id), "deleted": {"$ne": True}})
+    if not party: raise HTTPException(status_code=404, detail="Party not found")
+    allowed = ("pay", "supplier_refund") if party["type"] == "supplier" else ("receive", "customer_refund")
+    if body.kind.value not in allowed: raise HTTPException(status_code=400, detail=f"Use one of {', '.join(allowed)} for this party")
+    update={"party_id":body.party_id,"party_name":party["name"],"party_type":party["type"],"kind":body.kind.value,"amount":round(body.amount,2),"adjustment":round(body.adjustment,2),"note":body.note,"edited_at":now_iso()}
+    await db.payments.update_one({"_id": ObjectId(payment_id)}, {"$set": update})
+    return payment_public(await db.payments.find_one({"_id": ObjectId(payment_id)}))
+
+
+# ---------------------------------------------------------------------------
+# Expense budget (single monthly target)
+# ---------------------------------------------------------------------------
+@api.get("/budget")
+async def get_budget(_: Staff):
+    doc = await db.budget.find_one({"_id": "singleton"})
+    monthly = doc.get("monthly_amount", 0.0) if doc else 0.0
+    opening = doc.get("opening_amount", 0.0) if doc else 0.0
+    start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_expenses = await db.expenses.find(
+        {"deleted": {"$ne": True}, "created_at": {"$gte": start.isoformat()}}
+    ).to_list(10000)
+    spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
+    purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchase_spent = round(sum(p.get("total", 0) for p in purchase_docs), 2)
+    return {"monthly_amount": round(monthly, 2), "opening_amount": round(opening, 2), "spent_this_month": spent, "purchase_spent": purchase_spent, "purchase_remaining": round(max(0.0, opening - purchase_spent), 2)}
+
+
+@api.put("/budget")
+async def set_budget(body: BudgetIn, _: AdminOnly):
+    await db.budget.update_one(
+        {"_id": "singleton"},
+        {"$set": {"monthly_amount": round(max(0.0, body.monthly_amount), 2), **({"opening_amount": round(max(0.0, body.opening_amount), 2)} if body.opening_amount is not None else {})}},
+        upsert=True,
+    )
+    return await get_budget(_)
+
+
+# ---------------------------------------------------------------------------
+# Sales (cart) + reprint
+# ---------------------------------------------------------------------------
+def sale_public(d: dict) -> dict:
+    return {
+        "id": oid(d["_id"]),
+        "invoice_no": d.get("invoice_no"),
+        "items": d.get("items", []),
+        "customer_id": d.get("customer_id"),
+        "customer_name": d.get("customer_name", "Walk-in"),
+        "subtotal": d.get("subtotal", 0),
+        "discount": d.get("discount", 0),
+        "total": d.get("total", 0),
+        "cogs": d.get("cogs", 0),
+        "profit": d.get("profit", 0),
+        "note": d.get("note", ""),
+        "cashier_id": d.get("cashier_id"),
+        "cashier_name": d.get("cashier_name", ""),
+        "credit": d.get("credit", False),
+        "created_at": d.get("created_at"),
+    }
+
+
+@api.get("/sales")
+async def list_sales(_: AnyUser, limit: int = Query(200, le=1000)):
+    docs = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+    return [sale_public(d) for d in docs]
+
+
+@api.get("/sales/{sale_id}")
+async def get_sale(sale_id: str, _: AnyUser):
+    if not ObjectId.is_valid(sale_id):
+        raise HTTPException(status_code=404, detail="Sale not found")
+    doc = await db.sales.find_one({"_id": ObjectId(sale_id), "deleted": {"$ne": True}})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sale not found")
+    result = sale_public(doc)
+    rets = await db.returns.find({"sale_id": sale_id, "deleted": {"$ne": True}}).to_list(1000)
+    returned: dict = {}
+    for r in rets:
+        for it in r.get("items", []):
+            returned[it["product_id"]] = returned.get(it["product_id"], 0) + it["quantity"]
+    result["returned_items"] = returned
+    result["returned_total"] = round(sum(r.get("refund_total", 0) for r in rets), 2)
+    return result
+
+
+@api.post("/sales", status_code=201)
+async def create_sale(body: SaleIn, user: AnyUser):
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    requested = _aggregate_item_quantities(body.items)
+    for product_id, requested_qty in requested.items():
+        p = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+        if not p: raise HTTPException(status_code=400, detail="Product not found in cart")
+        if requested_qty > float(p.get("quantity", 0)): raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
+    items = []
+    subtotal = 0.0
+    cogs = 0.0
+    for it in body.items:
+        if not ObjectId.is_valid(it.product_id):
+            raise HTTPException(status_code=400, detail="Invalid product in cart")
+        p = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
+        if not p:
+            raise HTTPException(status_code=400, detail="Product not found in cart")
+        if it.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
+        if it.quantity > p.get("quantity", 0):
+            raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
+        line_total = round(it.quantity * it.unit_price, 2)
+        line_cogs = round(it.quantity * p.get("purchase_price", 0), 2)
+        subtotal += line_total
+        cogs += line_cogs
+        items.append({
+            "product_id": it.product_id,
+            "name": p["name"],
+            "quantity": it.quantity,
+            "unit_price": it.unit_price,
+            "purchase_price": p.get("purchase_price", 0),
+            "line_total": line_total,
+        })
+
+    discount = max(0.0, body.discount)
+    total = round(max(0.0, subtotal - discount), 2)
+    profit = round(total - cogs, 2)
+
+    customer_name = "Walk-in"
+    if body.customer_id and ObjectId.is_valid(body.customer_id):
+        c = await db.parties.find_one({"_id": ObjectId(body.customer_id)})
+        if c:
+            customer_name = c["name"]
+    # Credit only makes sense with a named customer (someone to owe the money).
+    credit = bool(body.credit and body.customer_id)
+
+    seq = await next_seq("sale")
+    doc = {
+        "invoice_no": f"INV-{seq:05d}",
+        "items": items,
+        "customer_id": body.customer_id,
+        "customer_name": customer_name,
+        "subtotal": round(subtotal, 2),
+        "discount": discount,
+        "total": total,
+        "cogs": round(cogs, 2),
+        "profit": profit,
+        "note": body.note,
+        "cashier_id": oid(user["_id"]),
+        "cashier_name": user.get("name", user["email"]),
+        "credit": credit,
+        "deleted": False,
+        "created_at": now_iso(),
+    }
+    res = await db.sales.insert_one(doc)
+    doc["_id"] = res.inserted_id
+
+    for it in body.items:
+        await db.products.update_one(
+            {"_id": ObjectId(it.product_id)},
+            {"$inc": {"quantity": -it.quantity}, "$set": {"updated_at": now_iso()}},
+        )
+    return sale_public(doc)
+
+
+async def _sale_returned_map(sale_id: str) -> dict:
+    rets = await db.returns.find({"sale_id": sale_id, "deleted": {"$ne": True}}).to_list(1000)
+    returned: dict = {}
+    for r in rets:
+        for it in r.get("items", []):
+            returned[it["product_id"]] = returned.get(it["product_id"], 0) + it["quantity"]
+    return returned
+
+
+@api.delete("/sales/{sale_id}")
+async def delete_sale(sale_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(sale_id):
+        raise HTTPException(status_code=404, detail="Sale not found")
+    sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+    if not sale or sale.get("deleted"):
+        raise HTTPException(status_code=404, detail="Sale not found")
+    returned = await _sale_returned_map(sale_id)
+    # Restore the stock that is still "out" (sold minus already returned)
+    for it in sale.get("items", []):
+        restore = it["quantity"] - returned.get(it["product_id"], 0)
+        if restore > 0:
+            await db.products.update_one(
+                {"_id": ObjectId(it["product_id"])},
+                {"$inc": {"quantity": restore}, "$set": {"updated_at": now_iso()}},
+            )
+    # Remove the sale and its returns from the books
+    await db.returns.update_many({"sale_id": sale_id}, {"$set": {"deleted": True}})
+    await db.sales.update_one({"_id": ObjectId(sale_id)}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
+
+@api.put("/sales/{sale_id}")
+async def edit_sale(sale_id: str, body: SaleIn, _: AdminOnly):
+    if not ObjectId.is_valid(sale_id):
+        raise HTTPException(status_code=404, detail="Sale not found")
+    sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+    if not sale or sale.get("deleted"):
+        raise HTTPException(status_code=404, detail="Sale not found")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Sale must have at least one item")
+
+    returned = await _sale_returned_map(sale_id)
+    if returned:
+        raise HTTPException(status_code=400, detail="This sale has returns. Handle returns before editing.")
+
+    # Put back the old items' stock, then apply the new items.
+    for it in sale.get("items", []):
+        await db.products.update_one(
+            {"_id": ObjectId(it["product_id"])},
+            {"$inc": {"quantity": it["quantity"]}, "$set": {"updated_at": now_iso()}},
+        )
+
+    items = []
+    subtotal = 0.0
+    cogs = 0.0
+    try:
+        for it in body.items:
+            if not ObjectId.is_valid(it.product_id):
+                raise HTTPException(status_code=400, detail="Invalid product in cart")
+            p = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
+            if not p:
+                raise HTTPException(status_code=400, detail="Product not found in cart")
+            if it.quantity <= 0:
+                raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
+            if it.quantity > p.get("quantity", 0):
+                raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
+            line_total = round(it.quantity * it.unit_price, 2)
+            line_cogs = round(it.quantity * p.get("purchase_price", 0), 2)
+            subtotal += line_total
+            cogs += line_cogs
+            items.append({
+                "product_id": it.product_id,
+                "name": p["name"],
+                "quantity": it.quantity,
+                "unit_price": it.unit_price,
+                "purchase_price": p.get("purchase_price", 0),
+                "line_total": line_total,
+            })
+    except HTTPException:
+        # roll back the stock we just restored so nothing is lost
+        for it in sale.get("items", []):
+            await db.products.update_one(
+                {"_id": ObjectId(it["product_id"])},
+                {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
+            )
+        raise
+
+    discount = max(0.0, body.discount)
+    total = round(max(0.0, subtotal - discount), 2)
+
+    customer_name = "Walk-in"
+    if body.customer_id and ObjectId.is_valid(body.customer_id):
+        c = await db.parties.find_one({"_id": ObjectId(body.customer_id)})
+        if c:
+            customer_name = c["name"]
+
+    await db.sales.update_one(
+        {"_id": ObjectId(sale_id)},
+        {"$set": {
+            "items": items,
+            "customer_id": body.customer_id,
+            "customer_name": customer_name,
+            "subtotal": round(subtotal, 2),
+            "discount": discount,
+            "total": total,
+            "cogs": round(cogs, 2),
+            "profit": round(total - cogs, 2),
+            "note": body.note,
+            "edited_at": now_iso(),
+        }},
+    )
+    # Deduct new items from stock
+    for it in body.items:
+        await db.products.update_one(
+            {"_id": ObjectId(it.product_id)},
+            {"$inc": {"quantity": -it.quantity}, "$set": {"updated_at": now_iso()}},
+        )
+    updated = await db.sales.find_one({"_id": ObjectId(sale_id)})
+    return sale_public(updated)
+
+
+# ---------------------------------------------------------------------------
+# Purchases (multi-item restock, editable cost)
+# ---------------------------------------------------------------------------
+def purchase_public(d: dict) -> dict:
+    return {
+        "id": oid(d["_id"]),
+        "ref_no": d.get("ref_no"),
+        "items": d.get("items", []),
+        "supplier_id": d.get("supplier_id"),
+        "supplier_name": d.get("supplier_name", "—"),
+        "total": d.get("total", 0),
+        "note": d.get("note", ""),
+        "user_name": d.get("user_name", ""),
+        "created_at": d.get("created_at"),
+    }
+
+
+@api.get("/purchases")
+async def list_purchases(_: Staff, limit: int = Query(200, le=1000)):
+    docs = await db.purchases.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+    return [purchase_public(d) for d in docs]
+
+
+@api.get("/purchases/{purchase_id}")
+async def get_purchase(purchase_id: str, _: Staff):
+    if not ObjectId.is_valid(purchase_id):
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    doc = await db.purchases.find_one({"_id": ObjectId(purchase_id), "deleted": {"$ne": True}})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    result = purchase_public(doc)
+    rets = await db.purchase_returns.find({"purchase_id": purchase_id, "deleted": {"$ne": True}}).to_list(1000)
+    returned: dict = {}
+    for r in rets:
+        for it in r.get("items", []):
+            returned[it["product_id"]] = returned.get(it["product_id"], 0) + it["quantity"]
+    result["returned_items"] = returned
+    result["returned_total"] = round(sum(r.get("refund_total", 0) for r in rets), 2)
+    return result
+
+
+@api.post("/purchases", status_code=201)
+async def create_purchase(body: PurchaseIn, user: Staff):
+    if not body.items:
+        raise HTTPException(status_code=400, detail="No products to purchase")
+    items = []
+    total = 0.0
+    for it in body.items:
+        if not ObjectId.is_valid(it.product_id):
+            raise HTTPException(status_code=400, detail="Invalid product")
+        p = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
+        if not p:
+            raise HTTPException(status_code=400, detail="Product not found")
+        if it.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
+        line_total = round(it.quantity * it.unit_cost, 2)
+        total += line_total
+        items.append({
+            "product_id": it.product_id,
+            "name": p["name"],
+            "quantity": it.quantity,
+            "unit_cost": it.unit_cost,
+            "line_total": line_total,
+        })
+
+    supplier_name = "—"
+    if body.supplier_id and ObjectId.is_valid(body.supplier_id):
+        s = await db.parties.find_one({"_id": ObjectId(body.supplier_id)})
+        if s:
+            supplier_name = s["name"]
+
+    seq = await next_seq("purchase")
+    doc = {
+        "ref_no": f"PO-{seq:05d}",
+        "items": items,
+        "supplier_id": body.supplier_id,
+        "supplier_name": supplier_name,
+        "total": round(total, 2),
+        "note": body.note,
+        "user_name": user.get("name", user["email"]),
+        "deleted": False,
+        "created_at": now_iso(),
+    }
+    res = await db.purchases.insert_one(doc)
+    doc["_id"] = res.inserted_id
+
+    for it in body.items:
+        await db.products.update_one(
+            {"_id": ObjectId(it.product_id)},
+            {"$inc": {"quantity": it.quantity},
+             "$set": {"purchase_price": it.unit_cost, "updated_at": now_iso()}},
+        )
+    return purchase_public(doc)
+
+
+async def _purchase_returned_map(purchase_id: str) -> dict:
+    rets = await db.purchase_returns.find(
+        {"purchase_id": purchase_id, "deleted": {"$ne": True}}
+    ).to_list(1000)
+    returned: dict = {}
+    for r in rets:
+        for it in r.get("items", []):
+            returned[it["product_id"]] = returned.get(it["product_id"], 0) + it["quantity"]
+    return returned
+
+
+@api.delete("/purchases/{purchase_id}")
+async def delete_purchase(purchase_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(purchase_id):
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
+    if not purchase or purchase.get("deleted"):
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    returned = await _purchase_returned_map(purchase_id)
+    if returned:
+        raise HTTPException(status_code=400, detail="This purchase has supplier returns. Handle them before deleting.")
+    for it in purchase.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        available = float(prod.get("quantity", 0)) if prod else 0
+        if available + 1e-9 < float(it["quantity"]):
+            raise HTTPException(status_code=400, detail=f"Cannot delete purchase: {it['name']} stock has already been used")
+    # Reverse the stock this purchase added
+    for it in purchase.get("items", []):
+        await db.products.update_one(
+            {"_id": ObjectId(it["product_id"])},
+            {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
+        )
+    await db.purchases.update_one({"_id": ObjectId(purchase_id)}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
+
+@api.put("/purchases/{purchase_id}")
+async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
+    if not ObjectId.is_valid(purchase_id):
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
+    if not purchase or purchase.get("deleted"):
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Purchase must have at least one item")
+
+    returned = await _purchase_returned_map(purchase_id)
+    if returned:
+        raise HTTPException(status_code=400, detail="This purchase has supplier returns. Handle them before editing.")
+
+    # Validate before reversing so a failed edit never corrupts stock.
+    for it in purchase.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        available = float(prod.get("quantity", 0)) if prod else 0
+        if available + 1e-9 < float(it["quantity"]):
+            raise HTTPException(status_code=400, detail=f"Cannot edit purchase: {it['name']} stock has already been used")
+    # Reverse old stock, then apply new items.
+    for it in purchase.get("items", []):
+        await db.products.update_one(
+            {"_id": ObjectId(it["product_id"])},
+            {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
+        )
+
+    items = []
+    total = 0.0
+    for it in body.items:
+        if not ObjectId.is_valid(it.product_id):
+            raise HTTPException(status_code=400, detail="Invalid product")
+        p = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
+        if not p:
+            raise HTTPException(status_code=400, detail="Product not found")
+        if it.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
+        line_total = round(it.quantity * it.unit_cost, 2)
+        total += line_total
+        items.append({
+            "product_id": it.product_id,
+            "name": p["name"],
+            "quantity": it.quantity,
+            "unit_cost": it.unit_cost,
+            "line_total": line_total,
+        })
+
+    budget_doc = await db.budget.find_one({"_id": "singleton"})
+    opening_budget = float(budget_doc.get("opening_amount", 0)) if budget_doc else 0.0
+    if opening_budget > 0:
+        purchase_docs = await db.purchases.find({"deleted": {"$ne": True}, "_id": {"$ne": ObjectId(purchase_id)}}).to_list(20000)
+        already_spent = sum(float(p.get("total", 0)) for p in purchase_docs)
+        if already_spent + total > opening_budget + 0.0001:
+            for old_it in purchase.get("items", []):
+                await db.products.update_one({"_id": ObjectId(old_it["product_id"])}, {"$inc": {"quantity": old_it["quantity"]}, "$set": {"updated_at": now_iso()}})
+            raise HTTPException(status_code=400, detail=f"Purchase exceeds remaining opening budget of {max(0.0, opening_budget - already_spent):.2f}")
+
+    supplier_name = "—"
+    if body.supplier_id and ObjectId.is_valid(body.supplier_id):
+        s = await db.parties.find_one({"_id": ObjectId(body.supplier_id)})
+        if s:
+            supplier_name = s["name"]
+
+    await db.purchases.update_one(
+        {"_id": ObjectId(purchase_id)},
+        {"$set": {
+            "items": items,
+            "supplier_id": body.supplier_id,
+            "supplier_name": supplier_name,
+            "total": round(total, 2),
+            "note": body.note,
+            "edited_at": now_iso(),
+        }},
+    )
+    # Apply new stock + latest cost
+    for it in body.items:
+        await db.products.update_one(
+            {"_id": ObjectId(it.product_id)},
+            {"$inc": {"quantity": it.quantity},
+             "$set": {"purchase_price": it.unit_cost, "updated_at": now_iso()}},
+        )
+    updated = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
+    return purchase_public(updated)
+
+
+# ---------------------------------------------------------------------------
+# Expenses (two buckets)
+# ---------------------------------------------------------------------------
+def expense_public(d: dict) -> dict:
+    return {
+        "id": oid(d["_id"]),
+        "title": d.get("title"),
+        "category": d.get("category", "Other"),
+        "bucket": d.get("bucket", "operating"),
+        "amount": d.get("amount", 0),
+        "note": d.get("note", ""),
+        "user_name": d.get("user_name", ""),
+        "created_at": d.get("created_at"),
+    }
+
+
+@api.get("/expenses")
+async def list_expenses(_: Staff, bucket: Optional[ExpenseBucket] = None):
+    q: dict = {"deleted": {"$ne": True}}
+    if bucket:
+        q["bucket"] = bucket.value
+    docs = await db.expenses.find(q).sort("created_at", -1).to_list(1000)
+    return [expense_public(d) for d in docs]
+
+
+@api.post("/expenses", status_code=201)
+async def create_expense(body: ExpenseIn, user: Staff):
+    doc = body.model_dump()
+    doc["bucket"] = body.bucket.value
+    doc.update({"deleted": False, "user_name": user.get("name", user["email"]), "created_at": now_iso()})
+    res = await db.expenses.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return expense_public(doc)
+
+
+@api.delete("/expenses/{expense_id}")
+async def delete_expense(expense_id: str, _: AdminOnly):
+    await db.expenses.update_one({"_id": ObjectId(expense_id)}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
+
+@api.put("/expenses/{expense_id}")
+async def edit_expense(expense_id: str, body: ExpenseIn, _: AdminOnly):
+    if not ObjectId.is_valid(expense_id): raise HTTPException(status_code=404, detail="Expense not found")
+    existing = await db.expenses.find_one({"_id": ObjectId(expense_id), "deleted": {"$ne": True}})
+    if not existing: raise HTTPException(status_code=404, detail="Expense not found")
+    update = body.model_dump(); update["bucket"] = body.bucket.value; update["edited_at"] = now_iso()
+    await db.expenses.update_one({"_id": ObjectId(expense_id)}, {"$set": update})
+    return expense_public(await db.expenses.find_one({"_id": ObjectId(expense_id)}))
+
+
+# ---------------------------------------------------------------------------
+# Returns / refunds
+# ---------------------------------------------------------------------------
+def return_public(d: dict) -> dict:
+    return {
+        "id": oid(d["_id"]),
+        "ref_no": d.get("ref_no"),
+        "sale_id": d.get("sale_id"),
+        "customer_id": d.get("customer_id"),
+        "invoice_no": d.get("invoice_no"),
+        "customer_name": d.get("customer_name", "Walk-in"),
+        "items": d.get("items", []),
+        "refund_total": d.get("refund_total", 0),
+        "refund_cogs": d.get("refund_cogs", 0),
+        "refund_profit": d.get("refund_profit", 0),
+        "reason": d.get("reason", ""),
+        "user_name": d.get("user_name", ""),
+        "created_at": d.get("created_at"),
+    }
+
+
+@api.get("/returns")
+async def list_returns(_: Staff, limit: int = Query(200, le=1000)):
+    docs = await db.returns.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+    return [return_public(d) for d in docs]
+
+
+@api.post("/returns", status_code=201)
+async def create_return(body: ReturnIn, user: Staff):
+    if not ObjectId.is_valid(body.sale_id):
+        raise HTTPException(status_code=404, detail="Sale not found")
+    sale = await db.sales.find_one({"_id": ObjectId(body.sale_id)})
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    # How much was already returned per product on this sale
+    prev = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(1000)
+    already: dict = {}
+    for r in prev:
+        for it in r.get("items", []):
+            already[it["product_id"]] = already.get(it["product_id"], 0) + it["quantity"]
+
+    sale_items = {it["product_id"]: it for it in sale.get("items", [])}
+
+    requested = _aggregate_item_quantities(body.items)
+    for product_id, requested_qty in requested.items():
+        si = sale_items.get(product_id)
+        if not si: raise HTTPException(status_code=400, detail="Item was not part of this sale")
+        remaining = si["quantity"] - already.get(product_id, 0)
+        if requested_qty > remaining: raise HTTPException(status_code=400, detail=f"Only {remaining} of {si['name']} can be returned")
+    items = []
+    refund_total = 0.0
+    refund_cogs = 0.0
+    for it in body.items:
+        if it.quantity <= 0:
+            continue
+        si = sale_items.get(it.product_id)
+        if not si:
+            raise HTTPException(status_code=400, detail="Item was not part of this sale")
+        remaining = si["quantity"] - already.get(it.product_id, 0)
+        if it.quantity > remaining:
+            raise HTTPException(status_code=400, detail=f"Only {remaining} of {si['name']} can be returned")
+        line_total = round(it.quantity * si["unit_price"], 2)
+        line_cogs = round(it.quantity * si.get("purchase_price", 0), 2)
+        refund_total += line_total
+        refund_cogs += line_cogs
+        items.append({
+            "product_id": it.product_id,
+            "name": si["name"],
+            "quantity": it.quantity,
+            "unit_price": si["unit_price"],
+            "purchase_price": si.get("purchase_price", 0),
+            "line_total": line_total,
+        })
+
+    if not items:
+        raise HTTPException(status_code=400, detail="Select at least one item to return")
+
+    seq = await next_seq("return")
+    doc = {
+        "ref_no": f"RET-{seq:05d}",
+        "sale_id": body.sale_id,
+        "invoice_no": sale.get("invoice_no"),
+        "customer_id": sale.get("customer_id"),
+        "customer_name": sale.get("customer_name", "Walk-in"),
+        "items": items,
+        "refund_total": round(refund_total, 2),
+        "refund_cogs": round(refund_cogs, 2),
+        "refund_profit": round(refund_total - refund_cogs, 2),
+        "reason": body.reason,
+        "user_name": user.get("name", user["email"]),
+        "deleted": False,
+        "created_at": now_iso(),
+    }
+    res = await db.returns.insert_one(doc)
+    doc["_id"] = res.inserted_id
+
+    # Restore stock
+    for it in items:
+        await db.products.update_one(
+            {"_id": ObjectId(it["product_id"])},
+            {"$inc": {"quantity": it["quantity"]}, "$set": {"updated_at": now_iso()}},
+        )
+    return return_public(doc)
+
+
+# ---------------------------------------------------------------------------
+# Purchase returns (return stock to supplier)
+# ---------------------------------------------------------------------------
+def purchase_return_public(d: dict) -> dict:
+    return {
+        "id": oid(d["_id"]),
+        "ref_no": d.get("ref_no"),
+        "purchase_id": d.get("purchase_id"),
+        "supplier_id": d.get("supplier_id"),
+        "po_ref": d.get("po_ref"),
+        "supplier_name": d.get("supplier_name", "—"),
+        "items": d.get("items", []),
+        "refund_total": d.get("refund_total", 0),
+        "reason": d.get("reason", ""),
+        "user_name": d.get("user_name", ""),
+        "created_at": d.get("created_at"),
+    }
+
+
+@api.get("/purchase-returns")
+async def list_purchase_returns(_: Staff, limit: int = Query(200, le=1000)):
+    docs = await db.purchase_returns.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+    return [purchase_return_public(d) for d in docs]
+
+
+@api.post("/purchase-returns", status_code=201)
+async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
+    if not ObjectId.is_valid(body.purchase_id):
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    purchase = await db.purchases.find_one({"_id": ObjectId(body.purchase_id), "deleted": {"$ne": True}})
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    prev = await db.purchase_returns.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(1000)
+    already: dict = {}
+    for r in prev:
+        for it in r.get("items", []):
+            already[it["product_id"]] = already.get(it["product_id"], 0) + it["quantity"]
+
+    po_items = {it["product_id"]: it for it in purchase.get("items", [])}
+
+    requested = _aggregate_item_quantities(body.items)
+    for product_id, requested_qty in requested.items():
+        pi = po_items.get(product_id)
+        if not pi: raise HTTPException(status_code=400, detail="Item was not part of this purchase")
+        remaining = pi["quantity"] - already.get(product_id, 0)
+        if requested_qty > remaining: raise HTTPException(status_code=400, detail=f"Only {remaining} of {pi['name']} can be returned")
+        prod = await db.products.find_one({"_id": ObjectId(product_id)})
+        in_stock = float(prod.get("quantity", 0)) if prod else 0
+        if requested_qty > in_stock: raise HTTPException(status_code=400, detail=f"Only {in_stock} of {pi['name']} in stock to return")
+    items = []
+    refund_total = 0.0
+    for it in body.items:
+        if it.quantity <= 0:
+            continue
+        pi = po_items.get(it.product_id)
+        if not pi:
+            raise HTTPException(status_code=400, detail="Item was not part of this purchase")
+        remaining = pi["quantity"] - already.get(it.product_id, 0)
+        if it.quantity > remaining:
+            raise HTTPException(status_code=400, detail=f"Only {remaining} of {pi['name']} can be returned")
+        prod = await db.products.find_one({"_id": ObjectId(it.product_id)})
+        in_stock = prod.get("quantity", 0) if prod else 0
+        if it.quantity > in_stock:
+            raise HTTPException(status_code=400, detail=f"Only {in_stock} of {pi['name']} in stock to return")
+        line_total = round(it.quantity * pi["unit_cost"], 2)
+        refund_total += line_total
+        items.append({
+            "product_id": it.product_id,
+            "name": pi["name"],
+            "quantity": it.quantity,
+            "unit_cost": pi["unit_cost"],
+            "line_total": line_total,
+        })
+
+    if not items:
+        raise HTTPException(status_code=400, detail="Select at least one item to return")
+
+    seq = await next_seq("purchase_return")
+    doc = {
+        "ref_no": f"PRET-{seq:05d}",
+        "purchase_id": body.purchase_id,
+        "po_ref": purchase.get("ref_no"),
+        "supplier_id": purchase.get("supplier_id"),
+        "supplier_name": purchase.get("supplier_name", "—"),
+        "items": items,
+        "refund_total": round(refund_total, 2),
+        "reason": body.reason,
+        "user_name": user.get("name", user["email"]),
+        "deleted": False,
+        "created_at": now_iso(),
+    }
+    res = await db.purchase_returns.insert_one(doc)
+    doc["_id"] = res.inserted_id
+
+    # Reduce stock (goods sent back to supplier)
+    for it in items:
+        await db.products.update_one(
+            {"_id": ObjectId(it["product_id"])},
+            {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
+        )
+    return purchase_return_public(doc)
+
+
+@api.put("/returns/{return_id}", status_code=200)
+async def edit_return(return_id: str, body: ReturnIn, _: AdminOnly):
+    if not ObjectId.is_valid(return_id):
+        raise HTTPException(status_code=404, detail="Return not found")
+    row = await db.returns.find_one({"_id": ObjectId(return_id), "deleted": {"$ne": True}})
+    if not row:
+        raise HTTPException(status_code=404, detail="Return not found")
+    if not ObjectId.is_valid(body.sale_id) or body.sale_id != row.get("sale_id"):
+        raise HTTPException(status_code=400, detail="Return sale cannot be changed")
+    sale = await db.sales.find_one({"_id": ObjectId(body.sale_id), "deleted": {"$ne": True}})
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    for old in row.get("items", []):
+        await db.products.update_one({"_id": ObjectId(old["product_id"])}, {"$inc": {"quantity": -old["quantity"]}, "$set": {"updated_at": now_iso()}})
+
+    prev = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}, "_id": {"$ne": ObjectId(return_id)}}).to_list(1000)
+    already = {}
+    for rr in prev:
+        for it in rr.get("items", []):
+            already[it["product_id"]] = already.get(it["product_id"], 0) + it["quantity"]
+    sale_items = {it["product_id"]: it for it in sale.get("items", [])}
+    items=[]; refund_total=0.0; refund_cogs=0.0
+    try:
+        for it in body.items:
+            if it.quantity <= 0: continue
+            si=sale_items.get(it.product_id)
+            if not si: raise HTTPException(status_code=400, detail="Item was not part of this sale")
+            remaining=si["quantity"]-already.get(it.product_id,0)
+            if it.quantity>remaining: raise HTTPException(status_code=400, detail=f"Only {remaining} of {si['name']} can be returned")
+            line_total=round(it.quantity*si["unit_price"],2); line_cogs=round(it.quantity*si.get("purchase_price",0),2)
+            refund_total+=line_total; refund_cogs+=line_cogs
+            items.append({"product_id":it.product_id,"name":si["name"],"quantity":it.quantity,"unit_price":si["unit_price"],"purchase_price":si.get("purchase_price",0),"line_total":line_total})
+        if not items: raise HTTPException(status_code=400, detail="Select at least one item to return")
+    except HTTPException:
+        for old in row.get("items", []):
+            await db.products.update_one({"_id": ObjectId(old["product_id"])}, {"$inc": {"quantity": old["quantity"]}, "$set": {"updated_at": now_iso()}})
+        raise
+    await db.returns.update_one({"_id": ObjectId(return_id)}, {"$set": {"items":items,"refund_total":round(refund_total,2),"refund_cogs":round(refund_cogs,2),"refund_profit":round(refund_total-refund_cogs,2),"reason":body.reason,"edited_at":now_iso()}})
+    for it in items:
+        await db.products.update_one({"_id":ObjectId(it["product_id"])},{"$inc":{"quantity":it["quantity"]},"$set":{"updated_at":now_iso()}})
+    return return_public(await db.returns.find_one({"_id":ObjectId(return_id)}))
+
+
+@api.delete("/returns/{return_id}")
+async def delete_return(return_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(return_id): raise HTTPException(status_code=404, detail="Return not found")
+    row = await db.returns.find_one({"_id": ObjectId(return_id), "deleted": {"$ne": True}})
+    if not row: raise HTTPException(status_code=404, detail="Return not found")
+    for it in row.get("items", []):
+        if ObjectId.is_valid(it["product_id"]): await db.products.update_one({"_id": ObjectId(it["product_id"])}, {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}})
+    await db.returns.update_one({"_id": ObjectId(return_id)}, {"$set": {"deleted": True, "deleted_at": now_iso()}})
+    return {"ok": True}
+
+
+@api.put("/purchase-returns/{return_id}", status_code=200)
+async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminOnly):
+    if not ObjectId.is_valid(return_id):
+        raise HTTPException(status_code=404, detail="Purchase return not found")
+    row=await db.purchase_returns.find_one({"_id":ObjectId(return_id),"deleted":{"$ne":True}})
+    if not row: raise HTTPException(status_code=404, detail="Purchase return not found")
+    if body.purchase_id != row.get("purchase_id"): raise HTTPException(status_code=400, detail="Purchase cannot be changed")
+    purchase=await db.purchases.find_one({"_id":ObjectId(body.purchase_id),"deleted":{"$ne":True}})
+    if not purchase: raise HTTPException(status_code=404, detail="Purchase not found")
+    for old in row.get("items",[]):
+        await db.products.update_one({"_id":ObjectId(old["product_id"])},{"$inc":{"quantity":old["quantity"]},"$set":{"updated_at":now_iso()}})
+    prev=await db.purchase_returns.find({"purchase_id":body.purchase_id,"deleted":{"$ne":True},"_id":{"$ne":ObjectId(return_id)}}).to_list(1000)
+    already={}
+    for rr in prev:
+        for it in rr.get("items",[]): already[it["product_id"]]=already.get(it["product_id"],0)+it["quantity"]
+    po_items={it["product_id"]:it for it in purchase.get("items",[])}
+    items=[]; total=0.0
+    try:
+        for it in body.items:
+            if it.quantity<=0: continue
+            pi=po_items.get(it.product_id)
+            if not pi: raise HTTPException(status_code=400,detail="Item was not part of this purchase")
+            remaining=pi["quantity"]-already.get(it.product_id,0)
+            if it.quantity>remaining: raise HTTPException(status_code=400,detail=f"Only {remaining} of {pi['name']} can be returned")
+            prod=await db.products.find_one({"_id":ObjectId(it.product_id)})
+            if it.quantity>(prod.get("quantity",0) if prod else 0): raise HTTPException(status_code=400,detail=f"Not enough {pi['name']} in stock")
+            line_total=round(it.quantity*pi["unit_cost"],2); total+=line_total
+            items.append({"product_id":it.product_id,"name":pi["name"],"quantity":it.quantity,"unit_cost":pi["unit_cost"],"line_total":line_total})
+        if not items: raise HTTPException(status_code=400,detail="Select at least one item to return")
+    except HTTPException:
+        for old in row.get("items",[]):
+            await db.products.update_one({"_id":ObjectId(old["product_id"])},{"$inc":{"quantity":-old["quantity"]},"$set":{"updated_at":now_iso()}})
+        raise
+    await db.purchase_returns.update_one({"_id":ObjectId(return_id)},{"$set":{"items":items,"refund_total":round(total,2),"reason":body.reason,"edited_at":now_iso()}})
+    for it in items:
+        await db.products.update_one({"_id":ObjectId(it["product_id"])},{"$inc":{"quantity":-it["quantity"]},"$set":{"updated_at":now_iso()}})
+    return purchase_return_public(await db.purchase_returns.find_one({"_id":ObjectId(return_id)}))
+
+
+@api.delete("/purchase-returns/{return_id}")
+async def delete_purchase_return(return_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(return_id): raise HTTPException(status_code=404, detail="Purchase return not found")
+    row = await db.purchase_returns.find_one({"_id": ObjectId(return_id), "deleted": {"$ne": True}})
+    if not row: raise HTTPException(status_code=404, detail="Purchase return not found")
+    for it in row.get("items", []):
+        if ObjectId.is_valid(it["product_id"]): await db.products.update_one({"_id": ObjectId(it["product_id"])}, {"$inc": {"quantity": it["quantity"]}, "$set": {"updated_at": now_iso()}})
+    await db.purchase_returns.update_one({"_id": ObjectId(return_id)}, {"$set": {"deleted": True, "deleted_at": now_iso()}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+def range_start(range_: str) -> Optional[datetime]:
+    now = datetime.now(timezone.utc)
+    if range_ == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if range_ == "week":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start - timedelta(days=(start.weekday()))
+    if range_ == "month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if range_ == "year":
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return None  # all
+
+
+@api.get("/reports/summary")
+async def report_summary(_: Staff, range: str = "today"):
+    start = range_start(range)
+    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+
+    # Returns/payments are dated when the cash movement happens. They must
+    # therefore be filtered independently from the original sale/purchase;
+    # otherwise a return made today against an older invoice disappears from
+    # today's cash report.
+    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    expenses = await db.expenses.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    purchases = await db.purchases.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
+
+    gross_revenue = round(sum(s.get("total", 0) for s in sales), 2)
+    returns_total = round(sum(r.get("refund_total", 0) for r in returns), 2)
+    returns_cogs = round(sum(r.get("refund_cogs", 0) for r in returns), 2)
+    revenue = round(gross_revenue - returns_total, 2)  # net sales
+    cogs_goods = round(sum(s.get("cogs", 0) for s in sales) - returns_cogs, 2)
+    units_sold = sum(sum(i.get("quantity", 0) for i in s.get("items", [])) for s in sales)
+    transactions = len(sales)
+
+    cogs_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "cogs"), 2)
+    operating_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "operating"), 2)
+    personal_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "personal"), 2)
+
+    payments = await db.payments.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    supplier_payments = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "pay"), 2)
+    customer_receipts = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "receive"), 2)
+    supplier_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "supplier_refund"), 2)
+    customer_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "customer_refund"), 2)
+
+    # Profit model:
+    #   Gross profit = net sales − cost of goods sold
+    #   Net profit   = gross profit − personal expenses (ONLY personal hits profit)
+    # Supplier payments, operating expenses and direct/COGS expenses no longer
+    # reduce profit — they reduce the Remaining Balance (cash) instead.
+    cogs_total = cogs_goods
+    gross_profit = round(revenue - cogs_goods, 2)
+    net_profit = round(gross_profit - personal_expenses, 2)
+    total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
+
+    # Remaining balance follows the store rule:
+    #   base remaining = net sales − gross profit
+    #   supplier payments are then deducted when actually paid in Payments.
+    # Purchases themselves never reduce this balance; personal expenses only
+    # affect Net Profit.
+    cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
+    cash_sale_returns = 0.0
+    for r in returns:
+        sale = next((s for s in all_sales if oid(s["_id"]) == r.get("sale_id")), None)
+        if sale and not sale.get("credit", False):
+            cash_sale_returns += float(r.get("refund_total", 0))
+    # A purchase return changes inventory and the supplier payable. It is NOT
+    # automatically a cash receipt: the supplier may credit the account
+    # instead of handing back cash. Cash changes only through an explicit
+    # supplier payment/receipt transaction, preventing a return from creating
+    # a second cash movement.
+    budget_doc = await db.budget.find_one({"_id": "singleton"})
+    opening_cash = float((budget_doc or {}).get("opening_amount", 0) or 0)
+    purchase_return_refunds = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
+    # Remaining balance rule (confirmed by store owner):
+    #   subtract every expense EXCEPT personal expenses, then add Net Profit.
+    expenses_except_personal = round(cogs_expenses + operating_expenses, 2)
+    remaining_balance = round(
+        opening_cash + cash_sales - cash_sale_returns + customer_receipts
+        + supplier_refunds - supplier_payments - customer_refunds
+        - expenses_except_personal + net_profit,
+        2,
+    )
+
+    purchase_total = round(sum(p.get("total", 0) for p in purchases), 2)
+    purchase_returns_total = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
+    purchase_net = round(purchase_total - purchase_returns_total, 2)
+
+    low_stock = [product_public(p).model_dump() for p in products
+                 if p.get("quantity", 0) <= p.get("low_stock_threshold", 5)]
+    inventory_value = round(sum(p.get("quantity", 0) * p.get("purchase_price", 0) for p in products), 2)
+
+    return {
+        "range": range,
+        "revenue": revenue,
+        "gross_revenue": gross_revenue,
+        "returns_total": returns_total,
+        "returns_count": len(returns),
+        "cogs_goods": cogs_goods,
+        "cogs_expenses": cogs_expenses,
+        "cogs_total": cogs_total,
+        "personal_expenses": personal_expenses,
+        "gross_profit": gross_profit,
+        "operating_expenses": operating_expenses,
+        "total_expenses": total_expenses,
+        "supplier_payments": supplier_payments,
+        "customer_receipts": customer_receipts,
+        "supplier_refunds": supplier_refunds,
+        "customer_refunds": customer_refunds,
+        "cash_sales": cash_sales,
+        "cash_sale_returns": round(cash_sale_returns, 2),
+        "opening_cash": round(opening_cash, 2),
+        "purchase_return_refunds": purchase_return_refunds,
+        "net_profit": net_profit,
+        "remaining_balance": remaining_balance,
+        "units_sold": units_sold,
+        "transactions": transactions,
+        "purchase_total": purchase_net,
+        "purchase_gross": purchase_total,
+        "purchase_returns_total": purchase_returns_total,
+        "inventory_value": inventory_value,
+        "product_count": len(products),
+        "low_stock": low_stock,
+    }
+
+
+@api.get("/reports/customers")
+async def report_customers(_: Staff, range: str = "all"):
+    start = range_start(range)
+    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    agg: dict = {}
+    for s in sales:
+        key = s.get("customer_id") or "walkin"
+        name = s.get("customer_name", "Walk-in")
+        row = agg.setdefault(key, {"customer_id": s.get("customer_id"), "name": name,
+                                   "orders": 0, "total": 0.0, "units": 0.0})
+        row["orders"] += 1
+        row["total"] += s.get("total", 0)
+        row["units"] += sum(i.get("quantity", 0) for i in s.get("items", []))
+    for r in returns:
+        key = r.get("customer_id") or "walkin"
+        row = agg.get(key)
+        if row:
+            row["total"] -= r.get("refund_total", 0)
+            row["units"] -= sum(i.get("quantity", 0) for i in r.get("items", []))
+    rows = sorted(agg.values(), key=lambda r: r["total"], reverse=True)
+    for r in rows:
+        r["total"] = round(r["total"], 2)
+    return rows
+
+
+@api.get("/reports/day-close")
+async def report_day_close(user: AnyUser, range: str = "today"):
+    start = range_start(range)
+    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+
+    def summarize(rows):
+        gross = round(sum(s.get("total", 0) for s in rows), 2)
+        discount = round(sum(s.get("discount", 0) for s in rows), 2)
+        units = sum(sum(i.get("quantity", 0) for i in s.get("items", [])) for s in rows)
+        return {"transactions": len(rows), "units": units, "gross_sales": gross, "discount": discount}
+
+    mine = [s for s in sales if s.get("cashier_id") == oid(user["_id"])]
+    me = {"user_name": user.get("name", user["email"]), "range": range, **summarize(mine)}
+
+    by_user = None
+    if user["role"] in ("admin", "partner"):
+        groups: dict = {}
+        for s in sales:
+            key = s.get("cashier_id") or "?"
+            groups.setdefault(key, {"user_name": s.get("cashier_name", "Unknown"), "rows": []})
+            groups[key]["rows"].append(s)
+        by_user = [
+            {"user_name": g["user_name"], **summarize(g["rows"])}
+            for g in sorted(groups.values(), key=lambda g: -sum(r.get("total", 0) for r in g["rows"]))
+        ]
+
+    return {"me": me, "by_user": by_user}
+
+
+# ---------------------------------------------------------------------------
+# Store settings (name + logo) — GET is public for the login screen
+# ---------------------------------------------------------------------------
+async def _settings_doc() -> dict:
+    doc = await db.settings.find_one({"_id": "singleton"})
+    return doc or {}
+
+
+@api.get("/settings")
+async def get_settings():
+    doc = await _settings_doc()
+    return {
+        "store_name": doc.get("store_name", "Surgical Store"),
+        "has_logo": bool(doc.get("logo_data") or doc.get("logo_path")),
+        "logo_version": doc.get("logo_version", 0),
+    }
+
+
+@api.put("/settings")
+async def update_settings(body: SettingsIn, _: AdminOnly):
+    await db.settings.update_one(
+        {"_id": "singleton"},
+        {"$set": {"store_name": body.store_name.strip()}},
+        upsert=True,
+    )
+    return await get_settings()
+
+
+@api.post("/settings/logo")
+async def upload_logo(_: AdminOnly, file: UploadFile = File(...)):
+    # Store the logo in MongoDB so the app does not depend on external object storage.
+    data = await file.read()
+    if len(data) > 3 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo must be under 3 MB")
+    ctype = file.content_type or "image/png"
+    if ctype not in {"image/png", "image/jpeg", "image/jpg", "image/webp"}:
+        raise HTTPException(status_code=400, detail="Unsupported logo format")
+    doc = await _settings_doc()
+    version = doc.get("logo_version", 0) + 1
+    await db.settings.update_one(
+        {"_id": "singleton"},
+        {"$set": {"logo_data": Binary(data), "logo_content_type": ctype,
+                  "logo_version": version, "logo_path": "__mongodb__"}},
+        upsert=True,
+    )
+    return {"ok": True, "logo_version": version}
+
+@api.get("/settings/logo")
+async def get_logo():
+    doc = await _settings_doc()
+    data = doc.get("logo_data")
+    if data is None:
+        raise HTTPException(status_code=404, detail="No logo set")
+    return Response(content=bytes(data), media_type=doc.get("logo_content_type", "image/png"),
+                    headers={"Cache-Control": "no-cache"})
+
+@api.get("/")
+async def root():
+    return {"app": "Surgical Store Manager", "status": "ok"}
+
+
+app.include_router(api)
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

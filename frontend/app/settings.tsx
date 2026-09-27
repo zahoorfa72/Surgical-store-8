@@ -1,0 +1,262 @@
+import { useEffect, useState } from "react";
+import { Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
+import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+
+import { useAuth, isAdmin } from "@/src/auth";
+import { useSettings, qk } from "@/src/data";
+import {
+  getApiBaseOverride,
+  logoUrl,
+  setApiBaseOverride,
+  updateSettingsRequest,
+  uploadLogo,
+} from "@/src/api";
+import { storage } from "@/src/utils/storage";
+import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
+import { makeStyles, useTheme } from "@/src/theme";
+
+export default function Settings() {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { user, logout } = useAuth();
+  const admin = isAdmin(user?.role);
+  const { data: settings } = useSettings();
+
+  const [confirm, setConfirm] = useState(false);
+  const [storeName, setStoreName] = useState("");
+  const [serverUrl, setServerUrl] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (settings?.store_name) setStoreName(settings.store_name);
+  }, [settings?.store_name]);
+  useEffect(() => {
+    setServerUrl(getApiBaseOverride() ?? "");
+  }, []);
+
+  const doLogout = async () => {
+    setConfirm(false);
+    await logout();
+    router.replace("/login");
+  };
+
+  const saveName = async () => {
+    if (!storeName.trim()) return toast("Enter a store name", "error");
+    setSavingName(true);
+    try {
+      await updateSettingsRequest(storeName.trim());
+      await queryClient.invalidateQueries({ queryKey: qk.settings });
+      toast("Store name updated", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not save", "error");
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const pickLogo = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      if (!perm.canAskAgain) {
+        toast("Enable photo access in Settings to upload a logo", "error");
+        Linking.openSettings();
+      } else {
+        toast("Photo access is needed to upload a logo", "error");
+      }
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (res.canceled || !res.assets?.length) return;
+    const asset = res.assets[0];
+    setUploading(true);
+    try {
+      const name = asset.fileName || `logo.${(asset.uri.split(".").pop() || "png").split("?")[0]}`;
+      const type = asset.mimeType || "image/png";
+      await uploadLogo(asset.uri, name, type);
+      await queryClient.invalidateQueries({ queryKey: qk.settings });
+      toast("Logo updated", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not upload logo", "error");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const saveServerUrl = async () => {
+    const clean = serverUrl.trim().replace(/\/+$/, "");
+    if (clean && !/^https?:\/\//i.test(clean)) {
+      return toast("URL must start with http:// or https://", "error");
+    }
+    await storage.setItem("ssm.serverurl", clean);
+    setApiBaseOverride(clean || null);
+    await queryClient.invalidateQueries();
+    toast(clean ? "Server URL saved" : "Using default server", "success");
+  };
+
+  return (
+    <View style={styles.root}>
+      <ScreenHeader title="Settings" topInset={insets.top} onBack={() => router.back()} />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 16 }}>
+        <View style={styles.profileCard}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{(user?.name?.[0] ?? "?").toUpperCase()}</Text>
+          </View>
+          <Text style={styles.name}>{user?.name}</Text>
+          <Text style={styles.email}>{user?.email}</Text>
+          <Badge text={user?.role ?? ""} tone="brand" />
+        </View>
+
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Store branding</Text>
+            <View style={styles.logoRow}>
+              <View style={styles.logoBox}>
+                {settings?.has_logo ? (
+                  <Image
+                    testID="settings-logo-preview"
+                    source={{ uri: settings.pending_logo_uri || logoUrl(settings.logo_version) }}
+                    style={styles.logoImg}
+                    contentFit="contain"
+                  />
+                ) : (
+                  <MaterialDesignIcons name="storefront-outline" size={30} color={colors.muted} />
+                )}
+              </View>
+              <Pressable testID="upload-logo-button" style={styles.uploadBtn} onPress={pickLogo} disabled={uploading}>
+                <MaterialDesignIcons name="image-plus" size={18} color={colors.brandPrimary} />
+                <Text style={styles.uploadText}>{uploading ? "Uploading…" : settings?.has_logo ? "Change logo" : "Upload logo"}</Text>
+              </Pressable>
+            </View>
+            <View style={{ height: 12 }} />
+            <Field label="Store name" testID="store-name-input" value={storeName} onChangeText={setStoreName} placeholder="Surgical Store" />
+            <View style={{ height: 12 }} />
+            <PrimaryButton label="Save store name" onPress={saveName} busy={savingName} testID="save-store-name" />
+          </View>
+        )}
+
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Server URL</Text>
+            <Text style={styles.cardHint}>
+              Leave blank to use the built-in server. Enter a URL to point the app at your own server.
+            </Text>
+            <View style={{ height: 10 }} />
+            <Field
+              label="Backend URL"
+              testID="server-url-input"
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              placeholder="https://your-server.com"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <View style={{ height: 12 }} />
+            <PrimaryButton label="Save server URL" onPress={saveServerUrl} testID="save-server-url" />
+          </View>
+        )}
+
+        <View style={styles.infoCard}>
+          <InfoRow icon="store" label="Store" value={settings?.store_name ?? "Surgical Store"} />
+          <InfoRow icon="cash" label="Currency" value="Rs (PKR)" />
+          <InfoRow icon="shield-check" label="Access level" value={user?.role ?? ""} />
+        </View>
+
+        <PrimaryButton label="Sign out" icon="logout" tone="danger" onPress={() => setConfirm(true)} testID="logout-button" />
+      </ScrollView>
+
+      <ConfirmModal
+        visible={confirm}
+        title="Sign out?"
+        message="You will need to log in again to continue."
+        confirmLabel="Sign out"
+        onConfirm={doLogout}
+        onCancel={() => setConfirm(false)}
+      />
+    </View>
+  );
+}
+
+function InfoRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  return (
+    <View style={styles.infoRow}>
+      <MaterialDesignIcons name={icon as any} size={20} color={colors.brandPrimary} />
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  );
+}
+
+const useStyles = makeStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.surface },
+  profileCard: {
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: colors.brandSecondary,
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  avatarText: { color: colors.onBrandPrimary, fontSize: 28, fontWeight: "800" },
+  name: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
+  email: { fontSize: 14, color: colors.onSurfaceSecondary, marginBottom: 6 },
+  card: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 },
+  cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 6 },
+  cardHint: { fontSize: 13, color: colors.muted, lineHeight: 18 },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 8 },
+  logoBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  logoImg: { width: "100%", height: "100%" },
+  uploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.brandSecondary,
+    paddingHorizontal: 16,
+    height: 44,
+  },
+  uploadText: { fontSize: 14, fontWeight: "700", color: colors.brandPrimary },
+  infoCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.divider },
+  infoLabel: { flex: 1, fontSize: 15, color: colors.onSurface },
+  infoValue: { fontSize: 14, color: colors.muted, fontWeight: "600", textTransform: "capitalize" },
+}));
