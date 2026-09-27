@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -16,7 +16,7 @@ import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import { useAuthRequest, ResponseType } from "expo-auth-session";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, clearGoogleDriveClientId } from "@/src/google-drive";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, clearGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const BACKUP_VERSION = 2;
@@ -90,7 +90,7 @@ export default function BackupRestore() {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);\n  const [manualClientId, setManualClientId] = useState("");\n  const [showClientIdForm, setShowClientIdForm] = useState(false);
-  const clientId = googleDriveClientId();
+  const [clientId, setClientId] = useState<string | null>(googleDriveClientId());
   const redirectUri = googleDriveRedirectUri();
   const [request, response, promptAsync] = useAuthRequest({
     clientId: clientId ?? "missing-client-id",
@@ -101,7 +101,13 @@ export default function BackupRestore() {
     extraParams: { access_type: "offline", prompt: "consent" },
   }, { authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth", tokenEndpoint: "https://oauth2.googleapis.com/token" });
 
-  useEffect(() => { hasGoogleDriveConnection().then(setDriveConnected).catch(() => setDriveConnected(false)); }, []);
+  useEffect(() => {
+    Promise.all([hasGoogleDriveConnection(), getStoredGoogleDriveClientId()]).then(([connected, storedId]) => {
+      setDriveConnected(connected);
+      if (!clientId && storedId) setClientId(storedId);
+      if (storedId) setManualClientId(storedId);
+    }).catch(() => setDriveConnected(false));
+  }, []);
 
   useEffect(() => {
     if (response?.type !== "success") return;
@@ -310,10 +316,27 @@ export default function BackupRestore() {
           </View>
         </View>
         {!driveConnected ? (
-          <Pressable style={[styles.action, styles.restore, (!request || !clientId || busy) && styles.disabled]} onPress={() => promptAsync()} disabled={!request || !clientId || busy}>
-            <MaterialDesignIcons name="google-drive" size={24} color={colors.brandPrimary} />
-            <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Connect Google Drive</Text><Text style={styles.actionSub}>{clientId ? "Sign in with your Google account" : "Add the Google OAuth client ID first"}</Text></View>
-          </Pressable>
+          <>
+            <View style={styles.clientIdBox}>
+              <Text style={styles.clientIdLabel}>Google OAuth Client ID</Text>
+              <TextInput value={manualClientId} onChangeText={setManualClientId} placeholder="Paste your Google OAuth Client ID" placeholderTextColor={colors.muted} autoCapitalize="none" autoCorrect={false} style={styles.clientIdInput} />
+              <Pressable style={[styles.action, styles.restore, (!manualClientId.trim() || busy) && styles.disabled]} disabled={!manualClientId.trim() || busy} onPress={async () => {
+                try {
+                  const id = manualClientId.trim();
+                  await setGoogleDriveClientId(id);
+                  setClientId(id);
+                  toast("Google OAuth Client ID saved on this phone. Tap Connect Google Drive.", "success");
+                } catch (e: any) { toast(e?.message || "Could not save Client ID", "error"); }
+              }}>
+                <MaterialDesignIcons name="content-save-outline" size={24} color={colors.brandPrimary} />
+                <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Save Client ID</Text><Text style={styles.actionSub}>Stored locally on this phone</Text></View>
+              </Pressable>
+            </View>
+            <Pressable style={[styles.action, styles.restore, (!request || !clientId || busy) && styles.disabled]} onPress={() => promptAsync()} disabled={!request || !clientId || busy}>
+              <MaterialDesignIcons name="google-drive" size={24} color={colors.brandPrimary} />
+              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Connect Google Drive</Text><Text style={styles.actionSub}>{clientId ? "Sign in with your Google account" : "Save the Client ID first"}</Text></View>
+            </Pressable>
+          </>
         ) : (
           <>
             <Pressable style={[styles.action, styles.restore, busy && styles.disabled]} onPress={uploadCurrentBackupToDrive} disabled={busy}>
@@ -359,5 +382,8 @@ const useStyles = makeStyles((colors) => ({
   driveStatus: { fontSize: 12, color: colors.muted, marginTop: 3 },
   linkButton: { alignItems: "center", paddingVertical: 10 },
   linkText: { color: colors.error, fontSize: 13, fontWeight: "700" },
+  clientIdBox: { gap: 10, padding: 14, borderRadius: 16, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
+  clientIdLabel: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  clientIdInput: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, color: colors.onSurface, backgroundColor: colors.surface },
   note: { fontSize: 12, lineHeight: 18, color: colors.muted, paddingHorizontal: 4 },
 }));
