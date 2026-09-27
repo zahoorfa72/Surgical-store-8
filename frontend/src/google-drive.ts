@@ -169,6 +169,3 @@ export async function uploadBackupToGoogleDrive(json: string, filename: string):
   return result.id as string;
 }
 
-export async function getGoogleDriveDiscovery() {
-  return discovery;
-}
