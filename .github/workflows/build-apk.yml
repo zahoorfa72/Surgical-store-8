@@ -51,45 +51,13 @@ jobs:
       - name: Validate Google OAuth configuration
         env:
           GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
-          GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
-          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
         run: |
-          validate_client_id() {
-            local name="$1"
-            local value="$2"
-            if [ -z "$value" ]; then
-              echo "$name: MISSING (Drive will require a valid Client ID in the app for this platform)"
-              return 0
-            fi
-            if printf '%s' "$value" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false"
-        run: |
-          chmod +x android/gradlew
-          cd android
-          ./gradlew clean --no-daemon --max-workers=2
-          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: surgical-store-apk
-          path: frontend/android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-; then
-              echo "$name: OK"
-              return 0
-            fi
-            echo "$name: INVALID_FORMAT"
-            return 1
-          }
-          failed=0
-          validate_client_id "GOOGLE_ANDROID_CLIENT_ID" "$GOOGLE_ANDROID_CLIENT_ID" || failed=1
-          validate_client_id "GOOGLE_IOS_CLIENT_ID" "$GOOGLE_IOS_CLIENT_ID" || failed=1
-          validate_client_id "GOOGLE_WEB_CLIENT_ID" "$GOOGLE_WEB_CLIENT_ID" || failed=1
-          if [ "$failed" -ne 0 ]; then
-            echo "One or more supplied Google OAuth Client IDs have an invalid format."
+          if [ -z "$GOOGLE_ANDROID_CLIENT_ID" ]; then
+            echo "GOOGLE_ANDROID_CLIENT_ID: MISSING"
+          elif printf '%s' "$GOOGLE_ANDROID_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$'; then
+            echo "GOOGLE_ANDROID_CLIENT_ID: FORMAT_OK"
+          else
+            echo "GOOGLE_ANDROID_CLIENT_ID: INVALID_FORMAT"
             exit 1
           fi
 
