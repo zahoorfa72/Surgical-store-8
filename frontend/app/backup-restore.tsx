@@ -185,13 +185,26 @@ export default function BackupRestore() {
   };
 
   const applyBackupPayload = async (payload: BackupPayload) => {
-    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
-    if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
     const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX));
-    if (entries.length) await AsyncStorage.multiSet(entries);
-    queryClient.clear();
-    const cacheRaw = payload.storage["ssm.qcache.v1"];
-    if (cacheRaw) { try { hydrate(queryClient, JSON.parse(cacheRaw)); } catch {} }
+    if (!entries.length) throw new Error("The backup contains no Surgical Store data.");
+    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+    const currentPairs = await AsyncStorage.multiGet(currentKeys);
+    try {
+      if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
+      await AsyncStorage.multiSet(entries);
+      queryClient.clear();
+      const cacheRaw = payload.storage["ssm.qcache.v1"];
+      if (cacheRaw) {
+        try { hydrate(queryClient, JSON.parse(cacheRaw)); } catch {}
+      }
+    } catch (error) {
+      try {
+        const partialKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+        if (partialKeys.length) await AsyncStorage.multiRemove(partialKeys);
+        if (currentPairs.length) await AsyncStorage.multiSet(currentPairs);
+      } catch {}
+      throw error;
+    }
   };
 
   const restoreGoogleDriveBackup = async () => {
@@ -205,13 +218,15 @@ export default function BackupRestore() {
         throw new Error("The Google Drive file is not a valid Surgical Store backup.");
       }
       const safety = await makeBackup();
+      const safetyDir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
       if (Platform.OS === "android") {
-        const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+        const dir = safetyDir;
         if (dir) {
           const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
           await FileSystem.writeAsStringAsync(uri, safety, { encoding: FileSystem.EncodingType.UTF8 });
         }
       }
+      if (!safetyDir && Platform.OS === "android") throw new Error("Select a backup folder first so a safety copy can be created before restore.");
       await applyBackupPayload(payload);
       toast("Latest Google Drive backup restored.", "success");
       router.replace("/(tabs)");
