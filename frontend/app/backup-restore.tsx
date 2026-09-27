@@ -104,13 +104,6 @@ export default function BackupRestore() {
     })();
   }, [response]);
 
-  useEffect(() => {
-    // Android background execution cannot be guaranteed by a normal JS timer.
-    // We therefore run the automatic backup when the app is opened/resumed
-    // after 06:00, and reuse the last selected backup folder when available.
-    saveAutoBackupIfDue().catch(() => {});
-  }, []);
-
   const uploadCurrentBackupToDrive = async () => {
     setBusy(true);
     try {
