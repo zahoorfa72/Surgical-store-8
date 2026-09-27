@@ -21,7 +21,9 @@
         "backgroundColor": "#000000"
       },
       "package": "com.emergent.offlinesync.vbbelt",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "bundler": "metro",
