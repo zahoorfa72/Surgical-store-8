@@ -22,6 +22,10 @@ export type GoogleDriveToken = {
   tokenType?: string;
 };
 
+export function isValidGoogleDriveClientId(clientId: string | null | undefined): boolean {
+  return !!clientId && /^\d+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/.test(clientId.trim());
+}
+
 export function googleDriveClientId(): string | null {
   const id =
     Platform.OS === "android"
