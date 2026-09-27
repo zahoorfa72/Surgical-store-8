@@ -15,7 +15,7 @@ import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId, isValidGoogleDriveClientId } from "@/src/google-drive";
 
 
 WebBrowser.maybeCompleteAuthSession();
@@ -94,7 +94,8 @@ export default function BackupRestore() {
     setBusy(true);
     try {
       const id = (clientId ?? manualClientId.trim() ?? "").trim();
-      if (!id) throw new Error("Enter your Google OAuth Client ID first.");
+      if (!id) throw new Error("Google Drive OAuth Client ID is not configured.");
+      if (!isValidGoogleDriveClientId(id)) throw new Error("Invalid Google OAuth Client ID. It must look like 123456789012-xxxxxxxx.apps.googleusercontent.com.");
       await setGoogleDriveClientId(id);
       setClientId(id);
 
@@ -393,6 +394,7 @@ export default function BackupRestore() {
                   try {
                     const id = manualClientId.trim();
                     if (!id) return;
+                    if (!isValidGoogleDriveClientId(id)) throw new Error("Invalid Google OAuth Client ID. Use the value ending in .apps.googleusercontent.com.");
                     await setGoogleDriveClientId(id);
                     setClientId(id);
                     toast("Client ID saved on this phone.", "success");
