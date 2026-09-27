@@ -89,7 +89,9 @@ export default function BackupRestore() {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [driveConnected, setDriveConnected] = useState(false);\n  const [manualClientId, setManualClientId] = useState("");\n  const [showClientIdForm, setShowClientIdForm] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [manualClientId, setManualClientId] = useState("");
+  const [showClientIdForm, setShowClientIdForm] = useState(false);
   const [clientId, setClientId] = useState<string | null>(googleDriveClientId());
   const redirectUri = googleDriveRedirectUri();
   const [request, response, promptAsync] = useAuthRequest({
