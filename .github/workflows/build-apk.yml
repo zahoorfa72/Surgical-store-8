@@ -58,8 +58,8 @@ jobs:
             local name="$1"
             local value="$2"
             if [ -z "$value" ]; then
-              echo "$name: MISSING"
-              return 1
+              echo "$name: MISSING (Drive will require a valid Client ID in the app for this platform)"
+              return 0
             fi
             if printf '%s' "$value" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
@@ -89,7 +89,7 @@ jobs:
           validate_client_id "GOOGLE_IOS_CLIENT_ID" "$GOOGLE_IOS_CLIENT_ID" || failed=1
           validate_client_id "GOOGLE_WEB_CLIENT_ID" "$GOOGLE_WEB_CLIENT_ID" || failed=1
           if [ "$failed" -ne 0 ]; then
-            echo "One or more Google OAuth Client IDs are missing or malformed. Refusing to build an APK that would produce Google invalid_client errors."
+            echo "One or more supplied Google OAuth Client IDs have an invalid format."
             exit 1
           fi
 
