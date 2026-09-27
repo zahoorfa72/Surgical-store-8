@@ -13,9 +13,7 @@ import { queryClient } from "@/src/query-client";
 import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import * as AuthSession from "expo-auth-session";
-import { useAuthRequest, ResponseType } from "expo-auth-session";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, setGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
+import { hasGoogleDriveConnection, clearGoogleDriveConnection, googleDriveClientId, uploadBackupToGoogleDrive, setGoogleDriveClientId, getStoredGoogleDriveClientId } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
 const BACKUP_VERSION = 2;
@@ -67,37 +65,23 @@ export default function BackupRestore() {
   const [driveConnected, setDriveConnected] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
   const [clientId, setClientId] = useState<string | null>(googleDriveClientId());
-  const redirectUri = googleDriveRedirectUri();
-  const [request, response, promptAsync] = useAuthRequest({
-    clientId: clientId ?? "missing-client-id",
-    responseType: ResponseType.Code,
-    scopes: [GOOGLE_DRIVE_SCOPE],
-    redirectUri,
-    usePKCE: true,
-    extraParams: { access_type: "offline", prompt: "consent" },
-  }, { authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth", tokenEndpoint: "https://oauth2.googleapis.com/token" });
 
   useEffect(() => {
-    Promise.all([hasGoogleDriveConnection(), getStoredGoogleDriveClientId()]).then(([connected, storedId]) => {
-      setDriveConnected(connected);
-      if (!clientId && storedId) setClientId(storedId);
-      if (storedId) setManualClientId(storedId);
-    }).catch(() => setDriveConnected(false));
-  }, []);
-
-  useEffect(() => {
-    if (response?.type !== "success") return;
+    let active = true;
     (async () => {
       try {
-        const code = response.params?.code;
-        if (!code || !clientId || !request?.codeVerifier) throw new Error("Google Drive authorization was incomplete.");
-        const token = await AuthSession.exchangeCodeAsync({ clientId, code, redirectUri, extraParams: { code_verifier: request.codeVerifier } }, { tokenEndpoint: "https://oauth2.googleapis.com/token" });
-        await saveGoogleDriveToken({ accessToken: token.accessToken, refreshToken: token.refreshToken ?? undefined, expiresIn: token.expiresIn, issuedAt: token.issuedAt, tokenType: token.tokenType });
-        setDriveConnected(true);
-        toast("Google Drive connected.", "success");
-      } catch (e: any) { toast(e?.message || "Google Drive connection failed", "error"); }
+        const [connected, storedId] = await Promise.all([hasGoogleDriveConnection(), getStoredGoogleDriveClientId()]);
+        if (!active) return;
+        setDriveConnected(connected);
+        if (storedId) {
+          setManualClientId(storedId);
+          if (!clientId) setClientId(storedId);
+        }
+      } catch {}
     })();
-  }, [response]);
+    return () => { active = false; };
+  }, []);
+
 
 
   const uploadCurrentBackupToDrive = async () => {
@@ -274,23 +258,20 @@ export default function BackupRestore() {
               <Text style={styles.clientIdLabel}>Google OAuth Client ID</Text>
               <TextInput value={manualClientId} onChangeText={setManualClientId} placeholder="Paste your Google OAuth Client ID" placeholderTextColor={colors.muted} autoCapitalize="none" autoCorrect={false} style={styles.clientIdInput} />
               <Pressable style={[styles.action, styles.restore, (!manualClientId.trim() || busy) && styles.disabled]} disabled={!manualClientId.trim() || busy} onPress={async () => {
-                try { const id = manualClientId.trim(); await setGoogleDriveClientId(id); setClientId(id); toast("Google OAuth Client ID saved on this phone.", "success"); }
+                try { const id = manualClientId.trim(); await setGoogleDriveClientId(id); setClientId(id); toast("Client ID saved on this phone.", "success"); }
                 catch (e: any) { toast(e?.message || "Could not save Client ID", "error"); }
               }}>
                 <MaterialDesignIcons name="content-save-outline" size={24} color={colors.brandPrimary} />
-                <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Save Client ID</Text><Text style={styles.actionSub}>Stored locally on this phone</Text></View>
+                <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Save Client ID</Text><Text style={styles.actionSub}>Stored securely on this phone</Text></View>
               </Pressable>
+              <Text style={styles.actionSub}>Google Drive connection is available when the app build has valid Google OAuth configuration.</Text>
             </View>
-            <Pressable style={[styles.action, styles.restore, (!request || !clientId || busy) && styles.disabled]} onPress={() => promptAsync()} disabled={!request || !clientId || busy}>
-              <MaterialDesignIcons name="google-drive" size={24} color={colors.brandPrimary} />
-              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Connect Google Drive</Text><Text style={styles.actionSub}>{clientId ? "Sign in with your Google account" : "Save the Client ID first"}</Text></View>
-            </Pressable>
           </>
         ) : (
           <>
             <Pressable style={[styles.action, styles.restore, busy && styles.disabled]} onPress={uploadCurrentBackupToDrive} disabled={busy}>
               <MaterialDesignIcons name="cloud-upload-outline" size={24} color={colors.brandPrimary} />
-              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Backup now to Google Drive</Text><Text style={styles.actionSub}>Creates a separate timestamped cloud backup</Text></View>
+              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Backup now to Google Drive</Text><Text style={styles.actionSub}>Creates a timestamped cloud backup</Text></View>
             </Pressable>
             <Pressable style={[styles.linkButton, busy && styles.disabled]} onPress={async () => { await clearGoogleDriveConnection(); setDriveConnected(false); toast("Google Drive disconnected", "success"); }} disabled={busy}><Text style={styles.linkText}>Disconnect Google Drive</Text></Pressable>
           </>
