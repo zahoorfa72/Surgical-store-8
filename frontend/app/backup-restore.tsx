@@ -256,12 +256,13 @@ export default function BackupRestore() {
         { text: "Restore", style: "destructive", onPress: async () => {
           try {
             const safety = await makeBackup();
-            if (Platform.OS === "android") {
-              const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
-              if (dir) {
-                const uri2 = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
-                await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
-              }
+            const dir = await storage.getItem<string | null>("ssm.auto-backup-dir", null);
+            if (Platform.OS === "android" && !dir) {
+              throw new Error("First tap “Backup to phone” and select a folder. A safety backup is required before restore.");
+            }
+            if (Platform.OS === "android" && dir) {
+              const uri2 = await FileSystem.StorageAccessFramework.createFileAsync(dir, `SurgicalStore-Before-Restore-${Date.now()}.json`, "application/json");
+              await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
             }
             await applyBackupPayload(payload);
             toast("Backup restored. Local data is ready.", "success");
