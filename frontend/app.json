@@ -60,7 +60,8 @@
           "cameraPermission": "Scan product barcodes to add items quickly"
         }
       ],
-      "expo-background-task"
+      "expo-background-task",
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true
