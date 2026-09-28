@@ -63,6 +63,16 @@ export async function connectGoogleDriveNative(webClientId: string): Promise<voi
     throw new Error("Google Drive sign-in was cancelled.");
   }
 
+  // Android separates account authentication from authorization for
+  // additional Google API scopes. Explicitly request Drive access before
+  // taking the access token used by the Drive REST API.
+  try {
+    await GoogleSignin.addScopes({ scopes: [GOOGLE_DRIVE_SCOPE] });
+  } catch (error: any) {
+    const message = String(error?.message ?? "");
+    if (!/already|granted|authorized/i.test(message)) throw error;
+  }
+
   const token = await GoogleSignin.getTokens();
   await saveGoogleDriveToken({
     accessToken: token.accessToken,
@@ -103,11 +113,10 @@ export async function clearGoogleDriveClientId(): Promise<void> {
 }
 
 export function googleDriveRedirectUri(): string {
-  // Google OAuth requires a valid native redirect URI for standalone builds.
-  // Use the app's reverse-DNS application ID and a path, rather than the
-  // previous "frontend://" scheme, which Google can reject as malformed.
+  // Android uses the native Google Sign-In SDK and never uses a browser
+  // redirect here. This helper remains only for the existing iOS/web flow.
   const nativeRedirect =
-    Platform.OS === "android" || Platform.OS === "ios"
+    Platform.OS === "ios"
       ? "com.emergent.offlinesync.vbbelt:/oauthredirect"
       : undefined;
   return AuthSession.makeRedirectUri(nativeRedirect ? { native: nativeRedirect } : {});
