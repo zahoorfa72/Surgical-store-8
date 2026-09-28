@@ -55,42 +55,7 @@ jobs:
         run: |
           if [ -z "$GOOGLE_ANDROID_CLIENT_ID" ]; then
             echo "GOOGLE_ANDROID_CLIENT_ID: MISSING"
-          elif printf '%s' "$GOOGLE_ANDROID_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com
-
-      - name: Build release APK
-        env:
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false"
-        run: |
-          chmod +x android/gradlew
-          cd android
-          ./gradlew clean --no-daemon --max-workers=2
-          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
-
-      - name: Print APK SHA-1 fingerprint
-        run: |
-          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          if [ -z "$APKSIGNER" ]; then
-            echo "ERROR: apksigner was not found in the Android SDK build-tools."
-            exit 1
-          fi
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK not found at $APK_PATH"
-            exit 1
-          fi
-          echo "APK SHA-1 fingerprint:"
-          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH" | grep -E "Signer #|SHA-1 digest|SHA-256 digest"
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: surgical-store-apk
-          path: frontend/android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-; then
+          elif printf '%s' "$GOOGLE_ANDROID_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$'; then
             echo "GOOGLE_ANDROID_CLIENT_ID: FORMAT_OK"
           else
             echo "GOOGLE_ANDROID_CLIENT_ID: INVALID_FORMAT"
@@ -100,42 +65,7 @@ jobs:
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then
             echo "GOOGLE_WEB_CLIENT_ID: MISSING"
             exit 1
-          elif printf '%s' "$GOOGLE_WEB_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com
-
-      - name: Build release APK
-        env:
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false"
-        run: |
-          chmod +x android/gradlew
-          cd android
-          ./gradlew clean --no-daemon --max-workers=2
-          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
-
-      - name: Print APK SHA-1 fingerprint
-        run: |
-          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          if [ -z "$APKSIGNER" ]; then
-            echo "ERROR: apksigner was not found in the Android SDK build-tools."
-            exit 1
-          fi
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK not found at $APK_PATH"
-            exit 1
-          fi
-          echo "APK SHA-1 fingerprint:"
-          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH" | grep -E "Signer #|SHA-1 digest|SHA-256 digest"
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: surgical-store-apk
-          path: frontend/android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-; then
+          elif printf '%s' "$GOOGLE_WEB_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$'; then
             echo "GOOGLE_WEB_CLIENT_ID: FORMAT_OK"
           else
             echo "GOOGLE_WEB_CLIENT_ID: INVALID_FORMAT"
