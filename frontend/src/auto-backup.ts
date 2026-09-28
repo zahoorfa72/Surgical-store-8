@@ -1,8 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { storage } from "@/src/utils/storage";
 import * as FileSystem from "expo-file-system/legacy";
-import { dehydrate } from "@tanstack/react-query";
-import { queryClient } from "@/src/query-client";
 import { hasGoogleDriveConnection, uploadBackupToGoogleDrive } from "@/src/google-drive";
 
 const PREFIX = "ssm.";
@@ -13,8 +11,6 @@ const AUTO_DIR = FileSystem.documentDirectory ? FileSystem.documentDirectory + "
 async function writeAutoBackup() {
   if (!AUTO_DIR) return;
   await FileSystem.makeDirectoryAsync(AUTO_DIR, { intermediates: true });
-  const liveCache = dehydrate(queryClient, { shouldDehydrateQuery: (q) => q.state.status === "success" });
-  await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
   const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(PREFIX));
   const pairs = await AsyncStorage.multiGet(keys);
   const storage: Record<string,string> = {};
