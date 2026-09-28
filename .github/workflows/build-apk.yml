@@ -65,8 +65,15 @@ jobs:
 
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then
             echo "GOOGLE_WEB_CLIENT_ID: NOT_SET (optional for now)"
-          elif printf '%s' "$GOOGLE_WEB_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$'; then
-            echo "GOOGLE_WEB_CLIENT_ID: FORMAT_OK"
+          elif printf '%s' "$GOOGLE_WEB_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\\.apps\\.googleusercontent\\.com$'; then
+            ANDROID_PROJECT="${GOOGLE_ANDROID_CLIENT_ID%%-*}"
+            WEB_PROJECT="${GOOGLE_WEB_CLIENT_ID%%-*}"
+            if [ "$ANDROID_PROJECT" != "$WEB_PROJECT" ]; then
+              echo "GOOGLE_WEB_CLIENT_ID: PROJECT_MISMATCH (Android=$ANDROID_PROJECT, Web=$WEB_PROJECT)"
+              echo "Create the Web OAuth client in the same Google Cloud project as the Android OAuth client."
+              exit 1
+            fi
+            echo "GOOGLE_WEB_CLIENT_ID: FORMAT_OK_AND_SAME_PROJECT"
           else
             echo "GOOGLE_WEB_CLIENT_ID: INVALID_FORMAT"
             exit 1
