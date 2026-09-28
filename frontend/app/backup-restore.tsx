@@ -15,7 +15,7 @@ import { useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
-import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveRedirectUri, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId, isValidGoogleDriveClientId } from "@/src/google-drive";
+import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveWebClientId, googleDriveRedirectUri, connectGoogleDriveNative, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId, isValidGoogleDriveClientId } from "@/src/google-drive";
 
 
 WebBrowser.maybeCompleteAuthSession();
@@ -69,7 +69,7 @@ export default function BackupRestore() {
   const [busy, setBusy] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
-  const [clientId, setClientId] = useState<string | null>(googleDriveClientId());
+  const [clientId, setClientId] = useState<string | null>(Platform.OS === "android" ? googleDriveWebClientId() : googleDriveClientId());
 
   useEffect(() => {
     let active = true;
@@ -95,9 +95,16 @@ export default function BackupRestore() {
     try {
       const id = (clientId ?? manualClientId.trim() ?? "").trim();
       if (!id) throw new Error("Google Drive OAuth Client ID is not configured.");
-      if (!isValidGoogleDriveClientId(id)) throw new Error("Invalid Google OAuth Client ID. It must look like 123456789012-xxxxxxxx.apps.googleusercontent.com.");
+      if (!isValidGoogleDriveClientId(id)) throw new Error("Invalid Google Web Client ID. It must look like 123456789012-xxxxxxxx.apps.googleusercontent.com.");
       await setGoogleDriveClientId(id);
       setClientId(id);
+
+      if (Platform.OS === "android") {
+        await connectGoogleDriveNative(id);
+        setDriveConnected(true);
+        toast("Google Drive connected.", "success");
+        return;
+      }
 
       const redirectUri = googleDriveRedirectUri();
       const discovery = {
@@ -381,7 +388,7 @@ export default function BackupRestore() {
               <TextInput
                 value={manualClientId}
                 onChangeText={setManualClientId}
-                placeholder="Paste your Google OAuth Client ID"
+                placeholder="Paste your Google Web Client ID"
                 placeholderTextColor={colors.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
