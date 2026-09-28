@@ -81,6 +81,7 @@ async function getNativeGoogleSignIn() {
 export async function connectGoogleDriveNative(webClientId: string): Promise<void> {
   if (Platform.OS !== "android") throw new Error("Native Google Drive sign-in is only available on Android.");
   if (!isValidGoogleDriveClientId(webClientId)) throw new Error("Invalid Google Web Client ID.");
+  assertAndroidDriveOAuthClientsCompatible(webClientId);
 
   const { GoogleSignin } = await getNativeGoogleSignIn();
   GoogleSignin.configure({
@@ -268,7 +269,19 @@ async function getOrCreateBackupFolder(): Promise<string> {
       mimeType: "application/vnd.google-apps.folder",
     }),
   });
-  if (!create.ok) throw new Error(`Google Drive folder creation failed (${create.status}).`);
+  if (!create.ok) {
+    const detail = await create.text().catch(() => "");
+    let message = "";
+    try {
+      const parsed = JSON.parse(detail);
+      message = String(parsed?.error?.message ?? parsed?.error_description ?? "");
+    } catch {
+      message = detail;
+    }
+    throw new Error(
+      `Google Drive folder creation failed (${create.status})${message ? `: ${message.slice(0, 300)}` : ""}`,
+    );
+  }
   const folder = await create.json();
   if (!folder?.id) throw new Error("Google Drive did not return a backup folder ID.");
   await SecureStore.setItemAsync(FOLDER_KEY, folder.id);
