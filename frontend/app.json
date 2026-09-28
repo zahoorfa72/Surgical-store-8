@@ -59,7 +59,8 @@
         {
           "cameraPermission": "Scan product barcodes to add items quickly"
         }
-      ]
+      ],
+      "expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true
