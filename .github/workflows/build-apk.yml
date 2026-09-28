@@ -51,7 +51,7 @@ jobs:
       - name: Validate Google OAuth configuration
         env:
           GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '853810600390-91etcjfra1ht42f8ndcaie34qlabii32.apps.googleusercontent.com' }}
-          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID || '853810600390-0aemv99o2kr9796oni5pte4l0enqomu7.apps.googleusercontent.com' }}
         run: |
           if [ -z "$GOOGLE_ANDROID_CLIENT_ID" ]; then
             echo "GOOGLE_ANDROID_CLIENT_ID: MISSING"
@@ -83,7 +83,7 @@ jobs:
         env:
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '853810600390-91etcjfra1ht42f8ndcaie34qlabii32.apps.googleusercontent.com' }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID || '853810600390-0aemv99o2kr9796oni5pte4l0enqomu7.apps.googleusercontent.com' }}
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false"
         run: |
           chmod +x android/gradlew
