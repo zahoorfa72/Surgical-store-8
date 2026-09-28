@@ -12,6 +12,7 @@ import { AuthProvider } from "@/src/auth";
 import { OfflineProvider } from "@/src/offline";
 import { ToastProvider } from "@/src/ui";
 import { startDailyAutoBackup } from "@/src/auto-backup";
+import { registerDailyBackupTask } from "@/src/daily-backup-task";
 
 LogBox.ignoreAllLogs(true);
 
@@ -31,6 +32,7 @@ export default function RootLayout() {
 
   React.useEffect(() => {
     if (!cacheReady) return;
+    void registerDailyBackupTask();
     return startDailyAutoBackup();
   }, [cacheReady]);
 
