@@ -255,21 +255,9 @@ async function getOrCreateBackupFolder(): Promise<string> {
       const data = await check.json();
       if (data?.id && !data?.trashed) return cached;
     }
+    // With drive.file, only app-created files are guaranteed to be accessible.
+    // If the cached folder is stale/inaccessible, create a fresh app-owned folder.
     await SecureStore.deleteItemAsync(FOLDER_KEY);
-  }
-
-  const q = encodeURIComponent(
-    "name = 'Surgical Store Backups' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-  );
-  const list = await driveFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)&pageSize=10`,
-  );
-  if (!list.ok) throw new Error(`Google Drive folder lookup failed (${list.status}).`);
-  const data = await list.json();
-  const existing = data?.files?.[0]?.id;
-  if (existing) {
-    await SecureStore.setItemAsync(FOLDER_KEY, existing);
-    return existing;
   }
 
   const create = await driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
