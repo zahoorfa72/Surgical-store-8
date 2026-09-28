@@ -36,6 +36,42 @@ export function googleDriveClientId(): string | null {
   return id?.trim() || null;
 }
 
+export function googleDriveWebClientId(): string | null {
+  return process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || null;
+}
+
+async function getNativeGoogleSignIn() {
+  if (Platform.OS !== "android") {
+    throw new Error("Native Google Drive sign-in is only used on Android.");
+  }
+  return import("@react-native-google-signin/google-signin");
+}
+
+export async function connectGoogleDriveNative(webClientId: string): Promise<void> {
+  if (Platform.OS !== "android") throw new Error("Native Google Drive sign-in is only available on Android.");
+  if (!isValidGoogleDriveClientId(webClientId)) throw new Error("Invalid Google Web Client ID.");
+
+  const { GoogleSignin } = await getNativeGoogleSignIn();
+  GoogleSignin.configure({
+    webClientId,
+    scopes: [GOOGLE_DRIVE_SCOPE],
+  });
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  const response = await GoogleSignin.signIn();
+
+  if (response.type !== "success") {
+    throw new Error("Google Drive sign-in was cancelled.");
+  }
+
+  const token = await GoogleSignin.getTokens();
+  await saveGoogleDriveToken({
+    accessToken: token.accessToken,
+    issuedAt: Math.floor(Date.now() / 1000),
+    expiresIn: 3600,
+    tokenType: "Bearer",
+  });
+}
+
 async function getEffectiveGoogleDriveClientId(): Promise<string | null> {
   const envId = googleDriveClientId();
   if (envId) return envId;
@@ -112,6 +148,28 @@ async function getAccessToken(): Promise<string | null> {
   const freshUntil = issuedAt + Math.max(0, expiresIn - 300);
 
   if (token.accessToken && (!expiresIn || now < freshUntil)) return token.accessToken;
+
+  // Android uses Google's native SDK to refresh the access token. This avoids
+  // the browser OAuth custom-URI redirect that can be rejected by Google.
+  if (Platform.OS === "android") {
+    const webClientId = googleDriveWebClientId() ?? (await getStoredGoogleDriveClientId());
+    if (!webClientId) return token.accessToken ?? null;
+    try {
+      const { GoogleSignin } = await getNativeGoogleSignIn();
+      GoogleSignin.configure({ webClientId, scopes: [GOOGLE_DRIVE_SCOPE] });
+      const refreshed = await GoogleSignin.getTokens();
+      const next: GoogleDriveToken = {
+        accessToken: refreshed.accessToken,
+        issuedAt: Math.floor(Date.now() / 1000),
+        expiresIn: 3600,
+        tokenType: "Bearer",
+      };
+      await saveGoogleDriveToken(next);
+      return next.accessToken;
+    } catch {
+      return null;
+    }
+  }
 
   if (!token.refreshToken) return token.accessToken ?? null;
   const clientId = await getEffectiveGoogleDriveClientId();
