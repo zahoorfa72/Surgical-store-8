@@ -81,8 +81,6 @@ async function getNativeGoogleSignIn() {
 export async function connectGoogleDriveNative(webClientId: string): Promise<void> {
   if (Platform.OS !== "android") throw new Error("Native Google Drive sign-in is only available on Android.");
   if (!isValidGoogleDriveClientId(webClientId)) throw new Error("Invalid Google Web Client ID.");
-  assertAndroidDriveOAuthClientsCompatible(webClientId);
-
   const { GoogleSignin } = await getNativeGoogleSignIn();
   GoogleSignin.configure({
     webClientId,
@@ -196,7 +194,6 @@ async function getAccessToken(): Promise<string | null> {
     const webClientId = googleDriveWebClientId() ?? (await getStoredGoogleDriveClientId());
     if (!webClientId) return token.accessToken ?? null;
     try {
-      assertAndroidDriveOAuthClientsCompatible(webClientId);
       const { GoogleSignin } = await getNativeGoogleSignIn();
       GoogleSignin.configure({ webClientId, scopes: [GOOGLE_DRIVE_SCOPE] });
       const refreshed = await GoogleSignin.getTokens();
