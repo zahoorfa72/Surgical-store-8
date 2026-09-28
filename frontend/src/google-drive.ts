@@ -26,6 +26,37 @@ export function isValidGoogleDriveClientId(clientId: string | null | undefined):
   return !!clientId && /^\d+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/.test(clientId.trim());
 }
 
+export function googleOAuthProjectNumber(clientId: string | null | undefined): string | null {
+  const match = clientId?.trim().match(/^(\d+)-/);
+  return match?.[1] ?? null;
+}
+
+export function areGoogleOAuthClientsInSameProject(
+  androidClientId: string | null | undefined,
+  webClientId: string | null | undefined,
+): boolean {
+  const androidProject = googleOAuthProjectNumber(androidClientId);
+  const webProject = googleOAuthProjectNumber(webClientId);
+  return !!androidProject && !!webProject && androidProject === webProject;
+}
+
+export function assertAndroidDriveOAuthClientsCompatible(webClientId: string): void {
+  const androidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID?.trim() || null;
+  if (!isValidGoogleDriveClientId(androidClientId)) {
+    throw new Error("This Android build is missing its Google Android OAuth Client ID.");
+  }
+  if (!isValidGoogleDriveClientId(webClientId)) {
+    throw new Error("Invalid Google Web Client ID.");
+  }
+  if (!areGoogleOAuthClientsInSameProject(androidClientId, webClientId)) {
+    const androidProject = googleOAuthProjectNumber(androidClientId) ?? "unknown";
+    const webProject = googleOAuthProjectNumber(webClientId) ?? "unknown";
+    throw new Error(
+      `Google OAuth project mismatch. Android client belongs to project ${androidProject}, but the Web client belongs to project ${webProject}. Create/use the Web client in the same Google Cloud project as the Android client.`,
+    );
+  }
+}
+
 export function googleDriveClientId(): string | null {
   const id =
     Platform.OS === "android"
@@ -164,6 +195,7 @@ async function getAccessToken(): Promise<string | null> {
     const webClientId = googleDriveWebClientId() ?? (await getStoredGoogleDriveClientId());
     if (!webClientId) return token.accessToken ?? null;
     try {
+      assertAndroidDriveOAuthClientsCompatible(webClientId);
       const { GoogleSignin } = await getNativeGoogleSignIn();
       GoogleSignin.configure({ webClientId, scopes: [GOOGLE_DRIVE_SCOPE] });
       const refreshed = await GoogleSignin.getTokens();
