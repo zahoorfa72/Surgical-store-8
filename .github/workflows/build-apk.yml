@@ -44,6 +44,9 @@ jobs:
         run: yarn install --non-interactive
 
       - name: Generate clean Android project
+        env:
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '853810600390-91etcjfra1ht42f8ndcaie34qlabii32.apps.googleusercontent.com' }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID || '853810600390-0aemv99o2kr9796oni5pte4l0enqomu7.apps.googleusercontent.com' }}
         run: |
           rm -rf android
           npx expo prebuild --platform android --non-interactive --no-install
@@ -65,7 +68,7 @@ jobs:
 
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then
             echo "GOOGLE_WEB_CLIENT_ID: NOT_SET (optional for now)"
-          elif printf '%s' "$GOOGLE_WEB_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\\.apps\\.googleusercontent\\.com$'; then
+          elif printf '%s' "$GOOGLE_WEB_CLIENT_ID" | grep -Eq '^[0-9]+-[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$'; then
             ANDROID_PROJECT="${GOOGLE_ANDROID_CLIENT_ID%%-*}"
             WEB_PROJECT="${GOOGLE_WEB_CLIENT_ID%%-*}"
             if [ "$ANDROID_PROJECT" != "$WEB_PROJECT" ]; then
