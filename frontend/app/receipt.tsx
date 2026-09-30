@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { storage } from "@/src/utils/storage";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useSale } from "@/src/data";
@@ -14,7 +15,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
 
-function receiptHtml(sale: Sale): string {
+function receiptHtml(sale: Sale, widthMm: 72): string {
   const rows = sale.items
     .map(
       (i) => `<tr>
@@ -28,7 +29,8 @@ function receiptHtml(sale: Sale): string {
   return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     * { font-family: -apple-system, Roboto, Helvetica, sans-serif; color: #0F172A; }
-    body { padding: 24px; }
+    @page { size: ${widthMm}mm auto; margin: 0; }
+    body { width: ${Math.max(widthMm - 4, 48)}mm; padding: 3mm 2mm; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0; color: #0F766E; text-align:center; }
     .muted { color: #64748B; font-size: 12px; text-align:center; }
     .meta { margin: 16px 0; font-size: 13px; }
@@ -73,12 +75,25 @@ export default function Receipt() {
   const { user } = useAuth();
   const staff = canManageStore(user?.role);
   const [busy, setBusy] = useState(false);
+  const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
+
+  useEffect(() => {
+    void (async () => {
+      const saved = await storage.getItem<string>("ssm.receiptWidth", "72");
+      setReceiptWidth(saved === "56" ? 56 : 72);
+    })();
+  }, []);
+
+  const chooseReceiptWidth = async (width: 56 | 72) => {
+    setReceiptWidth(width);
+    await storage.setItem("ssm.receiptWidth", String(width));
+  };
 
   const print = async () => {
     if (!sale) return;
     setBusy(true);
     try {
-      await Print.printAsync({ html: receiptHtml(sale) });
+      await Print.printAsync({ html: receiptHtml(sale, receiptWidth) });
     } catch (e: any) {
       toast("Printing not available on this device", "error");
     } finally {
@@ -90,7 +105,7 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale) });
+      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptWidth) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
       else toast("Sharing not available", "error");
     } catch (e: any) {
@@ -108,6 +123,19 @@ export default function Receipt() {
   return (
     <View style={styles.root}>
       <ScreenHeader title={sale.invoice_no} subtitle="Sale receipt" topInset={insets.top} onBack={() => router.back()} />
+      <View style={styles.printerBar}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.printerTitle}>Thermal receipt size</Text>
+          <Text style={styles.printerSub}>Choose paper width for thermal printers</Text>
+        </View>
+        <View style={styles.widthPicker}>
+          {[72, 56].map((w) => (
+            <Pressable key={w} onPress={() => chooseReceiptWidth(w as 56 | 72)} style={[styles.widthBtn, receiptWidth === w && styles.widthBtnActive]}>
+              <Text style={[styles.widthText, receiptWidth === w && styles.widthTextActive]}>{w}mm</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120, gap: 12 }}>
         <View style={styles.paper}>
           <Text style={styles.storeName}>{STORE_NAME}</Text>
@@ -201,6 +229,14 @@ function TotalRow({ label, value }: { label: string; value: string }) {
 
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surfaceSecondary },
+  printerBar: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  printerTitle: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  printerSub: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  widthPicker: { flexDirection: "row", borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
+  widthBtn: { minWidth: 54, minHeight: 38, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
+  widthBtnActive: { backgroundColor: colors.brandPrimary },
+  widthText: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  widthTextActive: { color: colors.onBrandPrimary },
   paper: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 20 },
   storeName: { fontSize: 22, fontWeight: "800", color: colors.brandPrimary, textAlign: "center" },
   receiptLabel: { fontSize: 12, color: colors.muted, textAlign: "center", marginTop: 2, marginBottom: 12 },
