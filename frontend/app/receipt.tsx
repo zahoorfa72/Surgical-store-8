@@ -17,7 +17,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
 
-function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string): string {
+function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string, storeName = STORE_NAME): string {
   const rows = sale.items
     .map(
       (i) => `<tr>
@@ -49,7 +49,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
     .thanks { text-align:center; margin-top: 24px; font-size: 12px; color:#64748B; }
   </style></head><body>
     ${logo ? `<img class="logo" src="${logo}" />` : ""}
-    <h1>${STORE_NAME}</h1>
+    <h1>${storeName}</h1>
     <div class="muted">Sales Receipt</div>
     <div class="meta">
       <div><b>Invoice:</b> ${sale.invoice_no}</div>
@@ -99,7 +99,7 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined) });
+      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME) });
     } catch (e: any) {
       toast("Printing not available on this device", "error");
     } finally {
@@ -111,7 +111,7 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth) });
+      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
       else toast("Sharing not available", "error");
     } catch (e: any) {
