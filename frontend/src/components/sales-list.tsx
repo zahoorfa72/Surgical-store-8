@@ -42,6 +42,15 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
     return m;
   }, [returns]);
 
+  const refundProfitBySale = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of returns ?? []) {
+      if (!r.sale_id) continue;
+      m[r.sale_id] = (m[r.sale_id] ?? 0) + Number(r.refund_profit ?? 0);
+    }
+    return m;
+  }, [returns]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (sales ?? []).filter(
@@ -113,7 +122,9 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
           renderItem={({ item }) => {
             const canModify = admin || (cashier && item.cashier_id === user?.id);
             const refunded = refundBySale[item.id] ?? 0;
+            const refundedProfit = refundProfitBySale[item.id] ?? 0;
             const net = Math.max(0, Number(item.total ?? 0) - refunded);
+            const saleProfit = Number(item.profit ?? 0) - refundedProfit;
             return (
               <Pressable
                 testID={`receipt-row-${item.id}`}
@@ -144,6 +155,9 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                   </Text>
                   <Text style={styles.sub}>
                     {item.items.length} item(s) · by {item.cashier_name}
+                  </Text>
+                  <Text style={styles.finance}>
+                    Discount {money(item.discount ?? 0)} · Profit {money(saleProfit)}
                   </Text>
                 </View>
                 <View style={styles.rowRight}>
@@ -251,6 +265,7 @@ const useStyles = makeStyles((colors) => ({
   pendingText: { fontSize: 10, fontWeight: "700", color: colors.warning },
   meta: { fontSize: 13, color: colors.onSurfaceSecondary, marginTop: 2 },
   sub: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  finance: { fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 3, fontWeight: "600" },
   rowRight: { alignItems: "flex-end", gap: 6 },
   total: { fontSize: 16, fontWeight: "800", color: colors.brandPrimary },
   refundLine: { flexDirection: "row", alignItems: "center", gap: 6 },
