@@ -119,13 +119,23 @@ export default function Sell() {
       toast("Set a quantity to sell", "error");
       return;
     }
+    const invalid = lines.find((c) => !Number.isFinite(c.quantity) || c.quantity <= 0 || !Number.isFinite(c.unit_price) || c.unit_price < 0);
+    if (invalid) {
+      toast("Please enter a valid quantity and unit price", "error");
+      return;
+    }
+    const overStock = lines.find((c) => c.quantity > c.stock);
+    if (overStock) {
+      toast(`${overStock.name} has only ${overStock.stock} in stock`, "error");
+      return;
+    }
     setBusy(true);
     try {
       const { sale, queued } = await createSale(
         {
-          items: lines.map((c) => ({ product_id: c.id, quantity: c.quantity, unit_price: c.unit_price })),
+          items: lines.map((c) => ({ product_id: c.id, quantity: Math.floor(c.quantity), unit_price: Number(c.unit_price) })),
           customer_id: customerId,
-          discount: discountNum,
+          discount: Number(discountNum),
           credit,
         },
         user?.name || user?.email || "Staff",
