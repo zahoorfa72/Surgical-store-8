@@ -106,8 +106,22 @@ jobs:
             echo "ERROR: APK not found at $APK_PATH"
             exit 1
           fi
-          echo "APK SHA-1 fingerprint:"
-          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH" | grep -E "Signer #|SHA-1 digest|SHA-256 digest"
+          CERTS="$("$APKSIGNER" verify --verbose --print-certs "$APK_PATH")"
+          echo "APK signing certificate fingerprints:"
+          echo "$CERTS" | grep -E "Signer #|SHA-1 digest|SHA-256 digest"
+          SHA1="$(printf '%s\n' "$CERTS" | sed -n 's/.*SHA-1 digest: //p' | head -n 1 | tr -d '\r')"
+          if [ -z "$SHA1" ]; then
+            echo "ERROR: Could not extract APK SHA-1 fingerprint."
+            exit 1
+          fi
+          echo "APK SHA-1: $SHA1"
+          {
+            echo "## Android APK signing fingerprint"
+            echo
+            echo "**SHA-1:** `$SHA1`"
+            echo
+            echo "Use this SHA-1 for the Android OAuth client with package `com.emergent.offlinesync.vbbelt`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
