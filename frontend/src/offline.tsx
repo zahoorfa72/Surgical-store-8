@@ -411,13 +411,24 @@ function OfflineBanner({ online, pending }: { online: boolean; pending: number }
       pointerEvents="none"
       style={[
         styles.banner,
-        { bottom: insets.bottom + 72, left: 12, right: 12, alignSelf: "center", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 9, maxWidth: "92%" },
+        {
+          bottom: insets.bottom + 10,
+          right: 10,
+          left: undefined,
+          alignSelf: "flex-end",
+          paddingHorizontal: 7,
+          paddingVertical: 4,
+          borderRadius: 999,
+          maxWidth: 155,
+          minHeight: 28,
+          opacity: 0.92,
+        },
         offlineMode ? styles.bannerOffline : styles.bannerPending,
       ]}
     >
       <MaterialDesignIcons
         name={offlineMode ? "cloud-off-outline" : "cloud-sync-outline"}
-        size={16}
+        size={13}
         color={colors.onSurfaceInverse}
       />
       <Text style={styles.bannerText} testID="offline-banner-text">
