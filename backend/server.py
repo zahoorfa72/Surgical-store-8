@@ -985,11 +985,24 @@ async def create_sale(body: SaleIn, user: AnyUser):
     if not body.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
+    # Validate IDs before constructing ObjectIds so a bad/stale cart entry
+    # returns a clean 400 instead of crashing the sale request.
+    for it in body.items:
+        if not ObjectId.is_valid(it.product_id):
+            raise HTTPException(status_code=400, detail="Invalid product in cart")
+        if it.quantity <= 0:
+            raise HTTPException(status_code=400, detail="Quantity must be greater than zero")
+        if not float(it.unit_price) >= 0:
+            raise HTTPException(status_code=400, detail="Unit price cannot be negative")
+
     requested = _aggregate_item_quantities(body.items)
     for product_id, requested_qty in requested.items():
         p = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
-        if not p: raise HTTPException(status_code=400, detail="Product not found in cart")
-        if requested_qty > float(p.get("quantity", 0)): raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
+        if not p:
+            raise HTTPException(status_code=400, detail="Product not found in cart")
+        available = float(p.get("quantity", 0) or 0)
+        if requested_qty > available:
+            raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
     items = []
     subtotal = 0.0
     cogs = 0.0
