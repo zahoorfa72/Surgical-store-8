@@ -412,16 +412,16 @@ function OfflineBanner({ online, pending }: { online: boolean; pending: number }
       style={[
         styles.banner,
         {
-          bottom: insets.bottom + 10,
-          right: 10,
+          bottom: insets.bottom + 8,
+          right: 8,
           left: undefined,
           alignSelf: "flex-end",
-          paddingHorizontal: 7,
-          paddingVertical: 4,
+          paddingHorizontal: 6,
+          paddingVertical: 3,
           borderRadius: 999,
-          maxWidth: 155,
-          minHeight: 28,
-          opacity: 0.92,
+          maxWidth: 120,
+          minHeight: 22,
+          opacity: 0.88,
         },
         offlineMode ? styles.bannerOffline : styles.bannerPending,
       ]}
@@ -540,7 +540,7 @@ const useStyles = makeStyles((colors) => ({
   },
   bannerOffline: { backgroundColor: colors.surfaceInverse },
   bannerPending: { backgroundColor: colors.brandPrimary },
-  bannerText: { color: colors.onSurfaceInverse, fontSize: 10, fontWeight: "700", flexShrink: 1, textAlign: "center" },
+  bannerText: { color: colors.onSurfaceInverse, fontSize: 9, fontWeight: "700", flexShrink: 1, textAlign: "center" },
   summaryScrim: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.45)",
