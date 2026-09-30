@@ -281,7 +281,7 @@ export default function BackupRestore() {
                   await FileSystem.writeAsStringAsync(uri, safety, { encoding: FileSystem.EncodingType.UTF8 });
                 }
                 await applyBackupPayload(payload);
-                toast("Google Drive backup restored.", "success");
+                toast("Google Drive backup restored. Finance data is now available offline.", "success");
                 router.replace("/(tabs)");
               } catch (e: any) {
                 toast(e?.message || "Drive restore failed", "error");
@@ -328,7 +328,7 @@ export default function BackupRestore() {
               await FileSystem.writeAsStringAsync(uri2, safety, { encoding: FileSystem.EncodingType.UTF8 });
             }
             await applyBackupPayload(payload);
-            toast("Backup restored. Local data is ready.", "success");
+            toast("Backup restored. Finance data is now available offline.", "success");
             router.replace("/(tabs)");
           } catch (e: any) { toast(e?.message || "Restore failed", "error"); }
         }},
