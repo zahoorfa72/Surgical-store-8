@@ -101,8 +101,8 @@ export default function Payments() {
         }});
       }
       if (saved?.id) {
-        if (receiptPhoto) await AsyncStorage.setItem(`ssm.paymentReceipt.${saved.id}`, receiptPhoto);
-        else await AsyncStorage.removeItem(`ssm.paymentReceipt.${saved.id}`);
+        if (receiptPhoto) { await AsyncStorage.setItem(`ssm.paymentReceipt.${saved.id}`, receiptPhoto); setReceiptPhotos((prev) => ({ ...prev, [saved.id]: receiptPhoto })); }
+        else { await AsyncStorage.removeItem(`ssm.paymentReceipt.${saved.id}`); setReceiptPhotos((prev) => { const next = { ...prev }; delete next[saved.id]; return next; }); }
       }
       await queryClient.invalidateQueries({ queryKey: qk.parties(isSupplier ? "supplier" : "customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
@@ -143,6 +143,8 @@ export default function Payments() {
     setDeleting(null);
     try {
       await apiRequest(`/payments/${id}`, { method: "DELETE" });
+      await AsyncStorage.removeItem(`ssm.paymentReceipt.${id}`);
+      setReceiptPhotos((prev) => { const next = { ...prev }; delete next[id]; return next; });
       await queryClient.invalidateQueries({ queryKey: qk.parties(isSupplier ? "supplier" : "customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
       toast("Entry deleted", "success");
