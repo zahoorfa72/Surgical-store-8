@@ -36,12 +36,14 @@ export default function Settings() {
   const [serverUrl, setServerUrl] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [receiptFormat, setReceiptFormat] = useState<"thermal" | "a4">("thermal");
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
   }, [settings?.store_name]);
   useEffect(() => {
     setServerUrl(getApiBaseOverride() ?? "");
+    void storage.getItem<string>("ssm.receiptFormat", "thermal").then((value) => setReceiptFormat(value === "a4" ? "a4" : "thermal"));
   }, []);
 
   const doLogout = async () => {
@@ -171,6 +173,29 @@ export default function Settings() {
           </View>
         )}
 
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Bill / receipt format</Text>
+          <Text style={styles.cardHint}>Choose the default format used when printing or creating a receipt PDF.</Text>
+          <View style={styles.formatRow}>
+            <Pressable
+              testID="receipt-format-thermal"
+              onPress={async () => { setReceiptFormat("thermal"); await storage.setItem("ssm.receiptFormat", "thermal"); toast("Thermal receipt selected", "success"); }}
+              style={[styles.formatBtn, receiptFormat === "thermal" && styles.formatBtnActive]}
+            >
+              <MaterialDesignIcons name="printer" size={20} color={receiptFormat === "thermal" ? colors.onBrandPrimary : colors.brandPrimary} />
+              <Text style={[styles.formatText, receiptFormat === "thermal" && styles.formatTextActive]}>Thermal</Text>
+            </Pressable>
+            <Pressable
+              testID="receipt-format-a4"
+              onPress={async () => { setReceiptFormat("a4"); await storage.setItem("ssm.receiptFormat", "a4"); toast("A4 bill selected", "success"); }}
+              style={[styles.formatBtn, receiptFormat === "a4" && styles.formatBtnActive]}
+            >
+              <MaterialDesignIcons name="file-document-outline" size={20} color={receiptFormat === "a4" ? colors.onBrandPrimary : colors.brandPrimary} />
+              <Text style={[styles.formatText, receiptFormat === "a4" && styles.formatTextActive]}>A4 Bill</Text>
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.infoCard}>
           <InfoRow icon="store" label="Store" value={settings?.store_name ?? "Surgical Store"} />
           <InfoRow icon="cash" label="Currency" value="Rs (PKR)" />
@@ -256,6 +281,11 @@ const useStyles = makeStyles((colors) => ({
     height: 44,
   },
   uploadText: { fontSize: 14, fontWeight: "700", color: colors.brandPrimary },
+  formatRow: { flexDirection: "row", gap: 10, marginTop: 12 },
+  formatBtn: { flex: 1, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  formatBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  formatText: { fontSize: 14, fontWeight: "800", color: colors.brandPrimary },
+  formatTextActive: { color: colors.onBrandPrimary },
   infoCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
   infoRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.divider },
   infoLabel: { flex: 1, fontSize: 15, color: colors.onSurface },
