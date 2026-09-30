@@ -537,10 +537,7 @@ const useStyles = makeStyles((colors) => ({
   heldCard: { borderWidth:1, borderColor:colors.border, borderRadius:14, padding:13, backgroundColor:colors.surface, flexDirection:"row", gap:10 },
   heldTitle: { fontSize:14, fontWeight:"800", color:colors.onSurface }, heldMeta:{fontSize:12,color:colors.muted,marginTop:3}, heldProducts:{fontSize:12,color:colors.onSurfaceSecondary,marginTop:6}, heldActions:{alignItems:"center",justifyContent:"center",gap:12}, resumeBtn:{minHeight:38,paddingHorizontal:11,borderRadius:9,backgroundColor:colors.brandPrimary,flexDirection:"row",alignItems:"center",gap:4}, resumeText:{color:colors.onBrandPrimary,fontSize:12,fontWeight:"800"}, addProductOption:{flexDirection:"row",alignItems:"center",gap:10,padding:13,borderRadius:12,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
   cartBar: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 16,
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
