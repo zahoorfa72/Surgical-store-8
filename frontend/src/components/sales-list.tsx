@@ -23,6 +23,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
+  const cashier = user?.role === "cashier";
 
   const { data: sales, isLoading } = useSales();
   const { data: returns } = useReturns();
@@ -110,7 +111,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
             />
           }
           renderItem={({ item }) => {
-            const canModify = admin;
+            const canModify = admin || (cashier && item.cashier_id === user?.id);
             const refunded = refundBySale[item.id] ?? 0;
             const net = Math.max(0, Number(item.total ?? 0) - refunded);
             return (
@@ -155,14 +156,14 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                   )}
                   {canModify ? (
                     <View style={styles.actions}>
-                      <Pressable
+                      {(!cashier || item.cashier_id === user?.id) && <Pressable
                         testID={`return-sale-${item.id}`}
                         hitSlop={8}
                         style={styles.actionBtn}
                         onPress={() => router.push(`/return-form?sale_id=${item.id}`)}
                       >
                         <MaterialDesignIcons name="undo-variant" size={18} color={colors.error} />
-                      </Pressable>
+                      </Pressable>}
                       <Pressable
                         testID={`edit-sale-${item.id}`}
                         hitSlop={8}
@@ -171,14 +172,14 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                       >
                         <MaterialDesignIcons name="pencil" size={18} color={colors.brandPrimary} />
                       </Pressable>
-                      <Pressable
+                      {admin && <Pressable
                         testID={`delete-sale-${item.id}`}
                         hitSlop={8}
                         style={styles.actionBtn}
                         onPress={() => setToDelete(item)}
                       >
                         <MaterialDesignIcons name="trash-can-outline" size={18} color={colors.error} />
-                      </Pressable>
+                      </Pressable>}
                     </View>
                   ) : (
                     <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
