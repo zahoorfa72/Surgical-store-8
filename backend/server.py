@@ -1117,7 +1117,31 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
     if returned:
         raise HTTPException(status_code=400, detail="This sale has returns. Handle returns before editing.")
 
-    # Put back the old items' stock, then apply the new items.
+    # Validate the complete new cart before changing stock. Aggregate quantities
+    # so the same product can never be deducted twice past available stock.
+    requested: dict[str, float] = {}
+    for it in body.items:
+        if not ObjectId.is_valid(it.product_id):
+            raise HTTPException(status_code=400, detail="Invalid product in cart")
+        if it.quantity <= 0:
+            raise HTTPException(status_code=400, detail="Quantity must be greater than zero")
+        if not float(it.unit_price) >= 0:
+            raise HTTPException(status_code=400, detail="Unit price cannot be negative")
+        requested[it.product_id] = requested.get(it.product_id, 0) + float(it.quantity)
+
+    old_qty: dict[str, float] = {}
+    for it in sale.get("items", []):
+        old_qty[it["product_id"]] = old_qty.get(it["product_id"], 0) + float(it.get("quantity", 0))
+
+    for product_id, requested_qty in requested.items():
+        p = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+        if not p:
+            raise HTTPException(status_code=400, detail="Product not found in cart")
+        available_after_restore = float(p.get("quantity", 0) or 0) + old_qty.get(product_id, 0)
+        if requested_qty > available_after_restore:
+            raise HTTPException(status_code=400, detail=f"Only {available_after_restore:g} of {p['name']} available for this sale")
+
+    # Put back the old items' stock, then apply the validated new cart.
     for it in sale.get("items", []):
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
