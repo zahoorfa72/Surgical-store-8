@@ -34,6 +34,7 @@ export default function Purchase() {
 
   const [lines, setLines] = useState<Line[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,8 +60,21 @@ export default function Purchase() {
   const total = lines.reduce((s, l) => s + l.quantity * l.unit_cost, 0);
   const supplierName = suppliers?.find((s) => s.id === supplierId)?.name ?? "No supplier";
 
-  const addLine = (pid: string, name: string, cost: number) => {
-    setLines((prev) => [...prev, { id: pid, name, quantity: 1, unit_cost: cost }]);
+  const toggleProduct = (pid: string) => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid); else next.add(pid);
+      return next;
+    });
+  };
+  const addSelectedProducts = () => {
+    const selected = products?.filter((p) => selectedProductIds.has(p.id) && !lineIds.has(p.id)) ?? [];
+    if (!selected.length) {
+      toast("Select at least one new product", "error");
+      return;
+    }
+    setLines((prev) => [...prev, ...selected.map((p) => ({ id: p.id, name: p.name, quantity: 1, unit_cost: p.purchase_price }))]);
+    setSelectedProductIds(new Set());
     setPickerOpen(false);
   };
   const setQty = (id: string, q: number) =>
@@ -173,30 +187,38 @@ export default function Purchase() {
       {/* Product picker */}
       <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
         <View style={styles.root}>
-          <ScreenHeader title="Add product" topInset={insets.top} onBack={() => setPickerOpen(false)} />
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 8 }}>
+          <ScreenHeader title="Add products" subtitle="Select multiple items at once" topInset={insets.top} onBack={() => { setSelectedProductIds(new Set()); setPickerOpen(false); }} />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 90, gap: 8 }}>
             {(products ?? []).map((p) => {
               const added = lineIds.has(p.id);
+              const selected = selectedProductIds.has(p.id);
               return (
                 <Pressable
                   key={p.id}
                   testID={`pick-product-${p.id}`}
                   disabled={added}
-                  style={[styles.pickRow, added && { opacity: 0.4 }]}
-                  onPress={() => addLine(p.id, p.name, p.purchase_price)}
+                  style={[styles.pickRow, added && { opacity: 0.4 }, selected && styles.pickRowSelected]}
+                  onPress={() => toggleProduct(p.id)}
                 >
-                  <View>
+                  <View style={styles.checkCircle}>
+                    <MaterialDesignIcons name={added || selected ? "check" : "checkbox-blank-outline"} size={22} color={added ? colors.muted : colors.brandPrimary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.pickName}>{p.name}</Text>
                     <Text style={styles.pickMeta}>Cost {money(p.purchase_price)} · {p.quantity} in stock</Text>
                   </View>
-                  <MaterialDesignIcons name={added ? "check" : "plus-circle"} size={22} color={colors.brandPrimary} />
                 </Pressable>
               );
             })}
-            {(!products || products.length === 0) && (
-              <Text style={styles.hint}>No products yet. Add products in Stock first.</Text>
-            )}
+            {(!products || products.length === 0) && <Text style={styles.hint}>No products yet. Add products in Stock first.</Text>}
           </ScrollView>
+          <View style={[styles.pickerBottom, { paddingBottom: insets.bottom + 10 }]}>
+            <Text style={styles.selectionText}>{selectedProductIds.size} selected</Text>
+            <Pressable style={styles.addSelectedBtn} onPress={addSelectedProducts}>
+              <MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.saveText}>Add selected</Text>
+            </Pressable>
+          </View>
         </View>
       </Modal>
 
@@ -302,6 +324,11 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.border,
     padding: 16,
   },
+  pickRowSelected: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  checkCircle: { width: 28, alignItems: "center", justifyContent: "center" },
+  pickerBottom: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
+  selectionText: { flex: 1, fontSize: 14, color: colors.muted, fontWeight: "700" },
+  addSelectedBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 48, paddingHorizontal: 18, borderRadius: 12, backgroundColor: colors.brandPrimary },
   pickName: { fontSize: 15, fontWeight: "700", color: colors.onSurface },
   pickMeta: { fontSize: 13, color: colors.muted, marginTop: 2 },
   hint: { fontSize: 14, color: colors.muted, textAlign: "center", marginTop: 20 },
