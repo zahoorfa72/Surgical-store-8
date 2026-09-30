@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -13,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useParties, useProducts, qk } from "@/src/data";
 import { useAuth } from "@/src/auth";
@@ -23,6 +25,7 @@ import { EmptyState, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number };
+type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean };
 
 export default function Sell() {
   const styles = useStyles();
@@ -46,6 +49,11 @@ export default function Sell() {
   const [credit, setCredit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
+  const [heldOpen, setHeldOpen] = useState(false);
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [addProductOpen, setAddProductOpen] = useState(false);
+  const [addProductSearch, setAddProductSearch] = useState("");
 
   const onScanned = (value: string) => {
     setScanOpen(false);
@@ -68,6 +76,14 @@ export default function Sell() {
   const discountNum = Math.max(0, parseFloat(discount) || 0);
   const total = Math.max(0, subtotal - discountNum);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
+
+  const reviewedCart = useMemo(() => { const q = reviewSearch.trim().toLowerCase(); return cart.filter((c) => !q || c.name.toLowerCase().includes(q)); }, [cart, reviewSearch]);
+
+  useEffect(() => { AsyncStorage.getItem("ssm.heldSales").then((raw) => { if (!raw) return; try { setHeldSales(JSON.parse(raw)); } catch { setHeldSales([]); } }); }, []);
+  const persistHeldSales = async (next: HeldSale[]) => { setHeldSales(next); await AsyncStorage.setItem("ssm.heldSales", JSON.stringify(next)); };
+  const holdCurrentSale = async () => { const lines = cart.filter((c) => c.quantity > 0); if (!lines.length) { toast("Add products before holding the sale", "error"); return; } const held: HeldSale = { id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`, createdAt: new Date().toISOString(), cart: lines, customerId, discount, credit }; await persistHeldSales([held, ...heldSales]); setCart([]); setDiscount("0"); setCustomerId(null); setCredit(false); setReviewOpen(false); toast("Sale held. You can start a new sale.", "success"); };
+  const resumeHeldSale = (held: HeldSale) => { if (cart.length) { Alert.alert("Current sale", "Hold or complete the current sale before opening another held sale."); return; } const restored = held.cart.map((line) => { const p = (products ?? []).find((x) => x.id === line.id); return { ...line, stock: p?.quantity ?? line.stock, threshold: p?.low_stock_threshold ?? line.threshold }; }).filter((line) => line.stock > 0); if (!restored.length) { toast("Products in this held sale are no longer available", "error"); return; } setCart(restored); setCustomerId(held.customerId); setDiscount(held.discount); setCredit(held.credit); void persistHeldSales(heldSales.filter((x) => x.id !== held.id)); setHeldOpen(false); setReviewOpen(true); };
+  const deleteHeldSale = (held: HeldSale) => Alert.alert("Delete held sale?", "This removes only the held draft.", [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => void persistHeldSales(heldSales.filter((x) => x.id !== held.id)) }]);
 
   const customerName =
     customers?.find((c) => c.id === customerId)?.name ?? "Walk-in customer";
@@ -242,7 +258,7 @@ export default function Sell() {
         }}
       />
 
-      {cart.length > 0 && (
+      <View style={styles.bottomActions}><Pressable testID="held-sales-button" style={styles.heldBtn} onPress={() => setHeldOpen(true)}><MaterialDesignIcons name="pause-circle-outline" size={20} color={colors.brandPrimary} /><Text style={styles.heldBtnText}>Held ({heldSales.length})</Text></Pressable>{cart.length > 0 && (
         <Pressable
           testID="open-cart-button"
           style={[styles.cartBar, { paddingBottom: 14 }]}
@@ -253,8 +269,7 @@ export default function Sell() {
           </View>
           <Text style={styles.cartBarText}>Review & Checkout</Text>
           <Text style={styles.cartBarTotal}>{money(subtotal)}</Text>
-        </Pressable>
-      )}
+        </Pressable> )}</View>
 
       {/* Cart review modal */}
       <Modal visible={reviewOpen} animationType="slide" onRequestClose={() => setReviewOpen(false)}>
@@ -265,6 +280,7 @@ export default function Sell() {
             topInset={insets.top}
             onBack={() => setReviewOpen(false)}
           />
+          <View style={styles.reviewSearchRow}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search items in this sale" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View>
           <KeyboardAwareScrollView
             contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}
             bottomOffset={20}
@@ -279,7 +295,7 @@ export default function Sell() {
               <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
             </Pressable>
 
-            {cart.map((c) => (
+            {reviewedCart.map((c) => (
               <View key={c.id} style={styles.cartLine} testID={`cart-line-${c.id}`}>
                 <View style={styles.cartLineHead}>
                   <Text style={styles.cartLineName}>{c.name}</Text>
@@ -382,6 +398,9 @@ export default function Sell() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={heldOpen} animationType="slide" onRequestClose={() => setHeldOpen(false)}><View style={styles.root}><ScreenHeader title="Held sales" subtitle="Resume a sale whenever you need" topInset={insets.top} onBack={() => setHeldOpen(false)} /><ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 10 }}>{heldSales.length === 0 ? <EmptyState icon="pause-circle-outline" title="No held sales" message="Hold a sale to continue it later." /> : heldSales.map((h) => <View key={h.id} style={styles.heldCard}><View style={{ flex: 1 }}><Text style={styles.heldTitle}>{new Date(h.createdAt).toLocaleString()}</Text><Text style={styles.heldMeta}>{h.cart.length} product(s) · {h.cart.reduce((n,x)=>n+x.quantity,0)} unit(s)</Text><Text style={styles.heldProducts} numberOfLines={2}>{h.cart.map(x=>x.name).join(" · ")}</Text></View><View style={styles.heldActions}><Pressable onPress={() => resumeHeldSale(h)} style={styles.resumeBtn}><MaterialDesignIcons name="play" size={18} color={colors.onBrandPrimary} /><Text style={styles.resumeText}>Open</Text></Pressable><Pressable onPress={() => deleteHeldSale(h)} hitSlop={8}><MaterialDesignIcons name="delete-outline" size={22} color={colors.error} /></Pressable></View></View>)}</ScrollView></View></Modal>
+      <Modal visible={addProductOpen} animationType="slide" onRequestClose={() => setAddProductOpen(false)}><View style={styles.root}><ScreenHeader title="Add products" subtitle="Search and add to this sale" topInset={insets.top} onBack={() => setAddProductOpen(false)} /><View style={[styles.searchWrap,{margin:16}]}><MaterialDesignIcons name="magnify" size={20} color={colors.muted}/><TextInput testID="review-product-search-input" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={addProductSearch} onChangeText={setAddProductSearch} autoFocus /></View><FlatList data={(products??[]).filter(p=>{const q=addProductSearch.trim().toLowerCase();return !q||p.name.toLowerCase().includes(q)||String(p.category??"").toLowerCase().includes(q)||String(p.barcode??p.sku??"").toLowerCase().includes(q)})} keyExtractor={p=>p.id} contentContainerStyle={{padding:16,gap:8}} renderItem={({item})=><Pressable disabled={item.quantity<=0} style={[styles.addProductOption,item.quantity<=0&&{opacity:.45}]} onPress={()=>addToCart(item)}><View style={{flex:1}}><Text style={styles.prodName}>{item.name}</Text><Text style={styles.prodMeta}>{item.quantity} in stock · {money(item.sale_price)}</Text></View><MaterialDesignIcons name="plus-circle" size={22} color={colors.brandPrimary}/></Pressable>} /></View></Modal>
 
       {/* Customer picker */}
       <Modal visible={custPickerOpen} animationType="slide" onRequestClose={() => setCustPickerOpen(false)}>
@@ -506,6 +525,17 @@ const useStyles = makeStyles((colors) => ({
     justifyContent: "center",
   },
   stepQty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  bottomActions: { position:"absolute", left:12, right:12, bottom:10, flexDirection:"row", alignItems:"center", gap:8 },
+  heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
+  heldBtnText: { fontSize:13, fontWeight:"800", color:colors.brandPrimary },
+  holdCheckoutRow: { paddingHorizontal:16, paddingTop:8, backgroundColor:colors.surface },
+  holdSaleBtn: { minHeight:44, paddingHorizontal:16, borderRadius:12, borderWidth:1, borderColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", justifyContent:"center", gap:7 },
+  holdSaleText: { color:colors.brandPrimary, fontSize:14, fontWeight:"800" },
+  reviewSearchRow: { marginHorizontal:16, marginBottom:4, minHeight:46, borderWidth:1, borderColor:colors.border, borderRadius:12, flexDirection:"row", alignItems:"center", paddingLeft:12, paddingRight:6, gap:7, backgroundColor:colors.surfaceSecondary },
+  reviewAddBtn: { minHeight:36, paddingHorizontal:10, borderRadius:9, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:4 },
+  reviewAddText: { color:colors.onBrandPrimary, fontWeight:"800", fontSize:12 },
+  heldCard: { borderWidth:1, borderColor:colors.border, borderRadius:14, padding:13, backgroundColor:colors.surface, flexDirection:"row", gap:10 },
+  heldTitle: { fontSize:14, fontWeight:"800", color:colors.onSurface }, heldMeta:{fontSize:12,color:colors.muted,marginTop:3}, heldProducts:{fontSize:12,color:colors.onSurfaceSecondary,marginTop:6}, heldActions:{alignItems:"center",justifyContent:"center",gap:12}, resumeBtn:{minHeight:38,paddingHorizontal:11,borderRadius:9,backgroundColor:colors.brandPrimary,flexDirection:"row",alignItems:"center",gap:4}, resumeText:{color:colors.onBrandPrimary,fontSize:12,fontWeight:"800"}, addProductOption:{flexDirection:"row",alignItems:"center",gap:10,padding:13,borderRadius:12,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
   cartBar: {
     position: "absolute",
     left: 16,
