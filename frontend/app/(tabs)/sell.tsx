@@ -385,6 +385,13 @@ export default function Sell() {
             </View>
           </KeyboardAwareScrollView>
 
+          <View style={styles.reviewHoldRow}>
+            <Pressable testID="hold-sale-button" disabled={busy || cart.length === 0} style={[styles.holdSaleBtn, (busy || cart.length === 0) && { opacity: 0.45 }]} onPress={holdCurrentSale}>
+              <MaterialDesignIcons name="pause" size={20} color={colors.brandPrimary} />
+              <Text style={styles.holdSaleText}>Hold Sale</Text>
+            </Pressable>
+            <Text style={styles.holdHint}>Save this cart and start a new sale</Text>
+          </View>
           <View style={[styles.checkoutBar, { paddingBottom: insets.bottom + 12 }]}>
             <Pressable
               testID="checkout-button"
@@ -526,6 +533,10 @@ const useStyles = makeStyles((colors) => ({
   },
   stepQty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "800", color: colors.onSurface },
   bottomActions: { position:"absolute", left:12, right:12, bottom:10, flexDirection:"row", alignItems:"center", gap:8 },
+  reviewHoldRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.surface },
+  holdSaleBtn: { minHeight: 44, paddingHorizontal: 15, borderRadius: 11, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  holdSaleText: { color: colors.brandPrimary, fontSize: 13, fontWeight: "800" },
+  holdHint: { flex: 1, fontSize: 11, color: colors.muted },
   heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
   heldBtnText: { fontSize:13, fontWeight:"800", color:colors.brandPrimary },
   holdCheckoutRow: { paddingHorizontal:16, paddingTop:8, backgroundColor:colors.surface },
