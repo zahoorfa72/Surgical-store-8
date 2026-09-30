@@ -115,7 +115,7 @@ export default function Dashboard() {
             {data.low_stock.length === 0 ? (
               <Text style={styles.okText}>All products are well stocked.</Text>
             ) : (
-              data.low_stock.slice(0, 6).map((p) => (
+              data.low_stock.map((p) => (
                 <View key={p.id} style={styles.lowRow}>
                   <MaterialDesignIcons name="alert-circle" size={18} color={colors.warning} />
                   <Text style={styles.lowName}>{p.name}</Text>
