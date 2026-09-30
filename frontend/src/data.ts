@@ -12,6 +12,7 @@ import {
   Payment, Product, Purchase, ReportSummary, ReturnRecord, Sale,
 } from "@/src/models";
 import { AppUser } from "@/src/api";
+import { notifyLowStock } from "@/src/low-stock-notifications";
 
 export const qk = {
   products: ["products"] as const,
@@ -135,7 +136,14 @@ function localReport(range: string): ReportSummary {
 }
 
 export function useProducts() {
-  return useQuery({ queryKey: qk.products, queryFn: () => localOrFetch(qk.products, () => apiRequest<Product[]>("/products"), []) });
+  return useQuery({
+    queryKey: qk.products,
+    queryFn: async () => {
+      const products = await localOrFetch(qk.products, () => apiRequest<Product[]>("/products"), []);
+      void notifyLowStock(products).catch(() => {});
+      return products;
+    },
+  });
 }
 export function useParties(type?: PartyType) {
   return useQuery({ queryKey: qk.parties(type), queryFn: () => localOrFetch(qk.parties(type), () => apiRequest<Party[]>(`/parties${type ? `?type=${type}` : ""}`), []) });
