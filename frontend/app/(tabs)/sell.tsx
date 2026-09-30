@@ -51,6 +51,7 @@ export default function Sell() {
   const [scanOpen, setScanOpen] = useState(false);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
   const [heldOpen, setHeldOpen] = useState(false);
+  const [heldSearch, setHeldSearch] = useState("");
   const [reviewSearch, setReviewSearch] = useState("");
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [addProductSearch, setAddProductSearch] = useState("");
@@ -78,6 +79,16 @@ export default function Sell() {
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
   const reviewedCart = useMemo(() => { const q = reviewSearch.trim().toLowerCase(); return cart.filter((c) => !q || c.name.toLowerCase().includes(q)); }, [cart, reviewSearch]);
+  const filteredHeldSales = useMemo(() => {
+    const q = heldSearch.trim().toLowerCase();
+    if (!q) return heldSales;
+    return heldSales.filter((h) => {
+      const customerName = customers?.find((c) => c.id === h.customerId)?.name ?? "";
+      return h.id.toLowerCase().includes(q)
+        || customerName.toLowerCase().includes(q)
+        || h.cart.some((line) => line.name.toLowerCase().includes(q));
+    });
+  }, [heldSales, heldSearch, customers]);
 
   useEffect(() => { AsyncStorage.getItem("ssm.heldSales").then((raw) => { if (!raw) return; try { setHeldSales(JSON.parse(raw)); } catch { setHeldSales([]); } }); }, []);
   const persistHeldSales = async (next: HeldSale[]) => { setHeldSales(next); await AsyncStorage.setItem("ssm.heldSales", JSON.stringify(next)); };
@@ -406,7 +417,73 @@ export default function Sell() {
         </View>
       </Modal>
 
-      <Modal visible={heldOpen} animationType="slide" onRequestClose={() => setHeldOpen(false)}><View style={styles.root}><ScreenHeader title="Held sales" subtitle="Resume a sale whenever you need" topInset={insets.top} onBack={() => setHeldOpen(false)} /><ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 10 }}>{heldSales.length === 0 ? <EmptyState icon="pause-circle-outline" title="No held sales" message="Hold a sale to continue it later." /> : heldSales.map((h) => <View key={h.id} style={styles.heldCard}><View style={{ flex: 1 }}><Text style={styles.heldTitle}>{new Date(h.createdAt).toLocaleString()}</Text><Text style={styles.heldMeta}>{h.cart.length} product(s) · {h.cart.reduce((n,x)=>n+x.quantity,0)} unit(s)</Text><Text style={styles.heldProducts} numberOfLines={2}>{h.cart.map(x=>x.name).join(" · ")}</Text></View><View style={styles.heldActions}><Pressable onPress={() => resumeHeldSale(h)} style={styles.resumeBtn}><MaterialDesignIcons name="play" size={18} color={colors.onBrandPrimary} /><Text style={styles.resumeText}>Open</Text></Pressable><Pressable onPress={() => deleteHeldSale(h)} hitSlop={8}><MaterialDesignIcons name="delete-outline" size={22} color={colors.error} /></Pressable></View></View>)}</ScrollView></View></Modal>
+      <Modal visible={heldOpen} animationType="slide" onRequestClose={() => { setHeldOpen(false); setHeldSearch(""); }}>
+        <View style={styles.root}>
+          <ScreenHeader
+            title="Held sales"
+            subtitle="Find and resume a saved cart"
+            topInset={insets.top}
+            onBack={() => { setHeldOpen(false); setHeldSearch(""); }}
+          />
+          <View style={[styles.searchWrap, { margin: 16, marginBottom: 8 }]}>
+            <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
+            <TextInput
+              testID="held-sale-search-input"
+              style={styles.searchInput}
+              placeholder="Search item, customer or held sale"
+              placeholderTextColor={colors.muted}
+              value={heldSearch}
+              onChangeText={setHeldSearch}
+              autoCorrect={false}
+            />
+            {heldSearch ? (
+              <Pressable testID="clear-held-sale-search" hitSlop={8} onPress={() => setHeldSearch("")}>
+                <MaterialDesignIcons name="close-circle" size={18} color={colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
+          <ScrollView
+            contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: insets.bottom + 24, gap: 10 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {heldSales.length === 0 ? (
+              <EmptyState icon="pause-circle-outline" title="No held sales" message="Hold a sale to continue it later." />
+            ) : filteredHeldSales.length === 0 ? (
+              <EmptyState icon="magnify-close" title="No matching held sales" message="Try a product name or customer name." />
+            ) : (
+              filteredHeldSales.map((h) => {
+                const subtotal = h.cart.reduce((n, x) => n + Number(x.quantity || 0) * Number(x.unit_price || 0), 0);
+                const discountValue = Math.max(0, Number(h.discount || 0));
+                const totalValue = Math.max(0, subtotal - discountValue);
+                const customerName = customers?.find((c) => c.id === h.customerId)?.name ?? "Walk-in customer";
+                return (
+                  <View key={h.id} style={styles.heldCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.heldTitle}>{new Date(h.createdAt).toLocaleString()}</Text>
+                      <Text style={styles.heldMeta}>{customerName} · {h.cart.length} product(s) · {h.cart.reduce((n, x) => n + Number(x.quantity || 0), 0)} unit(s)</Text>
+                      <Text style={styles.heldProducts} numberOfLines={2}>{h.cart.map(x => x.name).join(" · ")}</Text>
+                      <View style={styles.heldFinanceRow}>
+                        <Text style={styles.heldFinanceText}>Subtotal {money(subtotal)}</Text>
+                        <Text style={styles.heldDiscount}>Discount -{money(discountValue)}</Text>
+                        <Text style={styles.heldTotal}>Total {money(totalValue)}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.heldActions}>
+                      <Pressable onPress={() => resumeHeldSale(h)} style={styles.resumeBtn}>
+                        <MaterialDesignIcons name="play" size={18} color={colors.onBrandPrimary} />
+                        <Text style={styles.resumeText}>Open</Text>
+                      </Pressable>
+                      <Pressable onPress={() => deleteHeldSale(h)} hitSlop={8}>
+                        <MaterialDesignIcons name="delete-outline" size={22} color={colors.error} />
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
       <Modal visible={addProductOpen} animationType="slide" onRequestClose={() => setAddProductOpen(false)}><View style={styles.root}><ScreenHeader title="Add products" subtitle="Search and add to this sale" topInset={insets.top} onBack={() => setAddProductOpen(false)} /><View style={[styles.searchWrap,{margin:16}]}><MaterialDesignIcons name="magnify" size={20} color={colors.muted}/><TextInput testID="review-product-search-input" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={addProductSearch} onChangeText={setAddProductSearch} autoFocus /></View><FlatList data={(products??[]).filter(p=>{const q=addProductSearch.trim().toLowerCase();return !q||p.name.toLowerCase().includes(q)||String(p.category??"").toLowerCase().includes(q)||String(p.barcode??p.sku??"").toLowerCase().includes(q)})} keyExtractor={p=>p.id} contentContainerStyle={{padding:16,gap:8}} renderItem={({item})=><Pressable disabled={item.quantity<=0} style={[styles.addProductOption,item.quantity<=0&&{opacity:.45}]} onPress={()=>addToCart(item)}><View style={{flex:1}}><Text style={styles.prodName}>{item.name}</Text><Text style={styles.prodMeta}>{item.quantity} in stock · {money(item.sale_price)}</Text></View><MaterialDesignIcons name="plus-circle" size={22} color={colors.brandPrimary}/></Pressable>} /></View></Modal>
 
       {/* Customer picker */}
@@ -534,19 +611,27 @@ const useStyles = makeStyles((colors) => ({
   stepQty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "800", color: colors.onSurface },
   bottomActions: { position:"absolute", left:12, right:12, bottom:10, flexDirection:"row", alignItems:"center", gap:8 },
   reviewHoldRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.surface },
-  holdSaleBtn: { minHeight: 44, paddingHorizontal: 15, borderRadius: 11, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
-  holdSaleText: { color: colors.brandPrimary, fontSize: 13, fontWeight: "800" },
+  holdSaleBtn: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  holdSaleText: { color: colors.brandPrimary, fontSize: 14, fontWeight: "800" },
   holdHint: { flex: 1, fontSize: 11, color: colors.muted },
   heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
   heldBtnText: { fontSize:13, fontWeight:"800", color:colors.brandPrimary },
   holdCheckoutRow: { paddingHorizontal:16, paddingTop:8, backgroundColor:colors.surface },
-  holdSaleBtn: { minHeight:44, paddingHorizontal:16, borderRadius:12, borderWidth:1, borderColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", justifyContent:"center", gap:7 },
-  holdSaleText: { color:colors.brandPrimary, fontSize:14, fontWeight:"800" },
   reviewSearchRow: { marginHorizontal:16, marginBottom:4, minHeight:46, borderWidth:1, borderColor:colors.border, borderRadius:12, flexDirection:"row", alignItems:"center", paddingLeft:12, paddingRight:6, gap:7, backgroundColor:colors.surfaceSecondary },
   reviewAddBtn: { minHeight:36, paddingHorizontal:10, borderRadius:9, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:4 },
   reviewAddText: { color:colors.onBrandPrimary, fontWeight:"800", fontSize:12 },
   heldCard: { borderWidth:1, borderColor:colors.border, borderRadius:14, padding:13, backgroundColor:colors.surface, flexDirection:"row", gap:10 },
-  heldTitle: { fontSize:14, fontWeight:"800", color:colors.onSurface }, heldMeta:{fontSize:12,color:colors.muted,marginTop:3}, heldProducts:{fontSize:12,color:colors.onSurfaceSecondary,marginTop:6}, heldActions:{alignItems:"center",justifyContent:"center",gap:12}, resumeBtn:{minHeight:38,paddingHorizontal:11,borderRadius:9,backgroundColor:colors.brandPrimary,flexDirection:"row",alignItems:"center",gap:4}, resumeText:{color:colors.onBrandPrimary,fontSize:12,fontWeight:"800"}, addProductOption:{flexDirection:"row",alignItems:"center",gap:10,padding:13,borderRadius:12,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
+  heldTitle: { fontSize:14, fontWeight:"800", color:colors.onSurface },
+  heldMeta:{fontSize:12,color:colors.muted,marginTop:3},
+  heldProducts:{fontSize:12,color:colors.onSurfaceSecondary,marginTop:6},
+  heldActions:{alignItems:"center",justifyContent:"center",gap:12},
+  resumeBtn:{minHeight:38,paddingHorizontal:11,borderRadius:9,backgroundColor:colors.brandPrimary,flexDirection:"row",alignItems:"center",gap:4},
+  resumeText:{color:colors.onBrandPrimary,fontSize:12,fontWeight:"800"},
+  heldFinanceRow:{flexDirection:"row",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"},
+  heldFinanceText:{fontSize:11,color:colors.muted},
+  heldDiscount:{fontSize:11,color:colors.warning,fontWeight:"700"},
+  heldTotal:{fontSize:13,color:colors.brandPrimary,fontWeight:"900"},
+  addProductOption:{flexDirection:"row",alignItems:"center",gap:10,padding:13,borderRadius:12,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
   cartBar: {
     flex: 1,
     flexDirection: "row",
