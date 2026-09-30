@@ -337,7 +337,7 @@ export default function BackupRestore() {
           <Text style={styles.infoTitle}>Complete local backup</Text>
           <Text style={styles.infoText}>
             Saves products, sales, purchases, customers, suppliers, expenses, payments, offline pending changes,
-            settings and the saved offline cache into one JSON backup file.
+            settings, payment receipt photos and the saved offline cache into one JSON backup file. Receipt photos are stored as app data, not temporary cache files.
           </Text>
         </View>
 
