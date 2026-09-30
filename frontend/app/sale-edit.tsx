@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
-import { useParties, useSale, qk } from "@/src/data";
+import { useParties, useSale, useProducts, qk } from "@/src/data";
 import { Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -24,11 +24,14 @@ export default function SaleEdit() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: sale, isLoading } = useSale(id ?? "");
   const { data: customers } = useParties("customer");
+  const { data: products } = useProducts();
 
   const [lines, setLines] = useState<Line[]>([]);
   const [discount, setDiscount] = useState("0");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [custPickerOpen, setCustPickerOpen] = useState(false);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
 
@@ -53,6 +56,14 @@ export default function SaleEdit() {
   const setPrice = (lid: string, p: number) =>
     setLines((prev) => prev.map((l) => (l.id === lid ? { ...l, unit_price: Math.max(0, p) } : l)));
   const removeLine = (lid: string) => setLines((prev) => prev.filter((l) => l.id !== lid));
+  const addProduct = (p: any) => {
+    setLines((prev) => {
+      const existing = prev.find((l) => l.id === p.id);
+      if (existing) return prev.map((l) => l.id === p.id ? { ...l, quantity: l.quantity + 1 } : l);
+      return [...prev, { id: p.id, name: p.name, quantity: 1, unit_price: Number(p.sale_price ?? 0) }];
+    });
+    setProductPickerOpen(false); setProductSearch("");
+  };
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
   const discountNum = Math.max(0, parseFloat(discount) || 0);
@@ -64,6 +75,16 @@ export default function SaleEdit() {
     if (!valid.length) {
       toast("A sale needs at least one item", "error");
       return;
+    }
+    const invalid = lines.find((l) => !Number.isFinite(l.quantity) || l.quantity <= 0 || !Number.isFinite(l.unit_price) || l.unit_price < 0);
+    if (invalid) { toast("Check quantity and price for every item", "error"); return; }
+    const stockById = new Map((products ?? []).map((p: any) => [p.id, Number(p.quantity ?? 0)]));
+    const requested = new Map<string, number>();
+    for (const l of lines) requested.set(l.id, (requested.get(l.id) ?? 0) + Math.floor(l.quantity));
+    for (const [pid, qty] of requested) {
+      const originalQty = sale.items.find((x) => x.product_id === pid)?.quantity ?? 0;
+      const availableAfterRestore = (stockById.get(pid) ?? 0) + originalQty;
+      if (qty > availableAfterRestore) { const name = lines.find((l) => l.id === pid)?.name ?? "Product"; toast(name + " has only " + availableAfterRestore + " available for this sale", "error"); return; }
     }
     setBusy(true);
     try {
@@ -136,6 +157,11 @@ export default function SaleEdit() {
           </View>
         ))}
 
+        <Pressable testID="edit-add-product-button" style={styles.addProductBtn} onPress={() => setProductPickerOpen(true)}>
+          <MaterialDesignIcons name="plus-circle-outline" size={20} color={colors.brandPrimary} />
+          <Text style={styles.addProductText}>Add other product</Text>
+        </Pressable>
+
         <View style={styles.discountRow}>
           <Text style={styles.discountLabel}>Discount</Text>
           <TextInput
@@ -170,6 +196,25 @@ export default function SaleEdit() {
           <Text style={styles.saveText}>{busy ? "Saving…" : "Save changes"}</Text>
         </Pressable>
       </View>
+
+      <Modal visible={productPickerOpen} animationType="slide" onRequestClose={() => setProductPickerOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Add product" subtitle="Search and add another product" topInset={insets.top} onBack={() => setProductPickerOpen(false)} />
+          <View style={styles.searchWrap}>
+            <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
+            <TextInput testID="edit-product-search" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={productSearch} onChangeText={setProductSearch} autoFocus />
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16, gap: 8 }}>
+            {(products ?? []).filter((p: any) => { const q = productSearch.trim().toLowerCase(); return !q || String(p.name ?? "").toLowerCase().includes(q) || String(p.category ?? "").toLowerCase().includes(q) || String(p.barcode ?? p.sku ?? "").toLowerCase().includes(q); }).map((p: any) => {
+              const already = lines.some((l) => l.id === p.id);
+              return <Pressable key={p.id} testID={"edit-add-product-" + p.id} disabled={already || Number(p.quantity ?? 0) <= 0} style={[styles.productOption, (already || Number(p.quantity ?? 0) <= 0) && { opacity: 0.45 }]} onPress={() => addProduct(p)}>
+                <View style={{ flex: 1 }}><Text style={styles.productName}>{p.name}</Text><Text style={styles.productMeta}>Stock: {p.quantity} · Price: {money(Number(p.sale_price ?? 0))}</Text></View>
+                <MaterialDesignIcons name={already ? "check-circle" : "plus-circle"} size={22} color={already ? colors.muted : colors.brandPrimary} />
+              </Pressable>;
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
 
       <Modal visible={custPickerOpen} animationType="slide" onRequestClose={() => setCustPickerOpen(false)}>
         <View style={styles.root}>
@@ -231,6 +276,13 @@ const useStyles = makeStyles((colors) => ({
     color: colors.onSurface,
   },
   lineTotal: { fontSize: 15, fontWeight: "800", color: colors.brandPrimary, paddingVertical: 10 },
+  addProductBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.brandSecondary, backgroundColor: colors.brandTertiary },
+  addProductText: { color: colors.brandPrimary, fontSize: 14, fontWeight: "800" },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, margin: 16, paddingHorizontal: 12, height: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
+  productOption: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  productName: { fontSize: 15, fontWeight: "700", color: colors.onSurface },
+  productMeta: { fontSize: 12, color: colors.muted, marginTop: 3 },
   discountRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   discountLabel: { fontSize: 15, fontWeight: "600", color: colors.onSurface },
   discountInput: {
