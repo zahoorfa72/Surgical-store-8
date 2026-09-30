@@ -1089,12 +1089,14 @@ async def delete_sale(sale_id: str, _: AdminOnly):
 
 
 @api.put("/sales/{sale_id}")
-async def edit_sale(sale_id: str, body: SaleIn, _: AdminOnly):
+async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
     if not ObjectId.is_valid(sale_id):
         raise HTTPException(status_code=404, detail="Sale not found")
     sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
     if not sale or sale.get("deleted"):
         raise HTTPException(status_code=404, detail="Sale not found")
+    if user["role"] == Role.cashier.value and sale.get("cashier_id") != oid(user["_id"]):
+        raise HTTPException(status_code=403, detail="Cashiers can edit only their own sales")
     if not body.items:
         raise HTTPException(status_code=400, detail="Sale must have at least one item")
 
