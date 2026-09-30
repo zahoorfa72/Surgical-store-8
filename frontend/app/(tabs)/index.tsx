@@ -87,6 +87,35 @@ export default function Dashboard() {
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
 
+          <Card>
+            <View style={styles.chartHeader}>
+              <View>
+                <Text style={styles.cardTitle}>Finance chart</Text>
+                <Text style={styles.chartSub}>Quick view for {range === "all" ? "all time" : range}</Text>
+              </View>
+              <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
+            </View>
+            {[
+              { label: "Revenue", value: Number(data.revenue ?? 0), tone: colors.brandPrimary },
+              { label: "Gross Profit", value: Number(data.gross_profit ?? 0), tone: colors.info },
+              { label: "Net Profit", value: Number(data.net_profit ?? 0), tone: colors.success },
+              { label: "Remaining Balance", value: Number(data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
+            ].map((item) => {
+              const max = Math.max(1, Math.abs(Number(data.revenue ?? 0)), Math.abs(Number(data.gross_profit ?? 0)), Math.abs(Number(data.net_profit ?? 0)), Math.abs(Number(data.remaining_balance ?? 0)));
+              const width = Math.max(3, Math.min(100, Math.abs(item.value) / max * 100));
+              return (
+                <View key={item.label} style={styles.chartRow}>
+                  <View style={styles.chartLabelRow}>
+                    <Text style={styles.chartLabel}>{item.label}</Text>
+                    <Text style={[styles.chartValue, item.value < 0 && { color: colors.error }]}>{money(item.value)}</Text>
+                  </View>
+                  <View style={styles.chartTrack}>
+                    <View style={[styles.chartBar, { width: `${width}%`, backgroundColor: item.tone }]} />
+                  </View>
+                </View>
+              );
+            })}
+          </Card>
           {/* Profit & loss breakdown */}
           <Card>
             <Text style={styles.cardTitle}>Profit breakdown</Text>
@@ -184,6 +213,14 @@ const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
+  chartHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  chartSub: { fontSize: 12, color: colors.muted, marginTop: -6, marginBottom: 8 },
+  chartRow: { gap: 5, marginBottom: 10 },
+  chartLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  chartLabel: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  chartValue: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  chartTrack: { height: 9, borderRadius: 5, backgroundColor: colors.surfaceTertiary, overflow: "hidden" },
+  chartBar: { height: "100%", borderRadius: 5 },
   cashierGreeting: { fontSize: 13, color: colors.muted, marginBottom: 12 },
   quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   quickBtn: { width: "48%", minHeight: 78, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, justifyContent: "center", gap: 7 },
