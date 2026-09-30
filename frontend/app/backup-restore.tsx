@@ -16,12 +16,19 @@ import { makeStyles, useTheme } from "@/src/theme";
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveWebClientId, googleDriveRedirectUri, connectGoogleDriveNative, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId, isValidGoogleDriveClientId, assertAndroidDriveOAuthClientsCompatible } from "@/src/google-drive";
+import { setConnectionMode } from "@/src/api";
 
 
 WebBrowser.maybeCompleteAuthSession();
 
 const PREFIX = "ssm."
-const BACKUP_VERSION = 2;
+const BACKUP_VERSION = 3;
+const MIN_SUPPORTED_BACKUP_VERSION = 2;
+
+// Authentication/session values belong to the current installation, not the
+// business-data backup. Keeping them out prevents an old phone session from
+// replacing the current login after restore.
+const SESSION_KEYS = new Set(["ssm.token", "ssm.user", "ssm.vault", "ssm.connectionmode.v2"]);
 
 type BackupPayload = {
   app: "surgical-store";
@@ -39,7 +46,7 @@ async function makeBackup(): Promise<string> {
   });
   await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
 
-  const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+  const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX) && !SESSION_KEYS.has(key));
   const pairs = await AsyncStorage.multiGet(keys);
   const storage: Record<string, string> = {};
   for (const [key, value] of pairs) {
@@ -201,18 +208,29 @@ export default function BackupRestore() {
   };
 
   const applyBackupPayload = async (payload: BackupPayload) => {
-    const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX));
+    const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX) && !SESSION_KEYS.has(key));
     if (!entries.length) throw new Error("The backup contains no Surgical Store data.");
+
+    // Preserve the current installation's login/session while replacing only
+    // business data. This keeps restore usable after a clear-data/re-login flow.
     const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
     const currentPairs = await AsyncStorage.multiGet(currentKeys);
+    const preserved = currentPairs.filter(([key, value]) => SESSION_KEYS.has(key) && value !== null) as [string, string][];
     try {
       if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
-      await AsyncStorage.multiSet(entries);
+      await AsyncStorage.multiSet([...entries, ...preserved]);
+
       queryClient.clear();
       const cacheRaw = payload.storage["ssm.qcache.v1"];
       if (cacheRaw) {
         try { hydrate(queryClient, JSON.parse(cacheRaw)); } catch {}
       }
+
+      // A restored backup is a local snapshot. Keep it in offline mode until
+      // the user explicitly switches back online, so the next server refresh
+      // cannot immediately overwrite the restored payments/expenses/profit.
+      await setConnectionMode("offline");
+      await queryClient.invalidateQueries();
     } catch (error) {
       try {
         const partialKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
@@ -232,7 +250,7 @@ export default function BackupRestore() {
       const latest = files[0];
       const raw = await downloadGoogleDriveBackup(latest.id);
       const payload = JSON.parse(raw) as BackupPayload;
-      if (payload?.app !== "surgical-store" || payload?.backup_version !== BACKUP_VERSION || !payload?.storage || typeof payload.storage !== "object") {
+      if (payload?.app !== "surgical-store" || Number(payload?.backup_version) < MIN_SUPPORTED_BACKUP_VERSION || Number(payload?.backup_version) > BACKUP_VERSION || !payload?.storage || typeof payload?.storage !== "object") {
         throw new Error("The Google Drive file is not a valid Surgical Store backup.");
       }
 
@@ -293,7 +311,7 @@ export default function BackupRestore() {
       if (!uri) throw new Error("No backup file was selected.");
       const raw = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
       const payload = JSON.parse(raw) as BackupPayload;
-      if (payload?.app !== "surgical-store" || payload?.backup_version !== BACKUP_VERSION || !payload?.storage || typeof payload.storage !== "object") {
+      if (payload?.app !== "surgical-store" || Number(payload?.backup_version) < MIN_SUPPORTED_BACKUP_VERSION || Number(payload?.backup_version) > BACKUP_VERSION || !payload?.storage || typeof payload?.storage !== "object") {
         throw new Error("This is not a valid Surgical Store backup.");
       }
       Alert.alert("Restore backup?", "A safety copy will be created before local data is replaced.", [
