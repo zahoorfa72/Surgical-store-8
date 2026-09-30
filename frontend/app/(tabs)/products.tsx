@@ -9,7 +9,7 @@ import { apiRequest } from "@/src/api";
 import { canManageStore, useAuth } from "@/src/auth";
 import { useProducts, qk } from "@/src/data";
 import { Product } from "@/src/models";
-import { Badge, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
+import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
 export default function Products() {
@@ -30,6 +30,13 @@ export default function Products() {
     const q = search.trim().toLowerCase();
     return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q));
   }, [products, search]);
+
+  const inventoryFinance = useMemo(() => {
+    const rows = products ?? [];
+    const costValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0), 0);
+    const retailValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.sale_price ?? 0), 0);
+    return { costValue, retailValue, potentialProfit: retailValue - costValue };
+  }, [products]);
 
   const confirmDelete = async () => {
     if (!toDelete) return;
@@ -70,6 +77,23 @@ export default function Products() {
         />
       </View>
 
+      {!isLoading && (
+        <Card style={styles.financeCard}>
+          <View style={styles.financeHead}>
+            <View>
+              <Text style={styles.financeTitle}>Inventory finance</Text>
+              <Text style={styles.financeSub}>Current stock at buy and sell values</Text>
+            </View>
+            <MaterialDesignIcons name="chart-box-outline" size={22} color={colors.brandPrimary} />
+          </View>
+          <View style={styles.financeGrid}>
+            <View style={styles.financeCell}><Text style={styles.financeLabel}>Cost value</Text><Text style={styles.financeValue}>{money(inventoryFinance.costValue)}</Text></View>
+            <View style={styles.financeCell}><Text style={styles.financeLabel}>Retail value</Text><Text style={styles.financeValue}>{money(inventoryFinance.retailValue)}</Text></View>
+            <View style={styles.financeCell}><Text style={styles.financeLabel}>Potential margin</Text><Text style={[styles.financeValue,{color:inventoryFinance.potentialProfit>=0?colors.success:colors.error}]}>{money(inventoryFinance.potentialProfit)}</Text></View>
+          </View>
+        </Card>
+      )}
+
       {isLoading ? (
         <Loader />
       ) : (
@@ -101,6 +125,9 @@ export default function Products() {
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
                     Buy {money(item.purchase_price)} · Sell {money(item.sale_price)}
+                  </Text>
+                  <Text style={styles.itemFinance}>
+                    Stock value {money(Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * (Number(item.sale_price ?? 0) - Number(item.purchase_price ?? 0)))}
                   </Text>
                 </View>
                 <View style={styles.rowRight}>
@@ -156,6 +183,15 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.border,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
+  financeCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 2 },
+  financeHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  financeTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  financeSub: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  financeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  financeCell: { flexGrow: 1, minWidth: "30%", padding: 10, borderRadius: 10, backgroundColor: colors.surfaceTertiary },
+  financeLabel: { fontSize: 11, color: colors.muted, marginBottom: 3 },
+  financeValue: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  itemFinance: { fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 4 },
   row: {
     flexDirection: "row",
     alignItems: "center",
