@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { storage } from "@/src/utils/storage";
+import { logoUrl } from "@/src/api";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
-import { useSale } from "@/src/data";
+import { useSale, useSettings } from "@/src/data";
 import { Sale } from "@/src/models";
 import { canManageStore, useAuth } from "@/src/auth";
 import { Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
@@ -15,7 +17,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
 
-function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72): string {
+function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string): string {
   const rows = sale.items
     .map(
       (i) => `<tr>
@@ -33,6 +35,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72): string 
     * { font-family: -apple-system, Roboto, Helvetica, sans-serif; color: #0F172A; }
     @page { size: ${pageSize}; margin: 0; }
     body { width: ${bodyWidth}; padding: ${format === "a4" ? "12mm 10mm" : "3mm 2mm"}; margin: 0 auto; }
+    .logo { display:block; width:100%; max-width:100%; height:auto; max-height:55mm; object-fit:contain; margin:0 auto 4mm; }
     h1 { font-size: 22px; margin: 0; color: #0F766E; text-align:center; }
     .muted { color: #64748B; font-size: 12px; text-align:center; }
     .meta { margin: 16px 0; font-size: 13px; }
@@ -45,6 +48,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72): string 
     .grand { font-weight: 800; font-size: 18px; border-top: 2px solid #0F766E; padding-top: 8px; margin-top: 6px; }
     .thanks { text-align:center; margin-top: 24px; font-size: 12px; color:#64748B; }
   </style></head><body>
+    ${logo ? `<img class="logo" src="${logo}" />` : ""}
     <h1>${STORE_NAME}</h1>
     <div class="muted">Sales Receipt</div>
     <div class="meta">
@@ -74,6 +78,7 @@ export default function Receipt() {
   const toast = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: sale, isLoading } = useSale(id ?? "");
+  const { data: settings } = useSettings();
   const { user } = useAuth();
   const staff = canManageStore(user?.role);
   const [busy, setBusy] = useState(false);
@@ -89,16 +94,12 @@ export default function Receipt() {
     })();
   }, []);
 
-  const chooseReceiptWidth = async (width: 56 | 72) => {
-    setReceiptWidth(width);
-    await storage.setItem("ssm.receiptWidth", String(width));
-  };
 
   const print = async () => {
     if (!sale) return;
     setBusy(true);
     try {
-      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth) });
+      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined) });
     } catch (e: any) {
       toast("Printing not available on this device", "error");
     } finally {
@@ -128,22 +129,10 @@ export default function Receipt() {
   return (
     <View style={styles.root}>
       <ScreenHeader title={sale.invoice_no} subtitle="Sale receipt" topInset={insets.top} onBack={() => router.back()} />
-      <View style={styles.printerBar}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.printerTitle}>{receiptFormat === "a4" ? "A4 bill receipt" : "Thermal receipt"}</Text>
-          <Text style={styles.printerSub}>{receiptFormat === "a4" ? "A4 paper format" : "Choose paper width for thermal printers"}</Text>
-        </View>
-        <View style={styles.widthPicker}>
-          {receiptFormat === "thermal" && [72, 56].map((w) => (
-            <Pressable key={w} onPress={() => chooseReceiptWidth(w as 56 | 72)} style={[styles.widthBtn, receiptWidth === w && styles.widthBtnActive]}>
-              <Text style={[styles.widthText, receiptWidth === w && styles.widthTextActive]}>{w}mm</Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120, gap: 12 }}>
         <View style={styles.paper}>
-          <Text style={styles.storeName}>{STORE_NAME}</Text>
+          {settings?.has_logo && <Image source={{ uri: logoUrl(settings.logo_version) }} style={styles.receiptLogo} contentFit="contain" />}
+          <Text style={styles.storeName}>{settings?.store_name ?? STORE_NAME}</Text>
           <Text style={styles.receiptLabel}>Sales Receipt</Text>
 
           <View style={styles.metaBox}>
@@ -237,11 +226,12 @@ const useStyles = makeStyles((colors) => ({
   printerBar: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   printerTitle: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
   printerSub: { fontSize: 11, color: colors.muted, marginTop: 2 },
-  widthPicker: { flexDirection: "row", borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
-  widthBtn: { minWidth: 54, minHeight: 38, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
-  widthBtnActive: { backgroundColor: colors.brandPrimary },
-  widthText: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
-  widthTextActive: { color: colors.onBrandPrimary },
+
+
+
+
+
+  receiptLogo: { width: "100%", height: 150, marginBottom: 8 },
   paper: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 20 },
   storeName: { fontSize: 22, fontWeight: "800", color: colors.brandPrimary, textAlign: "center" },
   receiptLabel: { fontSize: 12, color: colors.muted, textAlign: "center", marginTop: 2, marginBottom: 12 },
