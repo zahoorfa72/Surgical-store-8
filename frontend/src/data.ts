@@ -184,8 +184,8 @@ export function useBudget() {
 export function useUsers() {
   return useQuery({ queryKey: qk.users, queryFn: () => localOrFetch(qk.users, () => apiRequest<AppUser[]>("/users"), []) });
 }
-export function useReport(range: string) {
-  return useQuery({ queryKey: qk.report(range), queryFn: async () => {
+export function useReport(range: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.report(range), queryFn: async () => {
     if ((await getConnectionMode()) === "offline") return localReport(range);
     if (!(await online())) return localReport(range);
     try { return await apiRequest<ReportSummary>(`/reports/summary?range=${range}`); }
