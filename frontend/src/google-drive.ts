@@ -245,24 +245,49 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
   return fetch(url, { ...init, headers });
 }
 
+const BACKUP_FOLDER_NAME = "Surgical Store Backups";
+
+async function findExistingBackupFolder(): Promise<string | null> {
+  try {
+    const q = encodeURIComponent(`name = '${BACKUP_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
+    const res = await driveFetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&fields=files(id,name,createdTime)&pageSize=20`,
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data?.files) && data.files.length ? String(data.files[0]?.id ?? "") || null : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getOrCreateBackupFolder(): Promise<string> {
   const cached = await SecureStore.getItemAsync(FOLDER_KEY);
   if (cached) {
-    const check = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cached)}?fields=id,trashed`);
-    if (check.ok) {
-      const data = await check.json();
-      if (data?.id && !data?.trashed) return cached;
-    }
-    // With drive.file, only app-created files are guaranteed to be accessible.
-    // If the cached folder is stale/inaccessible, create a fresh app-owned folder.
+    try {
+      const check = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cached)}?fields=id,name,mimeType,trashed`);
+      if (check.ok) {
+        const data = await check.json();
+        if (data?.id && data?.mimeType === "application/vnd.google-apps.folder" && !data?.trashed) return cached;
+      }
+    } catch {}
     await SecureStore.deleteItemAsync(FOLDER_KEY);
+  }
+
+  // App data can be cleared while the Google Drive folder remains. Discover
+  // the original app-created folder before creating another one, so backups
+  // remain recoverable after reinstall / clear-data / fresh login.
+  const discovered = await findExistingBackupFolder();
+  if (discovered) {
+    await SecureStore.setItemAsync(FOLDER_KEY, discovered);
+    return discovered;
   }
 
   const create = await driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      name: "Surgical Store Backups",
+      name: BACKUP_FOLDER_NAME,
       mimeType: "application/vnd.google-apps.folder",
     }),
   });
@@ -276,7 +301,7 @@ async function getOrCreateBackupFolder(): Promise<string> {
       message = detail;
     }
     throw new Error(
-      `Google Drive folder creation failed (${create.status})${message ? `: ${message.slice(0, 300)}` : ""}`,
+      `Google Drive folder creation failed (${create.status})${message ? `:${" " + message.slice(0, 300)}` : ""}`,
     );
   }
   const folder = await create.json();
@@ -315,12 +340,14 @@ export async function uploadBackupToGoogleDrive(json: string, filename: string):
 }
 
 export async function listGoogleDriveBackups(): Promise<Array<{ id: string; name: string; createdTime?: string; size?: string }>> {
-  const folderId = await getOrCreateBackupFolder();
+  // Search all app-created Surgical Store backup files, not only the cached
+  // folder ID. This is important after Android clear-data / reinstall because
+  // SecureStore and the cached folder ID may be gone while Drive data remains.
   const q = encodeURIComponent(
-    `'${folderId}' in parents and trashed = false and mimeType = 'application/json' and name contains '${BACKUP_NAME_PREFIX}'`,
+    `trashed = false and mimeType = 'application/json' and name contains '${BACKUP_NAME_PREFIX}'`,
   );
   const res = await driveFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&fields=files(id,name,createdTime,size)&pageSize=20`,
+    `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&fields=files(id,name,createdTime,size,parents)&pageSize=100`,
   );
   if (!res.ok) throw new Error(`Google Drive backup list failed (${res.status}).`);
   const data = await res.json();
