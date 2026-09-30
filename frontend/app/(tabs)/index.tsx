@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
-import { useReport } from "@/src/data";
+import { useDayClose, useReport } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -22,13 +22,11 @@ export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const cashier = user?.role === "cashier";
 
   const [range, setRange] = useState<string>("today");
-  const { data, isLoading, refetch, isRefetching } = useReport(range);
-
-  useEffect(() => {
-    if (user?.role === "cashier") router.replace("/(tabs)/sell");
-  }, [user, router]);
+  const { data, isLoading, refetch, isRefetching } = useReport(range, !cashier);
+  const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
 
   return (
     <View style={styles.root}>
@@ -40,7 +38,35 @@ export default function Dashboard() {
       />
       <ChipRow options={RANGES as any} value={range} onChange={setRange} testIDPrefix="range" />
 
-      {isLoading || !data ? (
+      {cashier ? (
+        dayCloseLoading || !dayClose ? <Loader /> : (
+          <ScrollView
+            contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}
+            refreshControl={<RefreshControl refreshing={dayCloseRefreshing} onRefresh={refetchDayClose} tintColor={colors.brandPrimary} />}
+          >
+            <Card>
+              <Text style={styles.cardTitle}>Cashier overview</Text>
+              <Text style={styles.cashierGreeting}>Your {range === "today" ? "today" : range} activity</Text>
+              <View style={styles.grid}>
+                <StatTile label="Sales" value={String(dayClose.me.transactions)} icon="receipt" tone="brand" />
+                <StatTile label="Units" value={String(dayClose.me.units)} icon="cube-outline" tone="info" />
+                <StatTile label="Sales total" value={money(dayClose.me.gross_sales)} icon="cash" tone="success" />
+                <StatTile label="Discount" value={money(dayClose.me.discount)} icon="tag-outline" tone="muted" />
+              </View>
+            </Card>
+            <View style={styles.quickGrid}>
+              <Pressable style={styles.quickBtn} onPress={() => router.push("/(tabs)/sell")}><MaterialDesignIcons name="cart-plus" size={22} color={colors.brandPrimary} /><Text style={styles.quickText}>New sale</Text></Pressable>
+              <Pressable style={styles.quickBtn} onPress={() => router.push("/sales-history")}><MaterialDesignIcons name="receipt-text" size={22} color={colors.brandPrimary} /><Text style={styles.quickText}>My receipts</Text></Pressable>
+              <Pressable style={styles.quickBtn} onPress={() => router.push("/backup-restore")}><MaterialDesignIcons name="backup-restore" size={22} color={colors.brandPrimary} /><Text style={styles.quickText}>Backup / Restore</Text></Pressable>
+              <Pressable style={styles.quickBtn} onPress={() => router.push("/day-close")}><MaterialDesignIcons name="chart-box-outline" size={22} color={colors.brandPrimary} /><Text style={styles.quickText}>My day close</Text></Pressable>
+            </View>
+            <Card>
+              <Text style={styles.cardTitle}>Cashier permissions</Text>
+              <Text style={styles.permissionText}>You can create sales, reprint receipts, edit your own sales, and use backup/restore. Store-wide finance and other cashiers' records remain protected.</Text>
+            </Card>
+          </ScrollView>
+        )
+      ) : isLoading || !data ? (
         <Loader />
       ) : (
         <ScrollView
@@ -158,6 +184,11 @@ const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
+  cashierGreeting: { fontSize: 13, color: colors.muted, marginBottom: 12 },
+  quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  quickBtn: { width: "48%", minHeight: 78, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, justifyContent: "center", gap: 7 },
+  quickText: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  permissionText: { fontSize: 13, lineHeight: 19, color: colors.onSurfaceSecondary },
   plRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
   plLabel: { fontSize: 14, color: colors.onSurfaceSecondary },
   plValue: { fontSize: 14, color: colors.onSurface, fontWeight: "600" },
