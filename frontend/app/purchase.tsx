@@ -35,6 +35,7 @@ export default function Purchase() {
   const [lines, setLines] = useState<Line[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [productSearch, setProductSearch] = useState("");
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,6 +68,10 @@ export default function Purchase() {
       return next;
     });
   };
+  const filteredPickerProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q) || String((p as any).category ?? "").toLowerCase().includes(q) || String((p as any).barcode ?? (p as any).sku ?? "").toLowerCase().includes(q));
+  }, [products, productSearch]);
   const addSelectedProducts = () => {
     const selected = products?.filter((p) => selectedProductIds.has(p.id) && !lineIds.has(p.id)) ?? [];
     if (!selected.length) {
@@ -187,9 +192,10 @@ export default function Purchase() {
       {/* Product picker */}
       <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
         <View style={styles.root}>
-          <ScreenHeader title="Add products" subtitle="Select multiple items at once" topInset={insets.top} onBack={() => { setSelectedProductIds(new Set()); setPickerOpen(false); }} />
+          <ScreenHeader title="Add products" subtitle="Select multiple items at once" topInset={insets.top} onBack={() => { setSelectedProductIds(new Set()); setProductSearch(""); setPickerOpen(false); }} />
+          <View style={styles.searchWrap}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="purchase-product-search" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={productSearch} onChangeText={setProductSearch} /><Pressable onPress={() => setProductSearch("")} hitSlop={8}><MaterialDesignIcons name="close-circle" size={18} color={colors.muted} /></Pressable></View>
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 90, gap: 8 }}>
-            {(products ?? []).map((p) => {
+            {filteredPickerProducts.map((p) => {
               const added = lineIds.has(p.id);
               const selected = selectedProductIds.has(p.id);
               return (
@@ -210,7 +216,7 @@ export default function Purchase() {
                 </Pressable>
               );
             })}
-            {(!products || products.length === 0) && <Text style={styles.hint}>No products yet. Add products in Stock first.</Text>}
+            {filteredPickerProducts.length === 0 && <Text style={styles.hint}>{productSearch.trim() ? "No matching products found." : "No products yet. Add products in Stock first."}</Text>}
           </ScrollView>
           <View style={[styles.pickerBottom, { paddingBottom: insets.bottom + 10 }]}>
             <Text style={styles.selectionText}>{selectedProductIds.size} selected</Text>
@@ -314,6 +320,8 @@ const useStyles = makeStyles((colors) => ({
     paddingHorizontal: 20,
   },
   saveText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "800" },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 12, height: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
   pickRow: {
     flexDirection: "row",
     alignItems: "center",
