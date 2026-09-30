@@ -37,13 +37,14 @@ export default function Settings() {
   const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [receiptFormat, setReceiptFormat] = useState<"thermal" | "a4">("thermal");
+  const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
   }, [settings?.store_name]);
   useEffect(() => {
     setServerUrl(getApiBaseOverride() ?? "");
-    void storage.getItem<string>("ssm.receiptFormat", "thermal").then((value) => setReceiptFormat(value === "a4" ? "a4" : "thermal"));
+    void Promise.all([storage.getItem<string>("ssm.receiptFormat", "thermal"), storage.getItem<string>("ssm.receiptWidth", "72")]).then(([format, width]) => { setReceiptFormat(format === "a4" ? "a4" : "thermal"); setReceiptWidth(width === "56" ? 56 : 72); });
   }, []);
 
   const doLogout = async () => {
@@ -194,6 +195,18 @@ export default function Settings() {
               <Text style={[styles.formatText, receiptFormat === "a4" && styles.formatTextActive]}>A4 Bill</Text>
             </Pressable>
           </View>
+          {receiptFormat === "thermal" && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.cardHint}>Thermal paper width</Text>
+              <View style={styles.widthRow}>
+                {[72, 56].map((w) => (
+                  <Pressable key={w} testID={"receipt-width-" + w} onPress={async () => { setReceiptWidth(w as 56 | 72); await storage.setItem("ssm.receiptWidth", String(w)); }} style={[styles.widthBtn, receiptWidth === w && styles.widthBtnActive]}>
+                    <Text style={[styles.widthText, receiptWidth === w && styles.widthTextActive]}>{w} mm</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
 
         <View style={styles.infoCard}>
@@ -286,6 +299,11 @@ const useStyles = makeStyles((colors) => ({
   formatBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   formatText: { fontSize: 14, fontWeight: "800", color: colors.brandPrimary },
   formatTextActive: { color: colors.onBrandPrimary },
+  widthRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  widthBtn: { flex: 1, minHeight: 42, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  widthBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  widthText: { fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
+  widthTextActive: { color: colors.onBrandPrimary },
   infoCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
   infoRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.divider },
   infoLabel: { flex: 1, fontSize: 15, color: colors.onSurface },
