@@ -1,9 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { apiRequest } from "@/src/api";
 import { useParties, usePayments, usePurchases, usePurchaseReturns, qk } from "@/src/data";
@@ -53,6 +56,11 @@ export default function Payments() {
   const [note, setNote] = useState("");
   const [entryKind, setEntryKind] = useState<"pay" | "receive" | "supplier_refund" | "customer_refund">("pay");
   const [busy, setBusy] = useState(false);
+  const [receiptPhoto, setReceiptPhoto] = useState<string | null>(null);
+  const [receiptPhotos, setReceiptPhotos] = useState<Record<string, string>>({});
+  useEffect(() => { void AsyncStorage.getAllKeys().then(async (keys) => { const ks = keys.filter((k) => k.startsWith("ssm.paymentReceipt.")); if (!ks.length) return; const pairs = await AsyncStorage.multiGet(ks); const map: Record<string,string> = {}; for (const [k,v] of pairs) if (v) map[k.replace("ssm.paymentReceipt.","")] = v; setReceiptPhotos(map); }); }, [payments?.length]);
+  const pickReceiptPhoto = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, quality: 0.55, base64: true, exif: false }); if (result.canceled) return; const asset = result.assets[0]; if (!asset?.base64) { toast("Could not read the receipt photo", "error"); return; } if (asset.base64.length > 4_000_000) { toast("Photo is too large. Please choose a smaller receipt photo.", "error"); return; } setReceiptPhoto("data:image/jpeg;base64," + asset.base64); };
+  const removeReceiptPhoto = () => setReceiptPhoto(null);
 
   const totalOutstanding = useMemo(
     () => (parties ?? []).reduce((s, p) => s + Math.max(0, p.balance), 0),
@@ -64,6 +72,7 @@ export default function Payments() {
     setAmount(p.balance > 0 ? String(p.balance) : "");
     setAdjustment("");
     setNote("");
+    setReceiptPhoto(receiptPhotos[p.id] ?? null);
     setEntryKind(isSupplier ? "pay" : "receive");
   };
 
@@ -81,14 +90,19 @@ export default function Payments() {
     }
     setBusy(true);
     try {
+      let saved: Payment;
       if (editingPayment) {
-        await apiRequest(`/payments/${editingPayment.id}`, { method: "PUT", body: {
+        saved = await apiRequest<Payment>(`/payments/${editingPayment.id}`, { method: "PUT", body: {
           party_id: editingPayment.party_id, kind: editingPayment.kind, amount: amt, adjustment: adj, note: note.trim()
         }});
       } else {
-        await apiRequest("/payments", { method: "POST", body: {
+        saved = await apiRequest<Payment>("/payments", { method: "POST", body: {
           party_id: active!.id, kind: entryKind, amount: amt, adjustment: adj, note: note.trim()
         }});
+      }
+      if (saved?.id) {
+        if (receiptPhoto) await AsyncStorage.setItem(`ssm.paymentReceipt.${saved.id}`, receiptPhoto);
+        else await AsyncStorage.removeItem(`ssm.paymentReceipt.${saved.id}`);
       }
       await queryClient.invalidateQueries({ queryKey: qk.parties(isSupplier ? "supplier" : "customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
@@ -254,7 +268,7 @@ export default function Payments() {
                             {refund ? "-" : ""}{money(p.amount)}
                           </Text>
                           {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
-                            setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(p.amount)); setAdjustment(String(p.adjustment||"")); setNote(p.note||"");
+                            setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(p.amount)); setAdjustment(String(p.adjustment||"")); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
                           }}>
                             <MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/>
                           </Pressable>}
@@ -323,6 +337,23 @@ export default function Payments() {
             />
             <Text style={styles.hint}>Adjustment also reduces the balance without cash (e.g. discount).</Text>
 
+            <View style={styles.photoSection}>
+              <Text style={styles.fieldLabel}>Receipt photo — optional</Text>
+              {receiptPhoto ? (
+                <View style={styles.photoPreviewWrap}>
+                  <Image source={{ uri: receiptPhoto }} style={styles.photoPreview} contentFit="contain" />
+                  <Pressable testID="remove-payment-receipt-photo" style={styles.photoRemove} onPress={removeReceiptPhoto}>
+                    <MaterialDesignIcons name="close-circle" size={22} color={colors.error} />
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable testID="add-payment-receipt-photo" style={styles.photoButton} onPress={pickReceiptPhoto}>
+                  <MaterialDesignIcons name="camera-plus-outline" size={21} color={colors.brandPrimary} />
+                  <Text style={styles.photoButtonText}>Attach receipt photo</Text>
+                </Pressable>
+              )}
+              <Text style={styles.photoHint}>Stored inside app data and included in backup/restore.</Text>
+            </View>
             <Text style={styles.fieldLabel}>Note — optional</Text>
             <TextInput
               testID="payment-note-input"
@@ -423,6 +454,13 @@ const useStyles = makeStyles((colors) => ({
   modalCard: { width: "100%", maxWidth: 400, backgroundColor: colors.surface, borderRadius: 18, padding: 20, gap: 8 },
   modalTitle: { fontSize: 17, fontWeight: "800", color: colors.onSurface },
   modalSub: { fontSize: 13, color: colors.onSurfaceSecondary, marginBottom: 4 },
+  photoSection: { gap: 7, marginTop: 2 },
+  photoPreviewWrap: { height: 150, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, overflow: "hidden", position: "relative" },
+  photoPreview: { width: "100%", height: "100%" },
+  photoRemove: { position: "absolute", right: 7, top: 7, backgroundColor: colors.surface, borderRadius: 20 },
+  photoButton: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: colors.brandSecondary, backgroundColor: colors.brandTertiary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  photoButtonText: { fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
+  photoHint: { fontSize: 11, color: colors.muted },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 4 },
   modalInput: {
     backgroundColor: colors.surfaceTertiary,
