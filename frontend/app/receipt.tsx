@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -15,7 +15,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
 
-function receiptHtml(sale: Sale, widthMm: 72): string {
+function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72): string {
   const rows = sale.items
     .map(
       (i) => `<tr>
@@ -26,11 +26,13 @@ function receiptHtml(sale: Sale, widthMm: 72): string {
       </tr>`
     )
     .join("");
+  const pageSize = format === "a4" ? "A4" : `${widthMm}mm auto`;
+  const bodyWidth = format === "a4" ? "190mm" : `${Math.max(widthMm - 4, 48)}mm`;
   return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     * { font-family: -apple-system, Roboto, Helvetica, sans-serif; color: #0F172A; }
-    @page { size: ${widthMm}mm auto; margin: 0; }
-    body { width: ${Math.max(widthMm - 4, 48)}mm; padding: 3mm 2mm; margin: 0 auto; }
+    @page { size: ${pageSize}; margin: 0; }
+    body { width: ${bodyWidth}; padding: ${format === "a4" ? "12mm 10mm" : "3mm 2mm"}; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0; color: #0F766E; text-align:center; }
     .muted { color: #64748B; font-size: 12px; text-align:center; }
     .meta { margin: 16px 0; font-size: 13px; }
@@ -75,11 +77,14 @@ export default function Receipt() {
   const { user } = useAuth();
   const staff = canManageStore(user?.role);
   const [busy, setBusy] = useState(false);
+  const [receiptFormat, setReceiptFormat] = useState<"thermal" | "a4">("thermal");
   const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
 
   useEffect(() => {
     void (async () => {
+      const savedFormat = await storage.getItem<string>("ssm.receiptFormat", "thermal");
       const saved = await storage.getItem<string>("ssm.receiptWidth", "72");
+      setReceiptFormat(savedFormat === "a4" ? "a4" : "thermal");
       setReceiptWidth(saved === "56" ? 56 : 72);
     })();
   }, []);
@@ -93,7 +98,7 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      await Print.printAsync({ html: receiptHtml(sale, receiptWidth) });
+      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth) });
     } catch (e: any) {
       toast("Printing not available on this device", "error");
     } finally {
@@ -105,7 +110,7 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptWidth) });
+      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
       else toast("Sharing not available", "error");
     } catch (e: any) {
@@ -125,11 +130,11 @@ export default function Receipt() {
       <ScreenHeader title={sale.invoice_no} subtitle="Sale receipt" topInset={insets.top} onBack={() => router.back()} />
       <View style={styles.printerBar}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.printerTitle}>Thermal receipt size</Text>
-          <Text style={styles.printerSub}>Choose paper width for thermal printers</Text>
+          <Text style={styles.printerTitle}>{receiptFormat === "a4" ? "A4 bill receipt" : "Thermal receipt"}</Text>
+          <Text style={styles.printerSub}>{receiptFormat === "a4" ? "A4 paper format" : "Choose paper width for thermal printers"}</Text>
         </View>
         <View style={styles.widthPicker}>
-          {[72, 56].map((w) => (
+          {receiptFormat === "thermal" && [72, 56].map((w) => (
             <Pressable key={w} onPress={() => chooseReceiptWidth(w as 56 | 72)} style={[styles.widthBtn, receiptWidth === w && styles.widthBtnActive]}>
               <Text style={[styles.widthText, receiptWidth === w && styles.widthTextActive]}>{w}mm</Text>
             </Pressable>
