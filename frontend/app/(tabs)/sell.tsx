@@ -21,6 +21,7 @@ import { useAuth } from "@/src/auth";
 import { useOffline } from "@/src/offline";
 import { Product } from "@/src/models";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
+import { OrderImageScannerModal } from "@/src/components/order-image-scanner";
 import { EmptyState, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -55,7 +56,7 @@ export default function Sell() {
   const [reviewSearch, setReviewSearch] = useState("");
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [addProductSearch, setAddProductSearch] = useState("");
-  const [showSaleDetails, setShowSaleDetails] = useState(true);
+  const [showSaleDetails, setShowSaleDetails] = useState(true);\n  const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
 
   const onScanned = (value: string) => {
     setScanOpen(false);
@@ -151,6 +152,44 @@ export default function Sell() {
   const setPrice = (id: string, price: number) =>
     setCart((prev) => prev.map((c) => (c.id === id ? { ...c, unit_price: Math.max(0, price) } : c)));
   const removeLine = (id: string) => setCart((prev) => prev.filter((c) => c.id !== id));
+
+  const onOrderImageItems = (items: { product: Product; quantity: number }[]) => {
+    let added = 0;
+    let skipped = 0;
+    setCart((prev) => {
+      const next = [...prev];
+      for (const { product, quantity } of items) {
+        const index = next.findIndex((line) => line.id === product.id);
+        const existingQty = index >= 0 ? next[index].quantity : 0;
+        const available = Math.max(0, product.quantity - existingQty);
+        const addQty = Math.min(Math.max(0, Math.floor(quantity)), available);
+        if (addQty <= 0) {
+          skipped += 1;
+          continue;
+        }
+        added += addQty;
+        if (index >= 0) {
+          next[index] = { ...next[index], quantity: existingQty + addQty, stock: product.quantity };
+        } else {
+          next.push({
+            id: product.id,
+            name: product.name,
+            stock: product.quantity,
+            quantity: addQty,
+            unit_price: product.sale_price,
+            threshold: product.low_stock_threshold,
+          });
+        }
+      }
+      return next;
+    });
+    if (added > 0) {
+      toast(`Added ${added} unit(s) from order image`, "success");
+    }
+    if (skipped > 0) {
+      toast(`${skipped} item(s) could not be added because stock is unavailable`, "error");
+    }
+  };
 
   const checkout = async () => {
     if (!cart.length) return;
@@ -304,7 +343,7 @@ export default function Sell() {
             topInset={insets.top}
             onBack={() => setReviewOpen(false)}
           />
-          <View style={styles.reviewSearchRow}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View>
+          <View style={styles.reviewSearchRow}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View><Pressable testID="scan-order-image-button" onPress={() => setOrderImageScanOpen(true)} style={styles.scanOrderBtn}><MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} /><Text style={styles.scanOrderText}>Scan order image</Text></Pressable>
           <KeyboardAwareScrollView
             contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}
             bottomOffset={20}
@@ -472,6 +511,13 @@ export default function Sell() {
           </View>
         </View>
       </Modal>
+
+      <OrderImageScannerModal
+        visible={orderImageScanOpen}
+        products={products ?? []}
+        onClose={() => setOrderImageScanOpen(false)}
+        onAddItems={onOrderImageItems}
+      />
 
       <Modal visible={heldOpen} animationType="slide" onRequestClose={() => { setHeldOpen(false); setHeldSearch(""); }}>
         <View style={styles.root}>
@@ -676,6 +722,8 @@ const useStyles = makeStyles((colors) => ({
   reviewSearchRow: { marginHorizontal:16, marginBottom:4, minHeight:46, borderWidth:1, borderColor:colors.border, borderRadius:12, flexDirection:"row", alignItems:"center", paddingLeft:12, paddingRight:6, gap:7, backgroundColor:colors.surfaceSecondary },
   reviewAddBtn: { minHeight:36, paddingHorizontal:10, borderRadius:9, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:4 },
   reviewAddText: { color:colors.onBrandPrimary, fontWeight:"800", fontSize:12 },
+  scanOrderBtn: { marginHorizontal: 16, minHeight: 46, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  scanOrderText: { color: colors.onBrandPrimary, fontSize: 13, fontWeight: "900" },
   reviewInventoryBox: { borderWidth:1, borderColor:colors.border, borderRadius:12, backgroundColor:colors.surfaceSecondary, overflow:"hidden" },
   reviewInventoryTitle: { fontSize:12, fontWeight:"800", color:colors.onSurface, padding:10, borderBottomWidth:1, borderBottomColor:colors.border },
   reviewInventoryRow: { minHeight:58, paddingHorizontal:10, paddingVertical:8, flexDirection:"row", alignItems:"center", gap:8, borderBottomWidth:1, borderBottomColor:colors.border },
