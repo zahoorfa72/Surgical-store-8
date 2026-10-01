@@ -113,6 +113,28 @@ function candidateScore(line: string, name: string) {
   return Math.max(edit, bigramScore(source, target), confusion, overlap * 0.94, wordScore * 0.96);
 }
 
+async function prepareLocalAi(): Promise<boolean> {
+  if (modelReadyPromise) return modelReadyPromise;
+  modelReadyPromise = (async () => {
+    try {
+      if (await isAvailable()) {
+        await prepareBuiltInModel();
+        return true;
+      }
+      const models = await getDownloadableModels();
+      const local = models.find((m: any) => m?.name === "qwen3-0.6b" || m?.id === "qwen3-0.6b" || m?.modelId === "qwen3-0.6b");
+      if (!local) return false;
+      if (typeof (local as any).meetsRequirements === "function" && !(await (local as any).meetsRequirements())) return false;
+      await downloadModel(local as any);
+      await setModel(local as any, { backend: "cpu" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  return modelReadyPromise;
+}
+
 export async function enhanceOrderLinesWithAI(
   lines: string[],
   products: Product[],
