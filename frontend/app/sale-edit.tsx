@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
@@ -10,6 +10,7 @@ import { apiRequest } from "@/src/api";
 import { useParties, useSale, useProducts, qk } from "@/src/data";
 import { Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { storage } from "@/src/utils/storage";
 
 type Line = { id: string; name: string; quantity: number; unit_price: number };
 
@@ -34,6 +35,17 @@ export default function SaleEdit() {
   const [productSearch, setProductSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
+  const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void storage.getItem<boolean>("ssm.showSellProfitDiscount", true).then((value) => {
+        if (active) setShowSellProfitDiscount(value !== false);
+      });
+      return () => { active = false; };
+    }, []),
+  );
 
   useEffect(() => {
     if (sale && !prefilled) {
@@ -112,7 +124,7 @@ export default function SaleEdit() {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={`Edit ${sale.invoice_no}`} subtitle="Adjust items, price & discount" topInset={insets.top} onBack={() => router.back()} />
+      <ScreenHeader title={`Edit ${sale.invoice_no}`} subtitle={showSellProfitDiscount ? "Adjust items, price & discount" : "Adjust items & price"} topInset={insets.top} onBack={() => router.back()} />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }} bottomOffset={20}>
         <Pressable testID="edit-select-customer-button" style={styles.customerRow} onPress={() => setCustPickerOpen(true)}>
           <MaterialDesignIcons name="account" size={20} color={colors.brandPrimary} />
@@ -162,16 +174,18 @@ export default function SaleEdit() {
           <Text style={styles.addProductText}>Add other product</Text>
         </Pressable>
 
-        <View style={styles.discountRow}>
-          <Text style={styles.discountLabel}>Discount</Text>
-          <TextInput
-            testID="edit-discount-input"
-            style={styles.discountInput}
-            keyboardType="numeric"
-            value={discount}
-            onChangeText={setDiscount}
-          />
-        </View>
+        {showSellProfitDiscount && (
+          <View style={styles.discountRow}>
+            <Text style={styles.discountLabel}>Discount</Text>
+            <TextInput
+              testID="edit-discount-input"
+              style={styles.discountInput}
+              keyboardType="numeric"
+              value={discount}
+              onChangeText={setDiscount}
+            />
+          </View>
+        )}
 
         <View style={styles.totalsCard}>
           <View style={styles.totalRow}>
@@ -179,8 +193,8 @@ export default function SaleEdit() {
             <Text style={styles.totalValue}>{money(subtotal)}</Text>
           </View>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Discount</Text>
-            <Text style={styles.totalValue}>- {money(discountNum)}</Text>
+            {showSellProfitDiscount && <><Text style={styles.totalLabel}>Discount</Text>
+            <Text style={styles.totalValue}>- {money(discountNum)}</Text></>}
           </View>
           <View style={styles.totalDivider} />
           <View style={styles.totalRow}>
