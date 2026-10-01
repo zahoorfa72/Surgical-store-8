@@ -19,6 +19,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 
 import { Product } from "@/src/models";
 import { makeStyles, useTheme } from "@/src/theme";
+import { enhanceOrderLinesWithAI } from "@/src/utils/order-ai";
 
 type ParsedItem = {
   key: string;
@@ -173,6 +174,7 @@ export function OrderImageScannerModal({
   const [unmatched, setUnmatched] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<{ line: string; product: Product; score: number; quantity: number }[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [aiUsed, setAiUsed] = useState(false);
   const [rawText, setRawText] = useState("");
 
   const selectedCount = items.filter((x) => x.selected && x.product && x.quantity > 0).length;
@@ -192,6 +194,7 @@ export function OrderImageScannerModal({
     }
     setImageUri(uri);
     setProcessing(true);
+    setAiUsed(false);
     try {
       const result = await recognizeText(uri);
       const lines = (result.blocks ?? [])
@@ -200,13 +203,15 @@ export function OrderImageScannerModal({
         .filter(Boolean);
 
       const sourceLines = lines.length ? lines : String(result.text ?? "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      const aiLines = await enhanceOrderLinesWithAI(sourceLines, products);
+      setAiUsed(aiLines.some((line, index) => line !== sourceLines[index]));
       setRawText(sourceLines.join("\n"));
 
       const grouped = new Map<string, ParsedItem>();
       const misses: string[] = [];
       const suggested: { line: string; product: Product; score: number; quantity: number }[] = [];
 
-      for (const line of sourceLines) {
+      for (const line of aiLines) {
         const match = matchProduct(line, products, 0.5);
         const quantity = extractQuantity(line);
         if (!match) {
@@ -340,6 +345,12 @@ export function OrderImageScannerModal({
                     <Text style={styles.sectionTitle}>Recognized products</Text>
                     <Text style={styles.sectionMeta}>{selectedCount} selected</Text>
                   </View>
+                  {aiUsed && (
+                    <View style={styles.aiBadge}>
+                      <MaterialDesignIcons name="brain" size={17} color={colors.brandPrimary} />
+                      <Text style={styles.aiBadgeText}>On-device AI corrected OCR matches</Text>
+                    </View>
+                  )}
 
                   {items.length === 0 ? (
                     <View style={styles.emptyBox}>
@@ -496,6 +507,8 @@ const useStyles = makeStyles((colors) => ({
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
   sectionTitle: { fontSize: 17, fontWeight: "900", color: colors.onSurface },
   sectionMeta: { fontSize: 12, color: colors.brandPrimary, fontWeight: "800" },
+  aiBadge: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 11, paddingVertical: 9, borderRadius: 10, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandPrimary + "40" },
+  aiBadgeText: { fontSize: 11, color: colors.brandPrimary, fontWeight: "800" },
   itemCard: { flexDirection: "row", alignItems: "center", gap: 9, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, backgroundColor: colors.surfaceSecondary },
   itemCardOff: { opacity: 0.55 },
   check: { width: 28, alignItems: "center" },
