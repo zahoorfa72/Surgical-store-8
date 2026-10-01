@@ -136,7 +136,7 @@ export async function enhanceOrderLinesWithAI(
     const corrections = new Map(
       (object.items ?? [])
         .filter((x) => validNames.has(x.productName) && x.ocrLine)
-        .map((x) => [normalize(x.ocrLine), x.productName]),
+        .map((x) => [normalize(x.ocrLine), `${Math.max(1, Math.floor(x.quantity || 1))} x ${x.productName}`]),
     );
 
     return lines.map((line) => corrections.get(normalize(line)) ?? line);
