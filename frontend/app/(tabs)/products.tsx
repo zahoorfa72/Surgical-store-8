@@ -138,9 +138,11 @@ export default function Products() {
                   <Text style={styles.meta}>
                     Buy {money(item.purchase_price)} · Sell {money(item.sale_price)}
                   </Text>
-                  <Text style={styles.itemFinance}>
-                    Stock value {money(Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * (Number(item.sale_price ?? 0) - Number(item.purchase_price ?? 0)))}
-                  </Text>
+                  {showInventoryProfitMargin && (
+                    <Text style={styles.itemFinance}>
+                      Stock value {money(Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * (Number(item.sale_price ?? 0) - Number(item.purchase_price ?? 0)))}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.rowRight}>
                   <Text style={[styles.qty, low && { color: colors.warning }]}>{item.quantity}</Text>
