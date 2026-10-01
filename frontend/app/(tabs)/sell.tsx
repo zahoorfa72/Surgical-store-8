@@ -56,8 +56,16 @@ export default function Sell() {
   const [reviewSearch, setReviewSearch] = useState("");
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [addProductSearch, setAddProductSearch] = useState("");
-  const [showSaleDetails, setShowSaleDetails] = useState(true);
   const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
+  const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+
+  useEffect(() => {
+    void AsyncStorage.getItem("ssm.showSellProfitDiscount").then((raw) => {
+      if (raw !== null) {
+        try { setShowSellProfitDiscount(JSON.parse(raw) !== false); } catch {}
+      }
+    });
+  }, []);
 
   const onScanned = (value: string) => {
     setScanOpen(false);
@@ -440,18 +448,7 @@ export default function Sell() {
               <Text style={styles.reviewNoMatch}>No matching product in the cart or inventory.</Text>
             )}
 
-            <View style={styles.saleDetailsToggleRow}>
-              <Text style={styles.saleDetailsToggleLabel}>Sale discount & profit</Text>
-              <Pressable
-                accessibilityRole="switch"
-                accessibilityState={{ checked: showSaleDetails }}
-                onPress={() => setShowSaleDetails((v) => !v)}
-                style={[styles.detailsToggle, showSaleDetails && styles.detailsToggleOn]}
-              >
-                <View style={[styles.detailsToggleThumb, showSaleDetails && styles.detailsToggleThumbOn]} />
-              </Pressable>
-            </View>
-            {showSaleDetails && (
+            {showSellProfitDiscount && ( 
               <>
             <View style={styles.discountRow}>
               <Text style={styles.discountLabel}>Discount</Text>
