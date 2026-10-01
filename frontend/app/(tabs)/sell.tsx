@@ -257,6 +257,9 @@ export default function Sell() {
         <Pressable testID="scan-to-cart-button" style={styles.scanBtn} onPress={() => setScanOpen(true)}>
           <MaterialDesignIcons name="barcode-scan" size={24} color={colors.onBrandPrimary} />
         </Pressable>
+        <Pressable testID="scan-order-image-sell-button" style={styles.scanBtn} onPress={() => setOrderImageScanOpen(true)}>
+          <MaterialDesignIcons name="text-box-search-outline" size={23} color={colors.onBrandPrimary} />
+        </Pressable>
       </View>
 
       <FlatList
