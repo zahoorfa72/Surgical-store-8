@@ -55,6 +55,7 @@ export default function Sell() {
   const [reviewSearch, setReviewSearch] = useState("");
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [addProductSearch, setAddProductSearch] = useState("");
+  const [showSaleDetails, setShowSaleDetails] = useState(true);
 
   const onScanned = (value: string) => {
     setScanOpen(false);
@@ -395,6 +396,19 @@ export default function Sell() {
               <Text style={styles.reviewNoMatch}>No matching product in the cart or inventory.</Text>
             )}
 
+            <View style={styles.saleDetailsToggleRow}>
+              <Text style={styles.saleDetailsToggleLabel}>Sale discount & profit</Text>
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityState={{ checked: showSaleDetails }}
+                onPress={() => setShowSaleDetails((v) => !v)}
+                style={[styles.detailsToggle, showSaleDetails && styles.detailsToggleOn]}
+              >
+                <View style={[styles.detailsToggleThumb, showSaleDetails && styles.detailsToggleThumbOn]} />
+              </Pressable>
+            </View>
+            {showSaleDetails && (
+              <>
             <View style={styles.discountRow}>
               <Text style={styles.discountLabel}>Discount</Text>
               <TextInput
@@ -405,6 +419,8 @@ export default function Sell() {
                 onChangeText={setDiscount}
               />
             </View>
+              </>
+            )}
 
             <Pressable
               testID="credit-toggle"
@@ -738,6 +754,12 @@ const useStyles = makeStyles((colors) => ({
   },
   lineTotalBox: { flex: 1, gap: 4 },
   lineTotal: { fontSize: 15, fontWeight: "800", color: colors.brandPrimary, paddingVertical: 10 },
+  saleDetailsToggleRow: { marginTop: 4, minHeight: 40, paddingHorizontal: 4, flexDirection:"row", alignItems:"center", justifyContent:"space-between" },
+  saleDetailsToggleLabel: { fontSize:12, fontWeight:"700", color:colors.muted },
+  detailsToggle: { width:42, height:24, borderRadius:12, backgroundColor:colors.border, padding:2, justifyContent:"center" },
+  detailsToggleOn: { backgroundColor:colors.brandPrimary },
+  detailsToggleThumb: { width:20, height:20, borderRadius:10, backgroundColor:colors.surface, alignSelf:"flex-start" },
+  detailsToggleThumbOn: { alignSelf:"flex-end" },
   discountRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   discountLabel: { fontSize: 15, fontWeight: "600", color: colors.onSurface },
   creditRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 4 },
