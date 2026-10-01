@@ -124,6 +124,7 @@ export function OrderImageScannerModal({
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [items, setItems] = useState<ParsedItem[]>([]);
   const [unmatched, setUnmatched] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<{ line: string; product: Product; score: number; quantity: number }[]>([]);
   const [processing, setProcessing] = useState(false);
   const [rawText, setRawText] = useState("");
 
@@ -133,6 +134,7 @@ export function OrderImageScannerModal({
     setImageUri(null);
     setItems([]);
     setUnmatched([]);
+    setSuggestions([]);
     setRawText("");
   };
 
@@ -155,12 +157,15 @@ export function OrderImageScannerModal({
 
       const grouped = new Map<string, ParsedItem>();
       const misses: string[] = [];
+      const suggested: { line: string; product: Product; score: number; quantity: number }[] = [];
 
       for (const line of sourceLines) {
-        const match = matchProduct(line, products);
+        const match = matchProduct(line, products, 0.5);
         const quantity = extractQuantity(line);
         if (!match) {
+          const suggestion = matchProduct(line, products, 0.3);
           misses.push(line);
+          if (suggestion) suggested.push({ line, product: suggestion.product, score: suggestion.score, quantity });
           continue;
         }
         const existing = grouped.get(match.product.id);
@@ -182,6 +187,7 @@ export function OrderImageScannerModal({
 
       setItems(Array.from(grouped.values()));
       setUnmatched(misses);
+      setSuggestions(suggested.filter((x) => x.product.quantity > 0).slice(0, 20));
     } catch (error: any) {
       Alert.alert("Could not read order", error?.message || "Please use a clearer image and try again.");
       reset();
