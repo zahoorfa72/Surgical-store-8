@@ -120,7 +120,7 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME) });
+      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME, showSellProfitDiscount) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
       else toast("Sharing not available", "error");
     } catch (e: any) {
