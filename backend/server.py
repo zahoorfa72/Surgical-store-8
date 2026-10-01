@@ -1808,23 +1808,26 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
 # ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
-def range_start(range_: str) -> Optional[datetime]:
+def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
+    # Convert the device local calendar boundary to UTC so Today/Week/Month
+    # match the cashier's local calendar rather than UTC midnight.
     now = datetime.now(timezone.utc)
+    local_now = now + timedelta(minutes=tz_offset_minutes)
     if range_ == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return local_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
     if range_ == "week":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return start - timedelta(days=(start.weekday()))
+        start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start - timedelta(days=start.weekday()) - timedelta(minutes=tz_offset_minutes)
     if range_ == "month":
-        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
     if range_ == "year":
-        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
     return None  # all
 
 
 @api.get("/reports/summary")
 async def report_summary(_: Staff, range: str = "today"):
-    start = range_start(range)
+    start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
 
     # Returns/payments are dated when the cash movement happens. They must
@@ -1967,7 +1970,7 @@ async def report_customers(_: Staff, range: str = "all"):
 
 
 @api.get("/reports/day-close")
-async def report_day_close(user: AnyUser, range: str = "today"):
+async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
     sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
