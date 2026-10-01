@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -11,10 +11,10 @@ import {
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { storage } from "@/src/utils/storage";
 
 import { useParties, useProducts, qk } from "@/src/data";
 import { useAuth } from "@/src/auth";
@@ -59,13 +59,15 @@ export default function Sell() {
   const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
 
-  useEffect(() => {
-    void AsyncStorage.getItem("ssm.showSellProfitDiscount").then((raw) => {
-      if (raw !== null) {
-        try { setShowSellProfitDiscount(JSON.parse(raw) !== false); } catch {}
-      }
-    });
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void storage.getItem<boolean>("ssm.showSellProfitDiscount", true).then((value) => {
+        if (active) setShowSellProfitDiscount(value !== false);
+      });
+      return () => { active = false; };
+    }, []),
+  );
 
   const onScanned = (value: string) => {
     setScanOpen(false);
@@ -487,7 +489,7 @@ export default function Sell() {
 
             <View style={styles.totalsCard}>
               <Row label="Subtotal" value={money(subtotal)} />
-              <Row label="Discount" value={"- " + money(discountNum)} />
+              {showSellProfitDiscount && <Row label="Discount" value={"- " + money(discountNum)} />}
               <View style={styles.totalDivider} />
               <Row label={credit ? "Total (on credit)" : "Total payable"} value={money(total)} bold />
             </View>
@@ -568,7 +570,7 @@ export default function Sell() {
                       <Text style={styles.heldProducts} numberOfLines={2}>{h.cart.map(x => x.name).join(" · ")}</Text>
                       <View style={styles.heldFinanceRow}>
                         <Text style={styles.heldFinanceText}>Subtotal {money(subtotal)}</Text>
-                        <Text style={styles.heldDiscount}>Discount -{money(discountValue)}</Text>
+                        {showSellProfitDiscount && <Text style={styles.heldDiscount}>Discount -{money(discountValue)}</Text>}
                         <Text style={styles.heldTotal}>Total {money(totalValue)}</Text>
                       </View>
                     </View>
