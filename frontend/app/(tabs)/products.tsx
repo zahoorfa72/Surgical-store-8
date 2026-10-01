@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
@@ -28,11 +29,15 @@ export default function Products() {
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
 
-  useEffect(() => {
-    void storage.getItem<boolean>("ssm.showInventoryProfitMargin", true).then((value) => {
-      setShowInventoryProfitMargin(value !== false);
-    });
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void storage.getItem<boolean>("ssm.showInventoryProfitMargin", true).then((value) => {
+        if (active) setShowInventoryProfitMargin(value !== false);
+      });
+      return () => { active = false; };
+    }, []),
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
