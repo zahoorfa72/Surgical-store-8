@@ -38,13 +38,25 @@ export default function Settings() {
   const [uploading, setUploading] = useState(false);
   const [receiptFormat, setReceiptFormat] = useState<"thermal" | "a4">("thermal");
   const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
+  const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+  const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
   }, [settings?.store_name]);
   useEffect(() => {
     setServerUrl(getApiBaseOverride() ?? "");
-    void Promise.all([storage.getItem<string>("ssm.receiptFormat", "thermal"), storage.getItem<string>("ssm.receiptWidth", "72")]).then(([format, width]) => { setReceiptFormat(format === "a4" ? "a4" : "thermal"); setReceiptWidth(width === "56" ? 56 : 72); });
+    void Promise.all([
+      storage.getItem<string>("ssm.receiptFormat", "thermal"),
+      storage.getItem<string>("ssm.receiptWidth", "72"),
+      storage.getItem<boolean>("ssm.showSellProfitDiscount", true),
+      storage.getItem<boolean>("ssm.showInventoryProfitMargin", true),
+    ]).then(([format, width, sellDetails, inventoryMargin]) => {
+      setReceiptFormat(format === "a4" ? "a4" : "thermal");
+      setReceiptWidth(width === "56" ? 56 : 72);
+      setShowSellProfitDiscount(sellDetails !== false);
+      setShowInventoryProfitMargin(inventoryMargin !== false);
+    });
   }, []);
 
   const doLogout = async () => {
@@ -209,6 +221,53 @@ export default function Settings() {
           )}
         </View>
 
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Financial visibility</Text>
+            <Text style={styles.cardHint}>Control whether staff see sale discount/profit details and the inventory profit margin panel.</Text>
+            <View style={styles.visibilityRow}>
+              <View style={styles.visibilityText}>
+                <Text style={styles.visibilityLabel}>Show discount & profit in Sell</Text>
+                <Text style={styles.visibilityHint}>Applies to every sale screen on this device.</Text>
+              </View>
+              <Pressable
+                testID="show-sell-profit-discount-toggle"
+                accessibilityRole="switch"
+                accessibilityState={{ checked: showSellProfitDiscount }}
+                onPress={async () => {
+                  const next = !showSellProfitDiscount;
+                  setShowSellProfitDiscount(next);
+                  await storage.setItem("ssm.showSellProfitDiscount", next);
+                  toast(next ? "Sell discount & profit shown" : "Sell discount & profit hidden", "success");
+                }}
+                style={[styles.visibilityToggle, showSellProfitDiscount && styles.visibilityToggleOn]}
+              >
+                <View style={[styles.visibilityThumb, showSellProfitDiscount && styles.visibilityThumbOn]} />
+              </Pressable>
+            </View>
+            <View style={styles.visibilityRow}>
+              <View style={styles.visibilityText}>
+                <Text style={styles.visibilityLabel}>Show inventory profit margin</Text>
+                <Text style={styles.visibilityHint}>Controls the Inventory finance / margin panel.</Text>
+              </View>
+              <Pressable
+                testID="show-inventory-profit-margin-toggle"
+                accessibilityRole="switch"
+                accessibilityState={{ checked: showInventoryProfitMargin }}
+                onPress={async () => {
+                  const next = !showInventoryProfitMargin;
+                  setShowInventoryProfitMargin(next);
+                  await storage.setItem("ssm.showInventoryProfitMargin", next);
+                  toast(next ? "Inventory profit margin shown" : "Inventory profit margin hidden", "success");
+                }}
+                style={[styles.visibilityToggle, showInventoryProfitMargin && styles.visibilityToggleOn]}
+              >
+                <View style={[styles.visibilityThumb, showInventoryProfitMargin && styles.visibilityThumbOn]} />
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         <View style={styles.infoCard}>
           <InfoRow icon="store" label="Store" value={settings?.store_name ?? "Surgical Store"} />
           <InfoRow icon="cash" label="Currency" value="Rs (PKR)" />
@@ -304,6 +363,14 @@ const useStyles = makeStyles((colors) => ({
   widthBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   widthText: { fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
   widthTextActive: { color: colors.onBrandPrimary },
+  visibilityRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.divider },
+  visibilityText: { flex: 1, gap: 3 },
+  visibilityLabel: { fontSize: 14, fontWeight: "700", color: colors.onSurface },
+  visibilityHint: { fontSize: 11, color: colors.muted, lineHeight: 16 },
+  visibilityToggle: { width: 46, height: 26, borderRadius: 13, backgroundColor: colors.border, padding: 3, justifyContent: "center" },
+  visibilityToggleOn: { backgroundColor: colors.brandPrimary },
+  visibilityThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.surface, alignSelf: "flex-start" },
+  visibilityThumbOn: { alignSelf: "flex-end" },
   infoCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
   infoRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.divider },
   infoLabel: { flex: 1, fontSize: 15, color: colors.onSurface },
