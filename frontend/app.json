@@ -11,8 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.offlinesync.vbbelt",
       "infoPlist": {
-        "NSCameraUsageDescription": "Scan product barcodes to add items quickly",
-        "NSPhotoLibraryUsageDescription": "Choose a store logo from your photos"
+        "NSCameraUsageDescription": "Take order photos for on-device OCR or scan product barcodes",
+        "NSPhotoLibraryUsageDescription": "Choose an order image for OCR or a store logo from your photos"
       }
     },
     "android": {
@@ -62,7 +62,22 @@
       ],
       "expo-background-task",
       "@react-native-google-signin/google-signin",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-mlkit-ocr",
+        {
+          "iosEngine": "auto"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0",
+            "useFrameworks": "static"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
