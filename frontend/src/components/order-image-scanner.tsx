@@ -114,40 +114,45 @@ function levenshtein(a: string, b: string) {
 
 function matchProduct(line: string, products: Product[], minimum = 0.5) {
   const source = normalize(cleanItemText(line) || line);
-  const sourceTokens = new Set(tokens(source));
+  const sourceTokens = tokens(source);
+  const sourceSet = new Set(sourceTokens);
   let best: { product: Product; score: number } | null = null;
 
   for (const p of products) {
     const name = normalize(p.name);
     const nameTokens = tokens(p.name);
-    const overlap = nameTokens.filter((t) => sourceTokens.has(t)).length;
-    let score = nameTokens.length ? overlap / nameTokens.length : 0;
-    if (source && (source.includes(name) || name.includes(source))) score = Math.max(score, 0.9);
+    if (!name) continue;
+
+    let score = nameTokens.length
+      ? nameTokens.filter((t) => sourceSet.has(t)).length / nameTokens.length
+      : 0;
+
+    if (source && (source === name || source.includes(name) || name.includes(source))) score = Math.max(score, 0.92);
     if (p.sku && normalize(String(p.sku)) === source) score = 1;
     if (p.barcode && normalize(String(p.barcode)) === source) score = 1;
 
-    if (source && name) {
-      const distance = levenshtein(source, name);
-      const editScore = 1 - distance / Math.max(1, source.length, name.length);
-      const typoScore = bigramScore(source, name);
-      const confusionScore = Math.max(
-        ...comparisonForms(source).flatMap((a) => comparisonForms(name).map((b) => bigramScore(a, b))),
-      );
-      score = Math.max(score, editScore, typoScore, confusionScore);
+    const editScore = 1 - levenshtein(source, name) / Math.max(1, source.length, name.length);
+    const typoScore = bigramScore(source, name);
+    const confusionScore = Math.max(
+      ...comparisonForms(source).flatMap((a) => comparisonForms(name).map((b) => bigramScore(a, b))),
+    );
 
-      const sourceWords = tokens(source);
-      for (const sw of sourceWords) {
-        if (sw.length < 3) continue;
-        let bestWord = 0;
-        for (const nw of nameTokens) {
-          if (nw.length < 3) continue;
+    // Strong word-level recovery for handwriting that destroys one word but leaves
+    // the other words recognizable.
+    const wordScores = sourceTokens.map((sw) => {
+      if (sw.length < 2) return 0;
+      return Math.max(
+        ...nameTokens.map((nw) => {
           const d = levenshtein(sw, nw);
-          const wordScore = 1 - d / Math.max(sw.length, nw.length);
-          bestWord = Math.max(bestWord, wordScore, bigramScore(sw, nw));
-        }
-        if (bestWord >= 0.65) score = Math.max(score, bestWord * 0.88);
-      }
-    }
+          return Math.max(1 - d / Math.max(sw.length, nw.length), bigramScore(sw, nw));
+        }),
+      );
+    });
+    const wordRecovery = wordScores.length
+      ? wordScores.reduce((sum, value) => sum + value, 0) / wordScores.length
+      : 0;
+
+    score = Math.max(score, editScore, typoScore, confusionScore, wordRecovery * 0.97);
     if (score > (best?.score ?? 0)) best = { product: p, score };
   }
   return best && best.score >= minimum ? best : null;
@@ -197,12 +202,19 @@ export function OrderImageScannerModal({
     setAiUsed(false);
     try {
       const result = await recognizeText(uri);
-      const lines = (result.blocks ?? [])
-        .flatMap((b: any) => (b.lines ?? []).map((l: any) => String(l.text ?? "")))
-        .map((x: string) => x.trim())
-        .filter(Boolean);
 
-      const sourceLines = lines.length ? lines : String(result.text ?? "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      // Build the OCR input from BOTH ML Kit line blocks and the full OCR text.
+      // This recovers lines that are occasionally missing from one representation.
+      const blockLines = (result.blocks ?? [])
+        .flatMap((b: any) => (b.lines ?? []).map((l: any) => String(l.text ?? "")));
+      const fullTextLines = String(result.text ?? "").split(/\r?\n/);
+      const sourceLines = [...blockLines, ...fullTextLines]
+        .map((x: string) => x.trim())
+        .filter(Boolean)
+        .filter((line, index, all) => {
+          const key = normalize(line);
+          return key && all.findIndex((other) => normalize(other) === key) === index;
+        });
       const aiLines = await enhanceOrderLinesWithAI(sourceLines, products);
       setAiUsed(aiLines.some((line, index) => line !== sourceLines[index]));
       setRawText(sourceLines.join("\n"));
