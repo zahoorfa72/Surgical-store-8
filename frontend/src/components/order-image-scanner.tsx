@@ -42,11 +42,49 @@ function tokens(value: string) {
   return normalize(value).split(" ").filter((x) => x.length > 1 && !/^\d+(\.\d+)?$/.test(x));
 }
 
+function comparisonForms(value: string) {
+  const base = normalize(value).replace(/\s+/g, "");
+  const confused = base
+    .replace(/[oO]/g, "0")
+    .replace(/[iIlL]/g, "1")
+    .replace(/[sS]/g, "5")
+    .replace(/[bB]/g, "8")
+    .replace(/[gG]/g, "6")
+    .replace(/[zZ]/g, "2");
+  return [base, confused];
+}
+
+function bigramScore(a: string, b: string) {
+  const aa = normalize(a).replace(/\s+/g, "");
+  const bb = normalize(b).replace(/\s+/g, "");
+  if (aa === bb) return 1;
+  if (aa.length < 2 || bb.length < 2) return 0;
+  const counts = new Map<string, number>();
+  for (let i = 0; i < aa.length - 1; i++) {
+    const key = aa.slice(i, i + 2);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let common = 0;
+  for (let i = 0; i < bb.length - 1; i++) {
+    const key = bb.slice(i, i + 2);
+    const n = counts.get(key) ?? 0;
+    if (n > 0) {
+      common++;
+      counts.set(key, n - 1);
+    }
+  }
+  return (2 * common) / Math.max(1, aa.length + bb.length - 2);
+}
+
 function extractQuantity(line: string) {
-  const matches = line.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
-  if (!matches.length) return 1;
-  const last = Number(matches[matches.length - 1]);
-  return Number.isFinite(last) && last > 0 ? Math.max(1, Math.floor(last)) : 1;
+  const normalized = normalize(line);
+  const explicit = normalized.match(/(?:qty|quantity|pcs|pieces|pack|packs|x)\s*[:=-]?\s*(\d+)\b/i);
+  if (explicit) return Math.max(1, Number(explicit[1]));
+  const prefix = normalized.match(/^\s*(\d+)\s*(?:x|pcs|pieces)?\b/i);
+  if (prefix) return Math.max(1, Number(prefix[1]));
+  const suffix = normalized.match(/(?:x|pcs|pieces)\s*(\d+)\s*$/i);
+  if (suffix) return Math.max(1, Number(suffix[1]));
+  return 1;
 }
 
 function cleanItemText(line: string) {
@@ -89,15 +127,24 @@ function matchProduct(line: string, products: Product[], minimum = 0.5) {
 
     if (source && name) {
       const distance = levenshtein(source, name);
-      score = Math.max(score, 1 - distance / Math.max(1, source.length, name.length));
-      for (const sw of tokens(source)) {
+      const editScore = 1 - distance / Math.max(1, source.length, name.length);
+      const typoScore = bigramScore(source, name);
+      const confusionScore = Math.max(
+        ...comparisonForms(source).flatMap((a) => comparisonForms(name).map((b) => bigramScore(a, b))),
+      );
+      score = Math.max(score, editScore, typoScore, confusionScore);
+
+      const sourceWords = tokens(source);
+      for (const sw of sourceWords) {
         if (sw.length < 3) continue;
+        let bestWord = 0;
         for (const nw of nameTokens) {
           if (nw.length < 3) continue;
           const d = levenshtein(sw, nw);
           const wordScore = 1 - d / Math.max(sw.length, nw.length);
-          if (wordScore >= 0.65) score = Math.max(score, wordScore * 0.82);
+          bestWord = Math.max(bestWord, wordScore, bigramScore(sw, nw));
         }
+        if (bestWord >= 0.65) score = Math.max(score, bestWord * 0.88);
       }
     }
     if (score > (best?.score ?? 0)) best = { product: p, score };
