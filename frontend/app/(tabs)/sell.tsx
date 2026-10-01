@@ -257,8 +257,9 @@ export default function Sell() {
         <Pressable testID="scan-to-cart-button" style={styles.scanBtn} onPress={() => setScanOpen(true)}>
           <MaterialDesignIcons name="barcode-scan" size={24} color={colors.onBrandPrimary} />
         </Pressable>
-        <Pressable testID="scan-order-image-sell-button" style={styles.scanBtn} onPress={() => setOrderImageScanOpen(true)}>
-          <MaterialDesignIcons name="text-box-search-outline" size={23} color={colors.onBrandPrimary} />
+        <Pressable testID="scan-order-image-sell-button" style={styles.scanOrderSellBtn} onPress={() => setOrderImageScanOpen(true)}>
+          <MaterialDesignIcons name="text-box-search-outline" size={21} color={colors.onBrandPrimary} />
+          <Text style={styles.scanOrderSellText}>Scan order</Text>
         </Pressable>
       </View>
 
@@ -672,6 +673,17 @@ const useStyles = makeStyles((colors) => ({
     alignItems: "center",
     justifyContent: "center",
   },
+  scanOrderSellBtn: {
+    height: 48,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: colors.brandPrimary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  scanOrderSellText: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "900" },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
   prodRow: {
     flexDirection: "row",
