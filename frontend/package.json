@@ -57,7 +57,9 @@
     "@react-native-google-signin/google-signin": "16.1.5",
     "expo-background-task": "~57.0.20",
     "expo-task-manager": "~57.0.1",
-    "expo-notifications": "~57.0.21"
+    "expo-notifications": "~57.0.21",
+    "expo-mlkit-ocr": "0.2.7",
+    "expo-build-properties": "57.0.22"
   },
   "devDependencies": {
     "@types/react": "19.2.10",
