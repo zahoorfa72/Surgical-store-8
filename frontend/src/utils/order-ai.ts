@@ -122,11 +122,17 @@ async function prepareLocalAi(): Promise<boolean> {
         return true;
       }
       const models = await getDownloadableModels();
-      const local = models.find((m: any) => m?.name === "qwen3-0.6b" || m?.id === "qwen3-0.6b" || m?.modelId === "qwen3-0.6b");
-      if (!local) return false;
-      if (typeof (local as any).meetsRequirements === "function" && !(await (local as any).meetsRequirements())) return false;
-      await downloadModel(local as any);
-      await setModel(local as any, { backend: "cpu" });
+      const small = models.find(
+        (m: any) => m?.id === "qwen3-0.6b" && m?.meetsRequirements,
+      );
+      if (!small) return false;
+      if (small.status !== "downloaded" && small.status !== "ready") {
+        await downloadModel(small.id);
+      }
+      await setModel(small.id, {
+        backend: "cpu",
+        generation: { temperature: 0.1, topK: 20 },
+      });
       return true;
     } catch {
       return false;
