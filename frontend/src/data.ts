@@ -202,7 +202,7 @@ export function usePurchaseReturns() {
   return useQuery({ queryKey: qk.purchaseReturns, queryFn: () => localOrFetch(qk.purchaseReturns, () => apiRequest<any[]>("/purchase-returns"), []) });
 }
 export function useDayClose(range: string) {
-  return useQuery({ queryKey: qk.dayClose(range), queryFn: () => localOrFetch(qk.dayClose(range), () => apiRequest<DayClose>(`/reports/day-close?range=${range}`), { me: { user_name: "", transactions: 0, units: 0, gross_sales: 0, discount: 0, range }, by_user: null }) });
+  return useQuery({ queryKey: qk.dayClose(range), queryFn: () => { const tzOffsetMinutes = new Date().getTimezoneOffset(); return localOrFetch(qk.dayClose(range), () => apiRequest<DayClose>(`/reports/day-close?range=${range}&tz_offset_minutes=${tzOffsetMinutes}`), { me: { user_name: "", transactions: 0, units: 0, gross_sales: 0, discount: 0, range }, by_user: null }); } });
 }
 export function useSettings() {
   return useQuery({ queryKey: qk.settings, queryFn: () => localOrFetch(qk.settings, () => getSettings(), { store_name: "Surgical Store", has_logo: false, logo_version: 0 }) });
