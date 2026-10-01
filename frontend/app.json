@@ -77,6 +77,12 @@
             "useFrameworks": "static"
           }
         }
+      ],
+      [
+        "expo-ai-kit",
+        {
+          "llm": true
+        }
       ]
     ],
     "experiments": {
