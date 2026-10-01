@@ -56,27 +56,53 @@ function cleanItemText(line: string) {
     .trim();
 }
 
-function matchProduct(line: string, products: Product[]) {
-  const source = normalize(line);
-  const cleaned = cleanItemText(line);
-  const sourceTokens = new Set(tokens(cleaned || source));
+function levenshtein(a: string, b: string) {
+  const aa = normalize(a);
+  const bb = normalize(b);
+  const prev = Array.from({ length: bb.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= aa.length; i++) {
+    let left = i;
+    for (let j = 1; j <= bb.length; j++) {
+      const cost = aa[i - 1] === bb[j - 1] ? 0 : 1;
+      const next = Math.min(prev[j] + 1, left + 1, prev[j - 1] + cost);
+      prev[j - 1] = left;
+      left = next;
+    }
+    prev[bb.length] = left;
+  }
+  return prev[bb.length];
+}
+
+function matchProduct(line: string, products: Product[], minimum = 0.5) {
+  const source = normalize(cleanItemText(line) || line);
+  const sourceTokens = new Set(tokens(source));
   let best: { product: Product; score: number } | null = null;
 
   for (const p of products) {
-    const fields = [p.name, p.barcode].filter(Boolean).map(String);
     const name = normalize(p.name);
-    const fieldText = normalize(fields.join(" "));
     const nameTokens = tokens(p.name);
     const overlap = nameTokens.filter((t) => sourceTokens.has(t)).length;
     let score = nameTokens.length ? overlap / nameTokens.length : 0;
-    if (source.includes(name) || name.includes(cleaned)) score = Math.max(score, 0.92);
-    if (fieldText && source.includes(fieldText)) score = Math.max(score, 0.95);
-    if (p.sku && normalize(String(p.sku)) === cleaned) score = 1;
-    if (p.barcode && normalize(String(p.barcode)) === cleaned) score = 1;
+    if (source && (source.includes(name) || name.includes(source))) score = Math.max(score, 0.9);
+    if (p.sku && normalize(String(p.sku)) === source) score = 1;
+    if (p.barcode && normalize(String(p.barcode)) === source) score = 1;
+
+    if (source && name) {
+      const distance = levenshtein(source, name);
+      score = Math.max(score, 1 - distance / Math.max(1, source.length, name.length));
+      for (const sw of tokens(source)) {
+        if (sw.length < 3) continue;
+        for (const nw of nameTokens) {
+          if (nw.length < 3) continue;
+          const d = levenshtein(sw, nw);
+          const wordScore = 1 - d / Math.max(sw.length, nw.length);
+          if (wordScore >= 0.65) score = Math.max(score, wordScore * 0.82);
+        }
+      }
+    }
     if (score > (best?.score ?? 0)) best = { product: p, score };
   }
-
-  return best && best.score >= 0.45 ? best : null;
+  return best && best.score >= minimum ? best : null;
 }
 
 export function OrderImageScannerModal({
