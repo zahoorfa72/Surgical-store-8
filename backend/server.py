@@ -1826,7 +1826,7 @@ def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
 
 
 @api.get("/reports/summary")
-async def report_summary(_: Staff, range: str = "today"):
+async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
 
@@ -1860,6 +1860,14 @@ async def report_summary(_: Staff, range: str = "today"):
     supplier_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "supplier_refund"), 2)
     customer_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "customer_refund"), 2)
 
+    # Remaining Balance is a store-wide running cash figure, not a period
+    # statistic. A new calendar day must carry forward yesterday's balance
+    # instead of resetting to the opening budget. Reports still use the
+    # selected range for their sales/profit/expense figures below.
+    all_returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    all_expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(20000)
+    all_payments = await db.payments.find({"deleted": {"$ne": True}}).to_list(20000)
+
     # Profit model:
     #   Gross profit = net sales − cost of goods sold
     #   Net profit   = gross profit − personal expenses (ONLY personal hits profit)
@@ -1882,21 +1890,43 @@ async def report_summary(_: Staff, range: str = "today"):
         if sale and not sale.get("credit", False):
             cash_sale_returns += float(r.get("refund_total", 0))
     # A purchase return changes inventory and the supplier payable. It is NOT
-    # automatically a cash receipt: the supplier may credit the account
+    # automatically a cash receipt; the supplier may credit the account
     # instead of handing back cash. Cash changes only through an explicit
-    # supplier payment/receipt transaction, preventing a return from creating
-    # a second cash movement.
+    # supplier payment/receipt transaction.
     budget_doc = await db.budget.find_one({"_id": "singleton"})
     opening_cash = float((budget_doc or {}).get("opening_amount", 0) or 0)
     purchase_return_refunds = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
-    # Remaining balance rule (confirmed by store owner):
-    #   base remaining = net sales − gross profit, then subtract every expense
-    #   EXCEPT personal expenses. Personal expenses only affect Net Profit.
-    expenses_except_personal = round(cogs_expenses + operating_expenses, 2)
+
+    # IMPORTANT: Remaining Balance is cumulative across the lifetime of the
+    # store. It must not reset to the opening budget at midnight or change
+    # merely because the user switches Daily/Weekly/Monthly/Yearly reports.
+    # Keep period-specific KPIs above, but calculate this figure from ALL
+    # historical cash/profit movements.
+    all_cash_sales = round(sum(s.get("total", 0) for s in all_sales if not s.get("credit", False)), 2)
+    all_cash_sale_returns = 0.0
+    for r in all_returns:
+        sale = next((s for s in all_sales if oid(s["_id"]) == r.get("sale_id")), None)
+        if sale and not sale.get("credit", False):
+            all_cash_sale_returns += float(r.get("refund_total", 0))
+    all_customer_receipts = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "receive"), 2)
+    all_supplier_refunds = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "supplier_refund"), 2)
+    all_customer_refunds = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "customer_refund"), 2)
+    all_supplier_payments = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "pay"), 2)
+    all_cogs_expenses = round(sum(e.get("amount", 0) for e in all_expenses if e.get("bucket") == "cogs"), 2)
+    all_operating_expenses = round(sum(e.get("amount", 0) for e in all_expenses if e.get("bucket") == "operating"), 2)
+    all_gross_revenue = round(sum(s.get("total", 0) for s in all_sales), 2)
+    all_returns_total = round(sum(r.get("refund_total", 0) for r in all_returns), 2)
+    all_returns_cogs = round(sum(r.get("refund_cogs", 0) for r in all_returns), 2)
+    all_net_sales = round(all_gross_revenue - all_returns_total, 2)
+    all_cogs_goods = round(sum(s.get("cogs", 0) for s in all_sales) - all_returns_cogs, 2)
+    all_gross_profit = round(all_net_sales - all_cogs_goods, 2)
+    all_expenses_except_personal = round(all_cogs_expenses + all_operating_expenses, 2)
+
     remaining_balance = round(
-        opening_cash + cash_sales - cash_sale_returns + customer_receipts
-        + supplier_refunds - supplier_payments - customer_refunds
-        - expenses_except_personal - gross_profit,
+        opening_cash + all_cash_sales - all_cash_sale_returns
+        + all_customer_receipts + all_supplier_refunds
+        - all_supplier_payments - all_customer_refunds
+        - all_expenses_except_personal - all_gross_profit,
         2,
     )
 
@@ -1943,8 +1973,8 @@ async def report_summary(_: Staff, range: str = "today"):
 
 
 @api.get("/reports/customers")
-async def report_customers(_: Staff, range: str = "all"):
-    start = range_start(range)
+async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
+    start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
     sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
@@ -1971,7 +2001,7 @@ async def report_customers(_: Staff, range: str = "all"):
 
 @api.get("/reports/day-close")
 async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
-    start = range_start(range)
+    start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
     sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
 
