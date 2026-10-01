@@ -78,7 +78,19 @@ export default function Sell() {
   const total = Math.max(0, subtotal - discountNum);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
-  const reviewedCart = useMemo(() => { const q = reviewSearch.trim().toLowerCase(); return cart.filter((c) => !q || c.name.toLowerCase().includes(q)); }, [cart, reviewSearch]);
+  const reviewedCart = useMemo(() => {
+    const q = reviewSearch.trim().toLowerCase();
+    return cart.filter((c) => !q || c.name.toLowerCase().includes(q));
+  }, [cart, reviewSearch]);
+
+  const reviewInventoryMatches = useMemo(() => {
+    const q = reviewSearch.trim().toLowerCase();
+    if (!q) return [];
+    return (products ?? [])
+      .filter((p) => !cartMap.has(p.id))
+      .filter((p) => p.name.toLowerCase().includes(q) || String(p.sku ?? "").toLowerCase().includes(q) || String(p.barcode ?? "").toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [products, cartMap, reviewSearch]);
   const filteredHeldSales = useMemo(() => {
     const q = heldSearch.trim().toLowerCase();
     if (!q) return heldSales;
@@ -291,7 +303,7 @@ export default function Sell() {
             topInset={insets.top}
             onBack={() => setReviewOpen(false)}
           />
-          <View style={styles.reviewSearchRow}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search items in this sale" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View>
+          <View style={styles.reviewSearchRow}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View>
           <KeyboardAwareScrollView
             contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}
             bottomOffset={20}
@@ -354,6 +366,34 @@ export default function Sell() {
                 )}
               </View>
             ))}
+
+            {reviewSearch.trim() && reviewInventoryMatches.length > 0 && (
+              <View style={styles.reviewInventoryBox}>
+                <Text style={styles.reviewInventoryTitle}>Inventory matches — tap Add</Text>
+                {reviewInventoryMatches.map((p) => (
+                  <View key={p.id} style={styles.reviewInventoryRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reviewInventoryName}>{p.name}</Text>
+                      <Text style={styles.reviewInventoryMeta}>
+                        Stock {p.quantity} · {money(p.sale_price)}{p.sku ? ` · SKU ${p.sku}` : ""}
+                      </Text>
+                    </View>
+                    <Pressable
+                      testID={`review-add-inventory-${p.id}`}
+                      onPress={() => { addToCart(p); setReviewSearch(""); }}
+                      style={styles.reviewInventoryAdd}
+                    >
+                      <MaterialDesignIcons name="plus" size={18} color={colors.onBrandPrimary} />
+                      <Text style={styles.reviewInventoryAddText}>Add</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {reviewSearch.trim() && reviewedCart.length === 0 && reviewInventoryMatches.length === 0 && (
+              <Text style={styles.reviewNoMatch}>No matching product in the cart or inventory.</Text>
+            )}
 
             <View style={styles.discountRow}>
               <Text style={styles.discountLabel}>Discount</Text>
@@ -620,6 +660,14 @@ const useStyles = makeStyles((colors) => ({
   reviewSearchRow: { marginHorizontal:16, marginBottom:4, minHeight:46, borderWidth:1, borderColor:colors.border, borderRadius:12, flexDirection:"row", alignItems:"center", paddingLeft:12, paddingRight:6, gap:7, backgroundColor:colors.surfaceSecondary },
   reviewAddBtn: { minHeight:36, paddingHorizontal:10, borderRadius:9, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:4 },
   reviewAddText: { color:colors.onBrandPrimary, fontWeight:"800", fontSize:12 },
+  reviewInventoryBox: { borderWidth:1, borderColor:colors.border, borderRadius:12, backgroundColor:colors.surfaceSecondary, overflow:"hidden" },
+  reviewInventoryTitle: { fontSize:12, fontWeight:"800", color:colors.onSurface, padding:10, borderBottomWidth:1, borderBottomColor:colors.border },
+  reviewInventoryRow: { minHeight:58, paddingHorizontal:10, paddingVertical:8, flexDirection:"row", alignItems:"center", gap:8, borderBottomWidth:1, borderBottomColor:colors.border },
+  reviewInventoryName: { fontSize:13, fontWeight:"700", color:colors.onSurface },
+  reviewInventoryMeta: { fontSize:11, color:colors.muted, marginTop:2 },
+  reviewInventoryAdd: { minHeight:34, paddingHorizontal:10, borderRadius:8, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:3 },
+  reviewInventoryAddText: { color:colors.onBrandPrimary, fontSize:12, fontWeight:"800" },
+  reviewNoMatch: { fontSize:12, color:colors.muted, paddingVertical:10, textAlign:"center" },
   heldCard: { borderWidth:1, borderColor:colors.border, borderRadius:14, padding:13, backgroundColor:colors.surface, flexDirection:"row", gap:10 },
   heldTitle: { fontSize:14, fontWeight:"800", color:colors.onSurface },
   heldMeta:{fontSize:12,color:colors.muted,marginTop:3},
