@@ -112,7 +112,8 @@ function candidateScore(line: string, name: string) {
   const edit = editSimilarity(source, target);
   return Math.max(edit, bigramScore(source, target), confusion, overlap * 0.94, wordScore * 0.96);
 }
-\nexport async function enhanceOrderLinesWithAI(
+
+export async function enhanceOrderLinesWithAI(
   lines: string[],
   products: Product[],
 ): Promise<string[]> {
