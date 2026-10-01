@@ -215,16 +215,24 @@ export function OrderImageScannerModal({
           const key = normalize(line);
           return key && all.findIndex((other) => normalize(other) === key) === index;
         });
+      // AI is intentionally the PRIMARY recognizer. OCR remains the fallback.
+      // The AI helper itself is inventory-constrained, so it can only return real products.
       const aiLines = await enhanceOrderLinesWithAI(sourceLines, products);
-      setAiUsed(aiLines.some((line, index) => line !== sourceLines[index]));
+      const aiChanged = aiLines.some((line, index) => line !== sourceLines[index]);
+      setAiUsed(aiChanged);
       setRawText(sourceLines.join("\n"));
 
       const grouped = new Map<string, ParsedItem>();
       const misses: string[] = [];
       const suggested: { line: string; product: Product; score: number; quantity: number }[] = [];
 
-      for (const line of aiLines) {
-        const match = matchProduct(line, products, 0.5);
+      // Prefer AI output whenever it identifies a real inventory product. Only use
+      // OCR/fuzzy matching for lines AI could not confidently correct.
+      const primaryLines = aiChanged ? aiLines : sourceLines;
+      for (let index = 0; index < primaryLines.length; index++) {
+        const line = primaryLines[index];
+        const aiWasDifferent = aiChanged && line !== sourceLines[index];
+        const match = matchProduct(line, products, aiWasDifferent ? 0.42 : 0.5);
         const quantity = extractQuantity(line);
         if (!match) {
           const suggestion = matchProduct(line, products, 0.3);
@@ -331,7 +339,7 @@ export function OrderImageScannerModal({
                 <MaterialDesignIcons name="text-box-search-outline" size={48} color={colors.brandPrimary} />
               </View>
               <Text style={styles.heroTitle}>Scan an order</Text>
-              <Text style={styles.heroText}>OCR runs on the device. No order image or recognized text is sent to an online OCR service.</Text>
+              <Text style={styles.heroText}>AI analyzes the order first on the device. OCR remains available as the fallback; no order image is sent to an online OCR service.</Text>
               <View style={styles.actionRow}>
                 <Pressable style={styles.primaryBtn} onPress={openCamera}>
                   <MaterialDesignIcons name="camera-outline" size={22} color={colors.onBrandPrimary} />
@@ -349,7 +357,7 @@ export function OrderImageScannerModal({
               {processing ? (
                 <View style={styles.processing}>
                   <ActivityIndicator size="small" color={colors.brandPrimary} />
-                  <Text style={styles.processingText}>Reading order on device…</Text>
+                  <Text style={styles.processingText}>AI is analyzing the order on this device…</Text>
                 </View>
               ) : (
                 <>
