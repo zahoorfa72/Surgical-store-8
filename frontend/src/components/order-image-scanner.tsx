@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -63,7 +63,7 @@ function matchProduct(line: string, products: Product[]) {
   let best: { product: Product; score: number } | null = null;
 
   for (const p of products) {
-    const fields = [p.name, p.category, p.sku, p.barcode].filter(Boolean).map(String);
+    const fields = [p.name, p.barcode].filter(Boolean).map(String);
     const name = normalize(p.name);
     const fieldText = normalize(fields.join(" "));
     const nameTokens = tokens(p.name);
