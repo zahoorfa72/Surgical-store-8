@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -9,6 +9,7 @@ import { apiRequest } from "@/src/api";
 import { canManageStore, useAuth } from "@/src/auth";
 import { useProducts, qk } from "@/src/data";
 import { Product } from "@/src/models";
+import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -25,6 +26,13 @@ export default function Products() {
   const { data: products, isLoading } = useProducts();
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Product | null>(null);
+  const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
+
+  useEffect(() => {
+    void storage.getItem<boolean>("ssm.showInventoryProfitMargin", true).then((value) => {
+      setShowInventoryProfitMargin(value !== false);
+    });
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -77,7 +85,7 @@ export default function Products() {
         />
       </View>
 
-      {!isLoading && (
+      {!isLoading && showInventoryProfitMargin && (
         <Card style={styles.financeCard}>
           <View style={styles.financeHead}>
             <View>
