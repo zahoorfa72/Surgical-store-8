@@ -59,7 +59,8 @@
     "expo-task-manager": "~57.0.1",
     "expo-notifications": "~57.0.21",
     "expo-mlkit-ocr": "0.2.7",
-    "expo-build-properties": "57.0.22"
+    "expo-build-properties": "57.0.22",
+    "expo-ai-kit": "0.18.2"
   },
   "devDependencies": {
     "@types/react": "19.2.10",
