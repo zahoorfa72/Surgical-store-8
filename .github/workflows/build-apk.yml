@@ -49,7 +49,7 @@ jobs:
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID || '853810600390-0aemv99o2kr9796oni5pte4l0enqomu7.apps.googleusercontent.com' }}
         run: |
           rm -rf android
-          npx expo prebuild --platform android --non-interactive --no-install
+          CI=1 npx expo prebuild --platform android --no-install
 
       - name: Validate Google OAuth configuration
         env:
