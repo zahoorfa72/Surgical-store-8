@@ -56,7 +56,8 @@ export default function Sell() {
   const [reviewSearch, setReviewSearch] = useState("");
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [addProductSearch, setAddProductSearch] = useState("");
-  const [showSaleDetails, setShowSaleDetails] = useState(true);\n  const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
+  const [showSaleDetails, setShowSaleDetails] = useState(true);
+  const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
 
   const onScanned = (value: string) => {
     setScanOpen(false);
