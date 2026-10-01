@@ -343,12 +343,44 @@ export function OrderImageScannerModal({
                     <View style={styles.unmatchedBox}>
                       <View style={styles.unmatchedTitleRow}>
                         <MaterialDesignIcons name="alert-outline" size={20} color={colors.warning} />
-                        <Text style={styles.unmatchedTitle}>Unmatched text</Text>
+                        <Text style={styles.unmatchedTitle}>Best matches — please confirm</Text>
                       </View>
-                      {unmatched.map((line, i) => (
-                        <Text key={i} style={styles.unmatchedLine}>• {line}</Text>
-                      ))}
-                      <Text style={styles.unmatchedHint}>Correct these manually in the cart or add the product using the normal inventory search.</Text>
+                      {unmatched.map((line, i) => {
+                        const suggestion = suggestions.find((s) => s.line === line);
+                        return (
+                          <View key={i} style={styles.suggestionRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.unmatchedLine}>“{line}”</Text>
+                              <Text style={styles.suggestionText}>
+                                {suggestion
+                                  ? `Best match: ${suggestion.product.name} · ${Math.round(suggestion.score * 100)}% match`
+                                  : "No close inventory product found"}
+                              </Text>
+                            </View>
+                            {suggestion && (
+                              <Pressable
+                                style={styles.useSuggestionBtn}
+                                onPress={() => {
+                                  setItems((prev) => [...prev, {
+                                    key: `suggestion-${suggestion.product.id}-${Date.now()}`,
+                                    product: suggestion.product,
+                                    rawText: suggestion.line,
+                                    quantity: Math.min(suggestion.quantity, suggestion.product.quantity),
+                                    maxStock: suggestion.product.quantity,
+                                    selected: suggestion.product.quantity > 0,
+                                    confidence: suggestion.score,
+                                  }]);
+                                  setSuggestions((prev) => prev.filter((x) => x.line !== line));
+                                  setUnmatched((prev) => prev.filter((x) => x !== line));
+                                }}
+                              >
+                                <Text style={styles.useSuggestionText}>Use</Text>
+                              </Pressable>
+                            )}
+                          </View>
+                        );
+                      })}
+                      <Text style={styles.unmatchedHint}>Spelling mistakes are matched automatically. Review the suggested product before adding it to the cart.</Text>
                     </View>
                   )}
 
@@ -431,6 +463,10 @@ const useStyles = makeStyles((colors) => ({
   unmatchedTitleRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   unmatchedTitle: { fontSize: 14, fontWeight: "900", color: colors.warning },
   unmatchedLine: { fontSize: 13, color: colors.onSurface, marginTop: 4 },
+  suggestionRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 7, padding: 9, borderRadius: 10, backgroundColor: colors.surface },
+  suggestionText: { flex: 1, fontSize: 11, color: colors.onSurfaceSecondary, lineHeight: 16 },
+  useSuggestionBtn: { minHeight: 36, paddingHorizontal: 14, borderRadius: 9, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  useSuggestionText: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "900" },
   unmatchedHint: { fontSize: 11, color: colors.muted, marginTop: 8, lineHeight: 16 },
   rawBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 13, backgroundColor: colors.surfaceTertiary },
   rawTitle: { fontSize: 12, fontWeight: "900", color: colors.onSurface, marginBottom: 6 },
