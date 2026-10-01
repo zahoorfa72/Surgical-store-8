@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { storage } from "@/src/utils/storage";
@@ -17,7 +17,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
 
-function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string, storeName = STORE_NAME): string {
+function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string, storeName = STORE_NAME, showDiscount = true): string {
   const rows = sale.items
     .map(
       (i) => `<tr>
@@ -63,7 +63,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
     </table>
     <div class="totals">
       <div><span>Subtotal</span><span>Rs ${sale.subtotal.toLocaleString()}</span></div>
-      <div><span>Discount</span><span>- Rs ${sale.discount.toLocaleString()}</span></div>
+      ${showDiscount ? `<div><span>Discount</span><span>- Rs ${sale.discount.toLocaleString()}</span></div>` : ""}
       <div class="grand"><span>Total</span><span>Rs ${sale.total.toLocaleString()}</span></div>
     </div>
     <div class="thanks">Thank you for your purchase!</div>
@@ -84,22 +84,31 @@ export default function Receipt() {
   const [busy, setBusy] = useState(false);
   const [receiptFormat, setReceiptFormat] = useState<"thermal" | "a4">("thermal");
   const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
+  const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
 
-  useEffect(() => {
-    void (async () => {
-      const savedFormat = await storage.getItem<string>("ssm.receiptFormat", "thermal");
-      const saved = await storage.getItem<string>("ssm.receiptWidth", "72");
-      setReceiptFormat(savedFormat === "a4" ? "a4" : "thermal");
-      setReceiptWidth(saved === "56" ? 56 : 72);
-    })();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void Promise.all([
+        storage.getItem<string>("ssm.receiptFormat", "thermal"),
+        storage.getItem<string>("ssm.receiptWidth", "72"),
+        storage.getItem<boolean>("ssm.showSellProfitDiscount", true),
+      ]).then(([savedFormat, savedWidth, visible]) => {
+        if (!active) return;
+        setReceiptFormat(savedFormat === "a4" ? "a4" : "thermal");
+        setReceiptWidth(savedWidth === "56" ? 56 : 72);
+        setShowSellProfitDiscount(visible !== false);
+      });
+      return () => { active = false; };
+    }, []),
+  );
 
 
   const print = async () => {
     if (!sale) return;
     setBusy(true);
     try {
-      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME) });
+      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME, showSellProfitDiscount) });
     } catch (e: any) {
       toast("Printing not available on this device", "error");
     } finally {
@@ -165,7 +174,7 @@ export default function Receipt() {
 
           <View style={styles.totalsBox}>
             <TotalRow label="Subtotal" value={money(sale.subtotal)} />
-            <TotalRow label="Discount" value={"- " + money(sale.discount)} />
+            {showSellProfitDiscount && <TotalRow label="Discount" value={"- " + money(sale.discount)} />}
             <View style={styles.grandRow}>
               <Text style={styles.grandLabel}>Total</Text>
               <Text style={styles.grandValue}>{money(sale.total)}</Text>
