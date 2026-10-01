@@ -1,4 +1,3 @@
-import { useEffect, useMemo, useState } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
