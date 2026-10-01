@@ -80,6 +80,13 @@ function localReport(range: string): ReportSummary {
   const payments = ((queryClient.getQueryData<Payment[]>(qk.payments()) ?? [])).filter(p => inRange(p.created_at, range));
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
 
+  // Remaining Balance is a lifetime running balance. Do not rebuild it from
+  // today's filtered rows, otherwise it resets to the opening budget at
+  // midnight while the Daily/Weekly/Monthly report changes.
+  const allSales = queryClient.getQueryData<Sale[]>(qk.sales) ?? [];
+  const allReturns = queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? [];
+  const allExpenses = queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? [];
+  const allPayments = queryClient.getQueryData<Payment[]>(qk.payments()) ?? [];
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
@@ -115,18 +122,24 @@ function localReport(range: string): ReportSummary {
     // simplified ledger unless a supplier payment is recorded.
     remaining_balance: (
       Number((queryClient.getQueryData<any>(qk.budget)?.opening_amount ?? 0))
-      + sales.filter(s => !s.credit).reduce((n, s) => n + Number(s.total ?? 0), 0)
-      - returns.filter(r => {
-          const sale = sales.find(s => s.id === r.sale_id);
+      + allSales.filter(s => !s.credit).reduce((n, s) => n + Number(s.total ?? 0), 0)
+      - allReturns.filter(r => {
+          const sale = allSales.find(s => s.id === r.sale_id);
           return !!sale && !sale.credit;
         }).reduce((n, r) => n + Number(r.refund_total ?? 0), 0)
-      + customerReceipts
-      + supplierRefunds
-      - customerRefunds
-      - supplierPayments
-      - cogsExpenses
-      - operating
-      - grossProfit
+      + allPayments.filter(p => p.kind === "receive").reduce((n, p) => n + Number(p.amount ?? 0), 0)
+      + allPayments.filter(p => p.kind === "supplier_refund").reduce((n, p) => n + Number(p.amount ?? 0), 0)
+      - allPayments.filter(p => p.kind === "customer_refund").reduce((n, p) => n + Number(p.amount ?? 0), 0)
+      - allPayments.filter(p => p.kind === "pay").reduce((n, p) => n + Number(p.amount ?? 0), 0)
+      - allExpenses.filter(e => e.bucket === "cogs" || e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0)
+      - (
+          allSales.reduce((n, s) => n + Number(s.total ?? 0), 0)
+          - allReturns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0)
+          - (
+              allSales.reduce((n, s) => n + Number(s.cogs ?? 0), 0)
+              - allReturns.reduce((n, r) => n + Number(r.refund_cogs ?? 0), 0)
+            )
+        )
     ),
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
