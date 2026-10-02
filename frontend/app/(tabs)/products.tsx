@@ -119,63 +119,74 @@ export default function Products() {
         />
       </View>
 
-      {!isLoading && (
-        <Card style={styles.usageCard}>
-          <View style={styles.financeHead}>
-            <View>
-              <Text style={styles.financeTitle}>Inventory usage</Text>
-              <Text style={styles.financeSub}>See which products are used most, medium, or least</Text>
-            </View>
-            <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
-          </View>
-          <View style={styles.usageTabs}>
-            {([["month", "This month"], ["year", "This year"], ["all", "All time"]] as const).map(([key, label]) => (
-              <Pressable key={key} onPress={() => setUsageRange(key)} style={[styles.usageTab, usageRange === key && { backgroundColor: colors.brandPrimary }]}>
-                <Text style={[styles.usageTabText, usageRange === key && { color: colors.onBrandPrimary }]}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {usageAnalytics.length === 0 ? (
-            <Text style={styles.usageEmpty}>No inventory items available.</Text>
-          ) : (
-            <View style={{ gap: 7 }}>
-              {usageAnalytics.slice(0, 10).map((row) => (
-                <View key={row.productId} style={styles.usageRow}>
-                  <View style={styles.usageRank}><Text style={styles.usageRankText}>{row.rank}</Text></View>
-                  <View style={{ flex: 1 }}><Text style={styles.usageName} numberOfLines={1}>{row.name}</Text><Text style={styles.usageQty}>{row.quantity} units used</Text></View>
-                  <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "muted"} />
-                </View>
-              ))}
-              {usageAnalytics.length > 10 && <Text style={styles.usageMore}>Showing top 10. Lower-use products remain included in the calculations.</Text>}
-            </View>
-          )}
-        </Card>
-      )}
-
-      {!isLoading && showInventoryProfitMargin && (
-        <Card style={styles.financeCard}>
-          <View style={styles.financeHead}>
-            <View>
-              <Text style={styles.financeTitle}>Inventory finance</Text>
-              <Text style={styles.financeSub}>Current stock at buy and sell values</Text>
-            </View>
-            <MaterialDesignIcons name="chart-box-outline" size={22} color={colors.brandPrimary} />
-          </View>
-          <View style={styles.financeGrid}>
-            <View style={styles.financeCell}><Text style={styles.financeLabel}>Cost value</Text><Text style={styles.financeValue}>{money(inventoryFinance.costValue)}</Text></View>
-            <View style={styles.financeCell}><Text style={styles.financeLabel}>Retail value</Text><Text style={styles.financeValue}>{money(inventoryFinance.retailValue)}</Text></View>
-            <View style={styles.financeCell}><Text style={styles.financeLabel}>Potential margin</Text><Text style={[styles.financeValue,{color:inventoryFinance.potentialProfit>=0?colors.success:colors.error}]}>{money(inventoryFinance.potentialProfit)}</Text></View>
-          </View>
-        </Card>
-      )}
-
       {isLoading ? (
         <Loader />
       ) : (
         <FlatList
+          style={{ flex: 1 }}
           data={filtered}
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 120, gap: 10 }}
+          ListHeaderComponent={
+            <View>
+                    {!isLoading && (
+                      <Card style={styles.usageCard}>
+                        <View style={styles.financeHead}>
+                          <View>
+                            <Text style={styles.financeTitle}>Inventory usage</Text>
+                            <Text style={styles.financeSub}>See which products are used most, medium, or least</Text>
+                          </View>
+                          <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
+                        </View>
+                        <View style={styles.usageTabs}>
+                          {([["month", "This month"], ["year", "This year"], ["all", "All time"]] as const).map(([key, label]) => (
+                            <Pressable key={key} onPress={() => setUsageRange(key)} style={[styles.usageTab, usageRange === key && { backgroundColor: colors.brandPrimary }]}>
+                              <Text style={[styles.usageTabText, usageRange === key && { color: colors.onBrandPrimary }]}>{label}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        {usageAnalytics.length === 0 ? (
+                          <Text style={styles.usageEmpty}>No inventory items available.</Text>
+                        ) : (
+                          <View style={{ gap: 7 }}>
+                            {usageAnalytics.slice(0, 10).map((row) => (
+                              <View key={row.productId} style={styles.usageRow}>
+                                <View style={styles.usageRank}><Text style={styles.usageRankText}>{row.rank}</Text></View>
+                                <View style={{ flex: 1 }}><Text style={styles.usageName} numberOfLines={1}>{row.name}</Text><Text style={styles.usageQty}>{row.quantity} units used</Text></View>
+                                <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "muted"} />
+                              </View>
+                            ))}
+                            {usageAnalytics.length > 10 && <Text style={styles.usageMore}>Showing top 10. Lower-use products remain included in the calculations.</Text>}
+                          </View>
+                        )}
+                      </Card>
+                    )}
+              
+                    {!isLoading && showInventoryProfitMargin && (
+                      <Card style={styles.financeCard}>
+                        <View style={styles.financeHead}>
+                          <View>
+                            <Text style={styles.financeTitle}>Inventory finance</Text>
+                            <Text style={styles.financeSub}>Current stock at buy and sell values</Text>
+                          </View>
+                          <MaterialDesignIcons name="chart-box-outline" size={22} color={colors.brandPrimary} />
+                        </View>
+                        <View style={styles.financeGrid}>
+                          <View style={styles.financeCell}><Text style={styles.financeLabel}>Cost value</Text><Text style={styles.financeValue}>{money(inventoryFinance.costValue)}</Text></View>
+                          <View style={styles.financeCell}><Text style={styles.financeLabel}>Retail value</Text><Text style={styles.financeValue}>{money(inventoryFinance.retailValue)}</Text></View>
+                          <View style={styles.financeCell}><Text style={styles.financeLabel}>Potential margin</Text><Text style={[styles.financeValue,{color:inventoryFinance.potentialProfit>=0?colors.success:colors.error}]}>{money(inventoryFinance.potentialProfit)}</Text></View>
+                        </View>
+                      </Card>
+                    )}
+            </View>
+          }
+          ListHeaderComponentStyle={{ paddingBottom: 2 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          nestedScrollEnabled
+          initialNumToRender={20}
+          maxToRenderPerBatch={20}
+          windowSize={7}
           ListEmptyComponent={
             <EmptyState
               icon="package-variant"
