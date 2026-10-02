@@ -7,7 +7,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 
 import { apiRequest } from "@/src/api";
 import { canManageStore, useAuth } from "@/src/auth";
-import { useProducts, qk } from "@/src/data";
+import { useProducts, useSales, qk } from "@/src/data";
 import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
@@ -24,6 +24,8 @@ export default function Products() {
   const staff = canManageStore(user?.role);
 
   const { data: products, isLoading } = useProducts();
+  const { data: sales } = useSales();
+  const [usageRange, setUsageRange] = useState<"month" | "year" | "all">("month");
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
@@ -42,6 +44,34 @@ export default function Products() {
     const q = search.trim().toLowerCase();
     return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q));
   }, [products, search]);
+
+  const usageAnalytics = useMemo(() => {
+    const now = new Date();
+    const start = usageRange === "month"
+      ? new Date(now.getFullYear(), now.getMonth(), 1)
+      : usageRange === "year"
+        ? new Date(now.getFullYear(), 0, 1)
+        : null;
+    const usage = new Map<string, { name: string; quantity: number }>();
+    for (const product of products ?? []) usage.set(product.id, { name: product.name, quantity: 0 });
+    for (const sale of sales ?? []) {
+      if (start && new Date(sale.created_at) < start) continue;
+      for (const item of sale.items ?? []) {
+        const current = usage.get(item.product_id) ?? { name: item.name, quantity: 0 };
+        current.quantity += Math.max(0, Number(item.quantity ?? 0));
+        usage.set(item.product_id, current);
+      }
+    }
+    const rows = Array.from(usage.entries()).map(([productId, value]) => ({ productId, ...value }))
+      .sort((a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name));
+    const active = rows.filter(r => r.quantity > 0);
+    const average = active.length ? active.reduce((n, r) => n + r.quantity, 0) / active.length : 0;
+    return rows.map((row, index) => ({
+      ...row,
+      rank: index + 1,
+      level: row.quantity <= 0 ? "Low" : average > 0 && row.quantity >= average * 1.5 ? "High" : average > 0 && row.quantity <= average * 0.5 ? "Low" : "Medium",
+    } as const));
+  }, [products, sales, usageRange]);
 
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
@@ -88,6 +118,39 @@ export default function Products() {
           onChangeText={setSearch}
         />
       </View>
+
+      {!isLoading && (
+        <Card style={styles.usageCard}>
+          <View style={styles.financeHead}>
+            <View>
+              <Text style={styles.financeTitle}>Inventory usage</Text>
+              <Text style={styles.financeSub}>See which products are used most, medium, or least</Text>
+            </View>
+            <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
+          </View>
+          <View style={styles.usageTabs}>
+            {([["month", "This month"], ["year", "This year"], ["all", "All time"]] as const).map(([key, label]) => (
+              <Pressable key={key} onPress={() => setUsageRange(key)} style={[styles.usageTab, usageRange === key && { backgroundColor: colors.brandPrimary }]}>
+                <Text style={[styles.usageTabText, usageRange === key && { color: colors.onBrandPrimary }]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {usageAnalytics.length === 0 ? (
+            <Text style={styles.usageEmpty}>No inventory items available.</Text>
+          ) : (
+            <View style={{ gap: 7 }}>
+              {usageAnalytics.slice(0, 10).map((row) => (
+                <View key={row.productId} style={styles.usageRow}>
+                  <View style={styles.usageRank}><Text style={styles.usageRankText}>{row.rank}</Text></View>
+                  <View style={{ flex: 1 }}><Text style={styles.usageName} numberOfLines={1}>{row.name}</Text><Text style={styles.usageQty}>{row.quantity} units used</Text></View>
+                  <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "neutral"} />
+                </View>
+              ))}
+              {usageAnalytics.length > 10 && <Text style={styles.usageMore}>Showing top 10. Lower-use products remain included in the calculations.</Text>}
+            </View>
+          )}
+        </Card>
+      )}
 
       {!isLoading && showInventoryProfitMargin && (
         <Card style={styles.financeCard}>
@@ -197,6 +260,17 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.border,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
+  usageCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 2 },
+  usageTabs: { flexDirection: "row", gap: 6, marginBottom: 10 },
+  usageTab: { flex: 1, minHeight: 36, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceTertiary },
+  usageTabText: { fontSize: 11, fontWeight: "700", color: colors.onSurface },
+  usageRow: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 7 },
+  usageRank: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  usageRankText: { fontSize: 11, fontWeight: "800", color: colors.onSurface },
+  usageName: { fontSize: 13, fontWeight: "700", color: colors.onSurface },
+  usageQty: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  usageMore: { fontSize: 10, color: colors.muted, marginTop: 4 },
+  usageEmpty: { fontSize: 12, color: colors.muted },
   financeCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 2 },
   financeHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   financeTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface },
