@@ -1825,6 +1825,68 @@ def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
     return None  # all
 
 
+@api.get("/reports/inventory-usage")
+async def report_inventory_usage(
+    _: AnyUser,
+    range: str = "month",
+    tz_offset_minutes: int = Query(0, ge=-840, le=840),
+):
+    """Return product usage for the selected local calendar range.
+
+    Usage is net sold quantity: sales add units and customer sale-returns subtract
+    returned units. The calculation stays server-side so the mobile Stock screen
+    does not load the entire sales history just to render usage analytics.
+    """
+    start = range_start(range, tz_offset_minutes)
+    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
+
+    usage: dict[str, dict[str, Any]] = {}
+    for product in products:
+        pid = str(product.get("_id"))
+        usage[pid] = {"product_id": pid, "name": product.get("name", ""), "quantity": 0}
+
+    for sale in sales:
+        for item in sale.get("items", []) or []:
+            pid = str(item.get("product_id") or "")
+            if not pid:
+                continue
+            row = usage.setdefault(pid, {"product_id": pid, "name": item.get("name", ""), "quantity": 0})
+            row["quantity"] += max(0, float(item.get("quantity", 0) or 0))
+            if not row["name"]:
+                row["name"] = item.get("name", "")
+
+    for ret in returns:
+        for item in ret.get("items", []) or []:
+            pid = str(item.get("product_id") or "")
+            if not pid:
+                continue
+            row = usage.setdefault(pid, {"product_id": pid, "name": item.get("name", ""), "quantity": 0})
+            row["quantity"] -= max(0, float(item.get("quantity", 0) or 0))
+            if not row["name"]:
+                row["name"] = item.get("name", "")
+
+    rows = []
+    for row in usage.values():
+        row["quantity"] = max(0, int(row["quantity"]))
+        rows.append(row)
+    active = [row for row in rows if row["quantity"] > 0]
+    average = (sum(row["quantity"] for row in active) / len(active)) if active else 0
+    rows.sort(key=lambda x: (-x["quantity"], str(x["name"]).lower()))
+    for index, row in enumerate(rows):
+        qty = row["quantity"]
+        row["rank"] = index + 1
+        row["level"] = (
+            "Low" if qty <= 0 else
+            "High" if average > 0 and qty >= average * 1.5 else
+            "Low" if average > 0 and qty <= average * 0.5 else
+            "Medium"
+        )
+    return rows
+
+
 @api.get("/reports/summary")
 async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
