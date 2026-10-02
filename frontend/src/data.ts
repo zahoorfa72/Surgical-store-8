@@ -9,7 +9,7 @@ import { apiRequest, getConnectionMode, getSettings, StoreSettings } from "@/src
 import { queryClient } from "@/src/query-client";
 import {
   Budget, CustomerRow, DayClose, Expense, ExpenseBucket, Party, PartyType,
-  Payment, Product, Purchase, ReportSummary, ReturnRecord, Sale,
+  Payment, Product, Purchase, ReportSummary, ReturnRecord, Sale, InventoryUsageRow,
 } from "@/src/models";
 import { AppUser } from "@/src/api";
 import { notifyLowStock } from "@/src/low-stock-notifications";
@@ -31,6 +31,7 @@ export const qk = {
   customers: (range: string) => ["customers", range] as const,
   dayClose: (range: string) => ["day-close", range] as const,
   settings: ["settings"] as const,
+  inventoryUsage: (range: string) => ["inventory-usage", range] as const,
 };
 
 async function online(): Promise<boolean> {
@@ -217,6 +218,81 @@ export function usePurchaseReturns() {
 export function useDayClose(range: string) {
   return useQuery({ queryKey: qk.dayClose(range), queryFn: () => { const tzOffsetMinutes = new Date().getTimezoneOffset(); return localOrFetch(qk.dayClose(range), () => apiRequest<DayClose>(`/reports/day-close?range=${range}&tz_offset_minutes=${tzOffsetMinutes}`), { me: { user_name: "", transactions: 0, units: 0, gross_sales: 0, discount: 0, range }, by_user: null }); } });
 }
+export function useInventoryUsage(range: "month" | "year" | "all") {
+  return useQuery({
+    queryKey: qk.inventoryUsage(range),
+    queryFn: async () => {
+      const fallback = localInventoryUsage(range);
+      if ((await getConnectionMode()) === "offline" || !(await online())) return fallback;
+      try {
+        const tzOffsetMinutes = new Date().getTimezoneOffset();
+        return await apiRequest<InventoryUsageRow[]>(
+          `/reports/inventory-usage?range=${range}&tz_offset_minutes=${tzOffsetMinutes}`,
+        );
+      } catch {
+        return fallback;
+      }
+    },
+  });
+}
+
+function localInventoryUsage(range: "month" | "year" | "all"): InventoryUsageRow[] {
+  const now = new Date();
+  const start = range === "month"
+    ? new Date(now.getFullYear(), now.getMonth(), 1)
+    : range === "year"
+      ? new Date(now.getFullYear(), 0, 1)
+      : null;
+  const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
+  const sales = queryClient.getQueryData<Sale[]>(qk.sales) ?? [];
+  const returns = queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? [];
+  const usage = new Map<string, { name: string; quantity: number }>();
+
+  for (const product of products) {
+    usage.set(product.id, { name: product.name, quantity: 0 });
+  }
+  for (const sale of sales) {
+    if (start && new Date(sale.created_at) < start) continue;
+    for (const item of sale.items ?? []) {
+      const row = usage.get(item.product_id) ?? { name: item.name, quantity: 0 };
+      row.quantity += Math.max(0, Number(item.quantity ?? 0));
+      usage.set(item.product_id, row);
+    }
+  }
+  for (const ret of returns) {
+    if (start && new Date(ret.created_at) < start) continue;
+    for (const item of ret.items ?? []) {
+      const row = usage.get(item.product_id) ?? { name: item.name, quantity: 0 };
+      row.quantity -= Math.max(0, Number(item.quantity ?? 0));
+      usage.set(item.product_id, row);
+    }
+  }
+
+  const rows = Array.from(usage.entries()).map(([product_id, value]) => ({
+    product_id,
+    name: value.name,
+    quantity: Math.max(0, Math.floor(value.quantity)),
+    rank: 0,
+    level: "Low" as const,
+  }));
+  const active = rows.filter(row => row.quantity > 0);
+  const average = active.length
+    ? active.reduce((sum, row) => sum + row.quantity, 0) / active.length
+    : 0;
+  rows.sort((a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name));
+  return rows.map((row, index) => ({
+    ...row,
+    rank: index + 1,
+    level: row.quantity <= 0
+      ? "Low"
+      : average > 0 && row.quantity >= average * 1.5
+        ? "High"
+        : average > 0 && row.quantity <= average * 0.5
+          ? "Low"
+          : "Medium",
+  }));
+}
+
 export function useSettings() {
   return useQuery({ queryKey: qk.settings, queryFn: () => localOrFetch(qk.settings, () => getSettings(), { store_name: "Surgical Store", has_logo: false, logo_version: 0 }) });
 }
