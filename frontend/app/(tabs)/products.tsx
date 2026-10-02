@@ -143,7 +143,7 @@ export default function Products() {
                 <View key={row.productId} style={styles.usageRow}>
                   <View style={styles.usageRank}><Text style={styles.usageRankText}>{row.rank}</Text></View>
                   <View style={{ flex: 1 }}><Text style={styles.usageName} numberOfLines={1}>{row.name}</Text><Text style={styles.usageQty}>{row.quantity} units used</Text></View>
-                  <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "neutral"} />
+                  <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "muted"} />
                 </View>
               ))}
               {usageAnalytics.length > 10 && <Text style={styles.usageMore}>Showing top 10. Lower-use products remain included in the calculations.</Text>}
