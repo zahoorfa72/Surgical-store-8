@@ -40,6 +40,14 @@ export type Payment = {
 
 export type Budget = { monthly_amount: number; opening_amount?: number; spent_this_month: number; purchase_spent?: number; purchase_remaining?: number };
 
+export type InventoryUsageRow = {
+  product_id: string;
+  name: string;
+  quantity: number;
+  rank: number;
+  level: "High" | "Medium" | "Low";
+};
+
 export type SaleItem = {
   product_id: string;
   name: string;
