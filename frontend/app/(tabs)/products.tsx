@@ -7,7 +7,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 
 import { apiRequest } from "@/src/api";
 import { canManageStore, useAuth } from "@/src/auth";
-import { useProducts, useSales, qk } from "@/src/data";
+import { useProducts, useInventoryUsage, qk } from "@/src/data";
 import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
@@ -24,8 +24,8 @@ export default function Products() {
   const staff = canManageStore(user?.role);
 
   const { data: products, isLoading } = useProducts();
-  const { data: sales } = useSales();
   const [usageRange, setUsageRange] = useState<"month" | "year" | "all">("month");
+  const { data: usageAnalytics = [] } = useInventoryUsage(usageRange);
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
@@ -44,34 +44,6 @@ export default function Products() {
     const q = search.trim().toLowerCase();
     return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q));
   }, [products, search]);
-
-  const usageAnalytics = useMemo(() => {
-    const now = new Date();
-    const start = usageRange === "month"
-      ? new Date(now.getFullYear(), now.getMonth(), 1)
-      : usageRange === "year"
-        ? new Date(now.getFullYear(), 0, 1)
-        : null;
-    const usage = new Map<string, { name: string; quantity: number }>();
-    for (const product of products ?? []) usage.set(product.id, { name: product.name, quantity: 0 });
-    for (const sale of sales ?? []) {
-      if (start && new Date(sale.created_at) < start) continue;
-      for (const item of sale.items ?? []) {
-        const current = usage.get(item.product_id) ?? { name: item.name, quantity: 0 };
-        current.quantity += Math.max(0, Number(item.quantity ?? 0));
-        usage.set(item.product_id, current);
-      }
-    }
-    const rows = Array.from(usage.entries()).map(([productId, value]) => ({ productId, ...value }))
-      .sort((a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name));
-    const active = rows.filter(r => r.quantity > 0);
-    const average = active.length ? active.reduce((n, r) => n + r.quantity, 0) / active.length : 0;
-    return rows.map((row, index) => ({
-      ...row,
-      rank: index + 1,
-      level: row.quantity <= 0 ? "Low" : average > 0 && row.quantity >= average * 1.5 ? "High" : average > 0 && row.quantity <= average * 0.5 ? "Low" : "Medium",
-    } as const));
-  }, [products, sales, usageRange]);
 
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
