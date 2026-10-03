@@ -106,7 +106,13 @@ function localReport(range: string): ReportSummary {
   const purchaseGross = purchases.reduce((n, p) => n + Number(p.total ?? 0), 0);
   const purchaseReturnsTotal = purchaseReturns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
   const purchaseTotal = purchaseGross - purchaseReturnsTotal;
-  const inventoryValue = products.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0), 0);
+  const inventoryValue = products.reduce((n, p) => {
+    const layers = Array.isArray((p as any).cost_layers) ? (p as any).cost_layers : [];
+    const value = layers.length
+      ? layers.reduce((sum: number, layer: any) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
+      : Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0);
+    return n + value;
+  }, 0);
 
   return {
     range, revenue, gross_revenue: grossRevenue, returns_total: returnsTotal, returns_count: returns.length,
