@@ -1118,6 +1118,9 @@ async def create_sale(body: SaleIn, user: AnyUser):
     res = await db.sales.insert_one(doc)
     doc["_id"] = res.inserted_id
 
+    for product_id, layers in working_cost_layers.items():
+        await _save_cost_layers(product_id, layers)
+
     for it in body.items:
         await db.products.update_one(
             {"_id": ObjectId(it.product_id)},
