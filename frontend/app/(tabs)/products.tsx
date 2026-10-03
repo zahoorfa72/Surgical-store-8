@@ -122,7 +122,7 @@ export default function Products() {
                         ) : (
                           <View style={{ gap: 7 }}>
                             {usageAnalytics.slice(0, 10).map((row) => (
-                              <View key={row.productId} style={styles.usageRow}>
+                              <View key={row.product_id} style={styles.usageRow}>
                                 <View style={styles.usageRank}><Text style={styles.usageRankText}>{row.rank}</Text></View>
                                 <View style={{ flex: 1 }}><Text style={styles.usageName} numberOfLines={1}>{row.name}</Text><Text style={styles.usageQty}>{row.quantity} units used</Text></View>
                                 <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "muted"} />
