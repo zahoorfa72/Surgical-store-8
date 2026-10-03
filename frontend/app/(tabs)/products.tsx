@@ -182,8 +182,17 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    Buy {money(item.purchase_price)} · Sell {money(item.sale_price)}
+                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Purchase lots" : `Buy {money(item.purchase_price)}`}
                   </Text>
+                  {!!item.cost_layers?.length && (
+                    <View style={{ gap: 2, marginTop: 3 }}>
+                      {item.cost_layers.map((layer, index) => (
+                        <Text key={`${item.id}-lot-${index}`} style={styles.lotText}>
+                          Lot {index + 1}: {Number(layer.quantity)} × {money(Number(layer.unit_cost))}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
                   {showInventoryProfitMargin && (
                     <Text style={styles.itemFinance}>
                       Stock value {money(Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * (Number(item.sale_price ?? 0) - Number(item.purchase_price ?? 0)))}
@@ -263,6 +272,7 @@ const useStyles = makeStyles((colors) => ({
   financeLabel: { fontSize: 11, color: colors.muted, marginBottom: 3 },
   financeValue: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
   itemFinance: { fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 4 },
+  lotText: { fontSize: 11, color: colors.muted },
   row: {
     flexDirection: "row",
     alignItems: "center",
