@@ -1,5 +1,7 @@
 // Shared TypeScript types mirroring the backend responses.
 
+export type CostLayer = { quantity: number; unit_cost: number; purchase_id?: string | null };
+
 export type Product = {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export type Product = {
   created_at: string;
   updated_at: string;
   expiry_date?: string | null;
+  cost_layers?: CostLayer[];
 };
 
 export type PartyType = "supplier" | "customer";
