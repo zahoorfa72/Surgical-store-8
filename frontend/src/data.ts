@@ -73,12 +73,17 @@ function inRange(iso: string | undefined, range: string): boolean {
 }
 
 function localReport(range: string): ReportSummary {
-  const sales = ((queryClient.getQueryData<Sale[]>(qk.sales) ?? [])).filter(s => inRange(s.created_at, range));
-  const purchases = ((queryClient.getQueryData<Purchase[]>(qk.purchases) ?? [])).filter(p => inRange(p.created_at, range));
-  const returns = ((queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? [])).filter(r => inRange(r.created_at, range));
-  const purchaseReturns = ((queryClient.getQueryData<any[]>(qk.purchaseReturns) ?? [])).filter(r => inRange(r.created_at, range));
-  const expenses = ((queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? [])).filter(e => inRange(e.created_at, range));
-  const payments = ((queryClient.getQueryData<Payment[]>(qk.payments()) ?? [])).filter(p => inRange(p.created_at, range));
+  const exactDate = range.startsWith("date:") ? range.slice(5) : null;
+  const exactStart = exactDate ? new Date(`${exactDate}T00:00:00`) : null;
+  const exactEnd = exactStart ? new Date(exactStart.getTime() + 86400000) : null;
+  const matchesDate = (iso?: string) => !exactStart || (!!iso && new Date(iso) >= exactStart && new Date(iso) < exactEnd!);
+  const filterRows = <T extends { created_at?: string }>(rows: T[]) => exactStart ? rows.filter(r => matchesDate(r.created_at)) : rows.filter(r => inRange(r.created_at, range));
+  const sales = filterRows(queryClient.getQueryData<Sale[]>(qk.sales) ?? []);
+  const purchases = filterRows(queryClient.getQueryData<Purchase[]>(qk.purchases) ?? []);
+  const returns = filterRows(queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? []);
+  const purchaseReturns = filterRows(queryClient.getQueryData<any[]>(qk.purchaseReturns) ?? []);
+  const expenses = filterRows(queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? []);
+  const payments = filterRows(queryClient.getQueryData<Payment[]>(qk.payments()) ?? []);
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
 
   // Remaining Balance is a lifetime running balance. Do not rebuild it from
@@ -205,11 +210,18 @@ export function useUsers() {
   return useQuery({ queryKey: qk.users, queryFn: () => localOrFetch(qk.users, () => apiRequest<AppUser[]>("/users"), []) });
 }
 export function useReport(range: string, enabled = true) {
-  return useQuery({ enabled, queryKey: qk.report(range), queryFn: async () => {
+  const exactDate = range.startsWith("date:") ? range.slice(5) : null;
+  const cacheRange = exactDate ? `date:${exactDate}` : range;
+  return useQuery({ enabled, queryKey: qk.report(cacheRange), queryFn: async () => {
     if ((await getConnectionMode()) === "offline") return localReport(range);
     if (!(await online())) return localReport(range);
-    try { return await apiRequest<ReportSummary>(`/reports/summary?range=${range}`); }
-    catch { return localReport(range); }
+    try {
+      const tzOffsetMinutes = new Date().getTimezoneOffset();
+      const url = exactDate
+        ? `/reports/summary?range=today&date=${encodeURIComponent(exactDate)}&tz_offset_minutes=${tzOffsetMinutes}`
+        : `/reports/summary?range=${range}&tz_offset_minutes=${tzOffsetMinutes}`;
+      return await apiRequest<ReportSummary>(url);
+    } catch { return localReport(range); }
   }});
 }
 export function useCustomers(range: string) {
