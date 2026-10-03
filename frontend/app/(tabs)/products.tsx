@@ -47,7 +47,9 @@ export default function Products() {
 
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
-    const costValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0), 0);
+    const costValue = rows.reduce((n, p) => n + (p.cost_layers?.length
+      ? p.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
+      : Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0)), 0);
     const retailValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.sale_price ?? 0), 0);
     return { costValue, retailValue, potentialProfit: retailValue - costValue };
   }, [products]);
@@ -182,7 +184,7 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Purchase lots" : `Buy {money(item.purchase_price)}`}
+                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Purchase lots" : "Buy " + money(item.purchase_price)}
                   </Text>
                   {!!item.cost_layers?.length && (
                     <View style={{ gap: 2, marginTop: 3 }}>
@@ -195,7 +197,11 @@ export default function Products() {
                   )}
                   {showInventoryProfitMargin && (
                     <Text style={styles.itemFinance}>
-                      Stock value {money(Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * (Number(item.sale_price ?? 0) - Number(item.purchase_price ?? 0)))}
+                      Stock value {money(item.cost_layers?.length
+                        ? item.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
+                        : Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - (item.cost_layers?.length
+                          ? item.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
+                          : Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0)))}
                     </Text>
                   )}
                 </View>
