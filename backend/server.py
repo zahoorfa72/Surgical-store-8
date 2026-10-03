@@ -396,7 +396,89 @@ async def _save_cost_layers(product_id: str, layers: list):
         {"$set": {"cost_layers": clean, "updated_at": now_iso()}},
     )
 
-def _aggregate_item_quantities(items) -> dict:
+
+async def _consume_cost_layers_matching(layers: list, quantity: float, unit_cost: float) -> tuple[list, float]:
+    """Consume stock at a requested historical cost when possible, then FIFO."""
+    remaining = float(quantity)
+    total = 0.0
+    used = [False] * len(layers)
+    for idx, layer in enumerate(layers):
+        if abs(float(layer.get("unit_cost", 0) or 0) - float(unit_cost)) > 1e-6:
+            continue
+        q = float(layer.get("quantity", 0) or 0)
+        if q <= 0: continue
+        take = min(q, remaining)
+        left = q - take
+        total += take * float(layer.get("unit_cost", 0) or 0)
+        if left > 1e-9: layers[idx] = {**layer, "quantity": left}
+        else: used[idx] = True
+        remaining -= take
+        if remaining <= 1e-9: break
+    if remaining > 1e-9:
+        for idx, layer in enumerate(layers):
+            if used[idx]: continue
+            q = float(layer.get("quantity", 0) or 0)
+            if q <= 0: continue
+            take = min(q, remaining)
+            left = q - take
+            total += take * float(layer.get("unit_cost", 0) or 0)
+            if left > 1e-9: layers[idx] = {**layer, "quantity": left}
+            else: used[idx] = True
+            remaining -= take
+            if remaining <= 1e-9: break
+    if remaining > 1e-9:
+        raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock.")
+    return [x for i, x in enumerate(layers) if not used[i] and float(x.get("quantity", 0) or 0) > 1e-9], total
+
+
+async def _migrate_legacy_cost_layers() -> dict:
+    """Reconstruct cost lots for existing products from historical transactions."""
+    products = await db.products.find({"deleted": {"$ne": True}}).to_list(10000)
+    purchases = await db.purchases.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
+    sales = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
+    returns = await db.returns.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
+    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
+    purchases_by_product = {}
+    events = {}
+    for po in purchases:
+        for it in po.get("items", []) or []:
+            pid = str(it.get("product_id"))
+            purchases_by_product.setdefault(pid, []).append((po.get("created_at", ""), float(it.get("quantity", 0) or 0), float(it.get("unit_cost", 0) or 0), oid(po["_id"])))
+    for sale in sales:
+        for it in sale.get("items", []) or []:
+            events.setdefault(str(it.get("product_id")), []).append((sale.get("created_at", ""), "sale", float(it.get("quantity", 0) or 0), float(it.get("purchase_price", 0) or 0)))
+    for ret in returns:
+        for it in ret.get("items", []) or []:
+            events.setdefault(str(it.get("product_id")), []).append((ret.get("created_at", ""), "sale_return", float(it.get("quantity", 0) or 0), float(it.get("purchase_price", 0) or 0)))
+    for ret in purchase_returns:
+        for it in ret.get("items", []) or []:
+            events.setdefault(str(it.get("product_id")), []).append((ret.get("created_at", ""), "purchase_return", float(it.get("quantity", 0) or 0), float(it.get("unit_cost", 0) or 0)))
+    migrated = 0
+    reconciled = 0
+    for product in products:
+        if product.get("cost_layers"): continue
+        pid = str(product["_id"])
+        layers = [{"quantity": q, "unit_cost": cost, "purchase_id": purchase_id}
+                  for _, q, cost, purchase_id in purchases_by_product.get(pid, []) if q > 0]
+        for _, kind, qty, unit_cost in sorted(events.get(pid, []), key=lambda x: x[0]):
+            if qty <= 0: continue
+            if kind == "sale_return":
+                layers = _append_cost_layer(layers, qty, unit_cost, None)
+            else:
+                layers, _ = _consume_cost_layers_matching(layers, qty, unit_cost)
+        target = float(product.get("quantity", 0) or 0)
+        current = sum(float(x.get("quantity", 0) or 0) for x in layers)
+        diff = target - current
+        if diff > 1e-9:
+            layers = _append_cost_layer(layers, diff, float(product.get("purchase_price", 0) or 0), None)
+            reconciled += 1
+        elif diff < -1e-9:
+            layers, _ = _consume_cost_layers(layers, -diff)
+            reconciled += 1
+        await _save_cost_layers(pid, layers)
+        migrated += 1
+    return {"migrated": migrated, "reconciled": reconciled}
+\ndef _aggregate_item_quantities(items) -> dict:
     totals = {}
     for item in items:
         if item.quantity > 0:
@@ -463,7 +545,8 @@ async def lifespan(app: FastAPI):
         await seed_user(ADMIN_EMAIL, "Administrator", ADMIN_PASSWORD, Role.admin)
         await seed_user(PARTNER_EMAIL, "Store Partner", PARTNER_PASSWORD, Role.partner)
         await seed_user(CASHIER_EMAIL, "Front Cashier", CASHIER_PASSWORD, Role.cashier)
-        logger.info("Startup complete; users seeded.")
+        migration = await _migrate_legacy_cost_layers()
+        logger.info("Startup complete; users seeded; cost-layer migration: %s", migration)
     except Exception as e:  # noqa: BLE001
         logger.error(f"Database unavailable at startup ({e}); running without a live DB.")
     yield
@@ -1150,9 +1233,12 @@ async def delete_sale(sale_id: str, _: AdminOnly):
     for it in sale.get("items", []):
         restore = it["quantity"] - returned.get(it["product_id"], 0)
         if restore > 0:
+            prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+            layers = await _ensure_cost_layers(prod or {})
+            layers = _append_cost_layer(layers, restore, float(it.get("purchase_price", 0) or 0), None)
             await db.products.update_one(
                 {"_id": ObjectId(it["product_id"])},
-                {"$inc": {"quantity": restore}, "$set": {"updated_at": now_iso()}},
+                {"$inc": {"quantity": restore}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
             )
     # Remove the sale and its returns from the books
     await db.returns.update_many({"sale_id": sale_id}, {"$set": {"deleted": True}})
@@ -1649,11 +1735,14 @@ async def create_return(body: ReturnIn, user: Staff):
     res = await db.returns.insert_one(doc)
     doc["_id"] = res.inserted_id
 
-    # Restore stock
+    # Restore stock at the exact cost used by the original sale.
     for it in items:
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        layers = await _ensure_cost_layers(prod or {})
+        layers = _append_cost_layer(layers, it["quantity"], float(it.get("purchase_price", 0) or 0), None)
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
-            {"$inc": {"quantity": it["quantity"]}, "$set": {"updated_at": now_iso()}},
+            {"$inc": {"quantity": it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
         )
     return return_public(doc)
 
@@ -1753,11 +1842,14 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
     res = await db.purchase_returns.insert_one(doc)
     doc["_id"] = res.inserted_id
 
-    # Reduce stock (goods sent back to supplier)
+    # Remove the returned units from their purchase-cost layer.
     for it in items:
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        layers = await _ensure_cost_layers(prod or {})
+        layers, _ = _consume_cost_layers_matching(layers, it["quantity"], float(it.get("unit_cost", 0) or 0))
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
-            {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
+            {"$inc": {"quantity": -it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
         )
     return purchase_return_public(doc)
 
