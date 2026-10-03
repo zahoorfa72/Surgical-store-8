@@ -1286,16 +1286,20 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         if requested_qty > available_after_restore:
             raise HTTPException(status_code=400, detail=f"Only {available_after_restore:g} of {p['name']} available for this sale")
 
-    # Put back the old items' stock, then apply the validated new cart.
+    # Put back the old items at their recorded sale cost.
     for it in sale.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        layers = await _ensure_cost_layers(prod or {})
+        layers = _append_cost_layer(layers, float(it["quantity"]), float(it.get("purchase_price", 0) or 0), None)
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
-            {"$inc": {"quantity": it["quantity"]}, "$set": {"updated_at": now_iso()}},
+            {"$inc": {"quantity": it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
         )
 
     items = []
     subtotal = 0.0
     cogs = 0.0
+    working_cost_layers = {}
     try:
         for it in body.items:
             if not ObjectId.is_valid(it.product_id):
@@ -1308,7 +1312,12 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             if it.quantity > p.get("quantity", 0):
                 raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
             line_total = round(it.quantity * it.unit_price, 2)
-            line_cogs = round(it.quantity * p.get("purchase_price", 0), 2)
+            layers = working_cost_layers.get(it.product_id)
+            if layers is None:
+                layers = await _ensure_cost_layers(p)
+            next_layers, line_cogs = _consume_cost_layers(layers, it.quantity)
+            working_cost_layers[it.product_id] = next_layers
+            unit_cost = round(line_cogs / it.quantity, 8)
             subtotal += line_total
             cogs += line_cogs
             items.append({
@@ -1316,7 +1325,8 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                 "name": p["name"],
                 "quantity": it.quantity,
                 "unit_price": it.unit_price,
-                "purchase_price": p.get("purchase_price", 0),
+                "purchase_price": unit_cost,
+                "line_cogs": round(line_cogs, 2),
                 "line_total": line_total,
             })
     except HTTPException:
@@ -1352,11 +1362,12 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             "edited_at": now_iso(),
         }},
     )
-    # Deduct new items from stock
-    for it in body.items:
+    # Commit the remaining cost layers selected above.
+    for product_id, layers in working_cost_layers.items():
+        await _save_cost_layers(product_id, layers)
         await db.products.update_one(
-            {"_id": ObjectId(it.product_id)},
-            {"$inc": {"quantity": -it.quantity}, "$set": {"updated_at": now_iso()}},
+            {"_id": ObjectId(product_id)},
+            {"$set": {"updated_at": now_iso()}},
         )
     updated = await db.sales.find_one({"_id": ObjectId(sale_id)})
     return sale_public(updated)
