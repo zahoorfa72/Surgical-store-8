@@ -1950,9 +1950,19 @@ async def report_inventory_usage(
 
 
 @api.get("/reports/summary")
-async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
+async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840), date: Optional[str] = None):
     start = range_start(range, tz_offset_minutes)
+    end = None
+    if date:
+        try:
+            local_day = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            start = local_day - timedelta(minutes=tz_offset_minutes)
+            end = start + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD.")
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    if end:
+        time_q["created_at"]["$lt"] = end.isoformat()
 
     # Returns/payments are dated when the cash movement happens. They must
     # therefore be filtered independently from the original sale/purchase;
