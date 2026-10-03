@@ -362,7 +362,7 @@ def _consume_cost_layers(layers: list, quantity: float) -> tuple[list, float]:
     remaining = float(quantity)
     total_cost = 0.0
     next_layers = []
-    for layer in layers:
+    for index, layer in enumerate(layers):
         q = float(layer.get("quantity", 0) or 0)
         if q <= 0:
             continue
@@ -373,6 +373,7 @@ def _consume_cost_layers(layers: list, quantity: float) -> tuple[list, float]:
             next_layers.append({**layer, "quantity": left})
         remaining -= take
         if remaining <= 1e-9:
+            next_layers.extend(layers[index + 1:])
             break
     if remaining > 1e-9:
         raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock. Please refresh/sync inventory before selling.")
