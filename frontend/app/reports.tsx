@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
@@ -47,9 +47,12 @@ export default function Reports() {
   const router = useRouter();
 
   const [range, setRange] = useState<string>("today");
-  const { data, isLoading, refetch, isRefetching } = useReport(range);
+  const [date, setDate] = useState("");
+  const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
+  const selectedRange = exactDate ? `date:${exactDate}` : range;
+  const { data, isLoading, refetch, isRefetching } = useReport(selectedRange);
 
-  const label = useMemo(() => periodLabel(range), [range]);
+  const label = useMemo(() => exactDate ? new Date(`${exactDate}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "2-digit", month: "short", year: "numeric" }) : periodLabel(range), [range, exactDate]);
   const netPurchases = data ? Number(data.purchase_total ?? 0) : 0;
 
   return (
@@ -61,6 +64,24 @@ export default function Reports() {
         onBack={() => router.back()}
       />
       <ChipRow options={RANGES as any} value={range} onChange={setRange} testIDPrefix="report-range" />
+      <View style={styles.dateFilter}>
+        <MaterialDesignIcons name="calendar-search" size={20} color={colors.muted} />
+        <TextInput
+          style={styles.dateInput}
+          value={date}
+          onChangeText={setDate}
+          placeholder="Exact date: YYYY-MM-DD"
+          placeholderTextColor={colors.muted}
+          keyboardType="numbers-and-punctuation"
+          maxLength={10}
+        />
+        {date.length > 0 && (
+          <Pressable onPress={() => setDate("")} hitSlop={8}>
+            <MaterialDesignIcons name="close-circle" size={19} color={colors.muted} />
+          </Pressable>
+        )}
+      </View>
+      <Text style={styles.dateHint}>{exactDate ? "Showing the finance statement for this exact date." : "Leave the date empty to use Daily / Weekly / Monthly / Yearly."}</Text>
 
       {isLoading || !data ? (
         <Loader />
@@ -196,6 +217,9 @@ function Divider() {
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  dateFilter: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 10, paddingHorizontal: 12, height: 46, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
+  dateInput: { flex: 1, fontSize: 14, color: colors.onSurface },
+  dateHint: { marginHorizontal: 18, marginTop: 5, fontSize: 11, color: colors.muted },
   periodBanner: {
     flexDirection: "row",
     alignItems: "center",
