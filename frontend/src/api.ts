@@ -262,7 +262,10 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       }
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
         const it = items.find((x: any) => x.product_id === p.id);
-        return it ? { ...p, quantity: p.quantity + Number(it.quantity || 0) } : p;
+        if (!it) return p;
+        const layers = ensureCostLayers(p);
+        layers.push({ quantity: Number(it.quantity || 0), unit_cost: Number(it.purchase_price || 0), purchase_id: null });
+        return { ...p, quantity: p.quantity + Number(it.quantity || 0), cost_layers: layers };
       }));
     } else if (method === "DELETE" && id) {
       const row = (queryClient.getQueryData<any[]>(["returns"]) ?? []).find((r) => r.id === id);
