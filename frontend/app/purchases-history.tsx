@@ -25,6 +25,7 @@ export default function PurchasesHistory() {
   const { data: purchases, isLoading } = usePurchases();
   const { data: purchaseReturns } = usePurchaseReturns();
   const [search, setSearch] = useState("");
+  const [date, setDate] = useState("");
   const [toDelete, setToDelete] = useState<Purchase | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -41,10 +42,14 @@ export default function PurchasesHistory() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (purchases ?? []).filter(
-      (p) => !q || p.ref_no.toLowerCase().includes(q) || p.supplier_name.toLowerCase().includes(q),
-    );
-  }, [purchases, search]);
+    const d = date.trim();
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
+    return (purchases ?? []).filter((p) => {
+      const matchesSearch = !q || p.ref_no.toLowerCase().includes(q) || p.supplier_name.toLowerCase().includes(q);
+      const matchesDate = !validDate || String(p.created_at ?? "").slice(0, 10) === d;
+      return matchesSearch && matchesDate;
+    });
+  }, [purchases, search, date]);
 
   // Group purchases by supplier so each supplier is shown separately, each with
   // its own net (after supplier returns) subtotal.
@@ -101,6 +106,19 @@ export default function PurchasesHistory() {
           value={search}
           onChangeText={setSearch}
         />
+      </View>
+      <View style={styles.dateWrap}>
+        <MaterialDesignIcons name="calendar" size={20} color={colors.muted} />
+        <TextInput
+          testID="purchase-date-input"
+          style={styles.searchInput}
+          placeholder="Exact date: YYYY-MM-DD"
+          placeholderTextColor={colors.muted}
+          value={date}
+          onChangeText={setDate}
+          autoCapitalize="none"
+        />
+        {!!date && <Pressable onPress={() => setDate("")}><Text style={styles.clearDate}>Clear</Text></Pressable>}
       </View>
 
       {isLoading ? (
@@ -243,6 +261,8 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.border,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
+  dateWrap: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 14, height: 44, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
+  clearDate: { color: colors.brandPrimary, fontWeight: "800", fontSize: 13 },
   row: {
     flexDirection: "row",
     alignItems: "center",
