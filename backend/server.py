@@ -1055,6 +1055,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
     items = []
     subtotal = 0.0
     cogs = 0.0
+    working_cost_layers = {}
     for it in body.items:
         if not ObjectId.is_valid(it.product_id):
             raise HTTPException(status_code=400, detail="Invalid product in cart")
