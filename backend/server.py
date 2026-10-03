@@ -347,6 +347,54 @@ class PurchaseIn(BaseModel):
 
 
 
+async def _ensure_cost_layers(product: dict) -> list:
+    """Keep old stock at its original purchase cost instead of overwriting it."""
+    layers = product.get("cost_layers")
+    if layers:
+        return layers
+    qty = float(product.get("quantity", 0) or 0)
+    if qty <= 0:
+        return []
+    return [{"quantity": qty, "unit_cost": float(product.get("purchase_price", 0) or 0), "purchase_id": None}]
+
+
+def _consume_cost_layers(layers: list, quantity: float) -> tuple[list, float]:
+    remaining = float(quantity)
+    total_cost = 0.0
+    next_layers = []
+    for layer in layers:
+        q = float(layer.get("quantity", 0) or 0)
+        if q <= 0:
+            continue
+        take = min(q, remaining)
+        total_cost += take * float(layer.get("unit_cost", 0) or 0)
+        left = q - take
+        if left > 1e-9:
+            next_layers.append({**layer, "quantity": left})
+        remaining -= take
+        if remaining <= 1e-9:
+            break
+    if remaining > 1e-9:
+        raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock. Please refresh/sync inventory before selling.")
+    return next_layers, total_cost
+
+
+def _append_cost_layer(layers: list, quantity: float, unit_cost: float, purchase_id: Optional[str] = None) -> list:
+    if quantity <= 0:
+        return layers
+    return [*layers, {"quantity": float(quantity), "unit_cost": float(unit_cost), "purchase_id": purchase_id}]
+
+
+async def _save_cost_layers(product_id: str, layers: list):
+    clean = [
+        {"quantity": round(float(x.get("quantity", 0)), 8), "unit_cost": round(float(x.get("unit_cost", 0)), 8), "purchase_id": x.get("purchase_id")}
+        for x in layers if float(x.get("quantity", 0) or 0) > 1e-9
+    ]
+    await db.products.update_one(
+        {"_id": ObjectId(product_id)},
+        {"$set": {"cost_layers": clean, "updated_at": now_iso()}},
+    )
+
 def _aggregate_item_quantities(items) -> dict:
     totals = {}
     for item in items:
