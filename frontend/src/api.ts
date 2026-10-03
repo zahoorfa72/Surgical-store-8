@@ -143,7 +143,8 @@ function consumeCostLayers(layers: any[], quantity: number): { layers: any[]; to
   let remaining = Number(quantity);
   let totalCost = 0;
   const next: any[] = [];
-  for (const layer of layers) {
+  for (let index = 0; index < layers.length; index += 1) {
+    const layer = layers[index];
     const q = Number(layer?.quantity ?? 0);
     if (q <= 0) continue;
     const take = Math.min(q, remaining);
@@ -151,7 +152,10 @@ function consumeCostLayers(layers: any[], quantity: number): { layers: any[]; to
     const left = q - take;
     if (left > 1e-9) next.push({ ...layer, quantity: left });
     remaining -= take;
-    if (remaining <= 1e-9) break;
+    if (remaining <= 1e-9) {
+      next.push(...layers.slice(index + 1));
+      break;
+    }
   }
   if (remaining > 1e-9) throw new Error("Inventory cost layers are inconsistent with stock.");
   return { layers: next, totalCost };
