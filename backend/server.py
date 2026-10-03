@@ -1067,8 +1067,11 @@ async def create_sale(body: SaleIn, user: AnyUser):
         if it.quantity > p.get("quantity", 0):
             raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
         line_total = round(it.quantity * it.unit_price, 2)
-        layers = await _ensure_cost_layers(p)
+        layers = working_cost_layers.get(it.product_id)
+        if layers is None:
+            layers = await _ensure_cost_layers(p)
         next_layers, line_cogs = _consume_cost_layers(layers, it.quantity)
+        working_cost_layers[it.product_id] = next_layers
         unit_cost = round(line_cogs / it.quantity, 8)
         subtotal += line_total
         cogs += line_cogs
@@ -1081,7 +1084,6 @@ async def create_sale(body: SaleIn, user: AnyUser):
             "line_cogs": round(line_cogs, 2),
             "line_total": line_total,
         })
-        await _save_cost_layers(it.product_id, next_layers)
 
     discount = max(0.0, body.discount)
     total = round(max(0.0, subtotal - discount), 2)
