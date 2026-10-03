@@ -1488,13 +1488,16 @@ async def delete_purchase(purchase_id: str, _: AdminOnly):
         available = float(prod.get("quantity", 0)) if prod else 0
         if available + 1e-9 < net_in:
             raise HTTPException(status_code=400, detail=f"Cannot delete purchase: {it['name']} stock has already been used")
-    # Reverse the stock still in inventory from this purchase
+    # Reverse only this purchase's remaining cost lot.
     for it in purchase.get("items", []):
         net_in = float(it["quantity"]) - float(returned.get(it["product_id"], 0))
         if net_in > 0:
+            prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+            layers = await _ensure_cost_layers(prod or {})
+            layers, _ = _consume_cost_layers_matching(layers, net_in, float(it.get("unit_cost", 0) or 0))
             await db.products.update_one(
                 {"_id": ObjectId(it["product_id"])},
-                {"$inc": {"quantity": -net_in}, "$set": {"updated_at": now_iso()}},
+                {"$inc": {"quantity": -net_in}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
             )
     # Cascade: remove this purchase's supplier returns from the books too.
     await db.purchase_returns.update_many({"purchase_id": purchase_id}, {"$set": {"deleted": True}})
@@ -1522,11 +1525,14 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
         available = float(prod.get("quantity", 0)) if prod else 0
         if available + 1e-9 < float(it["quantity"]):
             raise HTTPException(status_code=400, detail=f"Cannot edit purchase: {it['name']} stock has already been used")
-    # Reverse old stock, then apply new items.
+    # Reverse the old purchase's exact cost lot.
     for it in purchase.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        layers = await _ensure_cost_layers(prod or {})
+        layers, _ = _consume_cost_layers_matching(layers, float(it["quantity"]), float(it.get("unit_cost", 0) or 0))
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
-            {"$inc": {"quantity": -it["quantity"]}, "$set": {"updated_at": now_iso()}},
+            {"$inc": {"quantity": -it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
         )
 
     items = []
@@ -1576,12 +1582,15 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             "edited_at": now_iso(),
         }},
     )
-    # Apply new stock + latest cost
+    # Apply the edited purchase as a separate cost layer.
     for it in body.items:
+        prod = await db.products.find_one({"_id": ObjectId(it.product_id)})
+        layers = await _ensure_cost_layers(prod or {})
+        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, purchase_id)
         await db.products.update_one(
             {"_id": ObjectId(it.product_id)},
             {"$inc": {"quantity": it.quantity},
-             "$set": {"purchase_price": it.unit_cost, "updated_at": now_iso()}},
+             "$set": {"purchase_price": it.unit_cost, "cost_layers": layers, "updated_at": now_iso()}},
         )
     updated = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
     return purchase_public(updated)
