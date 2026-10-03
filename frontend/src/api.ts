@@ -132,6 +132,31 @@ export async function getWriteQueueCount(): Promise<number> {
 function now() {
   return new Date().toISOString();
 }
+function ensureCostLayers(product: any): any[] {
+  if (Array.isArray(product?.cost_layers) && product.cost_layers.length) return product.cost_layers;
+  const qty = Number(product?.quantity ?? 0);
+  if (qty <= 0) return [];
+  return [{ quantity: qty, unit_cost: Number(product?.purchase_price ?? 0), purchase_id: null }];
+}
+
+function consumeCostLayers(layers: any[], quantity: number): { layers: any[]; totalCost: number } {
+  let remaining = Number(quantity);
+  let totalCost = 0;
+  const next: any[] = [];
+  for (const layer of layers) {
+    const q = Number(layer?.quantity ?? 0);
+    if (q <= 0) continue;
+    const take = Math.min(q, remaining);
+    totalCost += take * Number(layer?.unit_cost ?? 0);
+    const left = q - take;
+    if (left > 1e-9) next.push({ ...layer, quantity: left });
+    remaining -= take;
+    if (remaining <= 1e-9) break;
+  }
+  if (remaining > 1e-9) throw new Error("Inventory cost layers are inconsistent with stock.");
+  return { layers: next, totalCost };
+}
+
 
 // Report/customers/day-close are derived from the base collections by data.ts.
 // After any local write we must mark them stale so the dashboard recomputes.
@@ -339,8 +364,12 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         const product = products.find((p: any) => p.id === it.product_id);
         const qty = Number(it.quantity ?? 0);
         const unitPrice = Number(it.unit_price ?? 0);
-        const purchasePrice = Number(product?.purchase_price ?? 0);
+        const layers = ensureCostLayers(product);
+        const consumed = consumeCostLayers(layers, qty);
+        const purchasePrice = qty > 0 ? consumed.totalCost / qty : 0;
         return { ...it, name: product?.name ?? "Item", purchase_price: purchasePrice,
+          line_cogs: Math.round(consumed.totalCost * 100) / 100,
+          _remaining_cost_layers: consumed.layers,
           line_total: Math.round(qty * unitPrice * 100) / 100 };
       });
       const subtotal = items.reduce((s: number, it: any) => s + Number(it.line_total ?? 0), 0);
@@ -356,7 +385,9 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any>(["sale", tempId], rec);
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
         const it = items.find((x: any) => x.product_id === p.id);
-        return it ? { ...p, quantity: Number(p.quantity ?? 0) - Number(it.quantity ?? 0) } : p;
+        if (!it) return p;
+        const layers = (it as any)._remaining_cost_layers ?? consumeCostLayers(ensureCostLayers(p), Number(it.quantity ?? 0)).layers;
+        return { ...p, quantity: Number(p.quantity ?? 0) - Number(it.quantity ?? 0), cost_layers: layers };
       }));
       if (rec.credit && rec.customer_id) {
         queryClient.setQueryData<any[]>(["parties", "customer"], (old) => (old ?? []).map((p: any) =>
@@ -439,8 +470,11 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any>(["purchase", tempId], rec);
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
         const it = items.find((x: any) => x.product_id === p.id);
-        return it ? { ...p, quantity: Number(p.quantity ?? 0) + Number(it.quantity ?? 0),
-          purchase_price: Number(it.unit_cost ?? p.purchase_price ?? 0), updated_at: now() } : p;
+        if (!it) return p;
+        const layers = ensureCostLayers(p);
+        layers.push({ quantity: Number(it.quantity ?? 0), unit_cost: Number(it.unit_cost ?? 0), purchase_id: tempId });
+        return { ...p, quantity: Number(p.quantity ?? 0) + Number(it.quantity ?? 0),
+          purchase_price: Number(it.unit_cost ?? p.purchase_price ?? 0), cost_layers: layers, updated_at: now() };
       }));
       if (supplierId) {
         queryClient.setQueryData<any[]>(["parties", "supplier"], (old) => (old ?? []).map((p: any) =>
