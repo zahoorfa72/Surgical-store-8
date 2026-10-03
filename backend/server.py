@@ -284,6 +284,7 @@ class ProductIn(BaseModel):
 
 class ProductOut(ProductIn):
     id: str
+    cost_layers: List[dict] = Field(default_factory=list)
     quantity: float = 0
     created_at: str
     updated_at: str
@@ -784,6 +785,10 @@ def product_public(d: dict) -> ProductOut:
         sale_price=max(0.0, float(d.get("sale_price", 0) or 0)),
         low_stock_threshold=max(0.0, float(d.get("low_stock_threshold", 5) or 0)),
         expiry_date=d.get("expiry_date"),
+        cost_layers=[
+            {"quantity": round(float(x.get("quantity", 0) or 0), 8), "unit_cost": round(float(x.get("unit_cost", 0) or 0), 8), "purchase_id": x.get("purchase_id")}
+            for x in (d.get("cost_layers") or []) if float(x.get("quantity", 0) or 0) > 1e-9
+        ],
         quantity=max(0.0, float(d.get("quantity", 0) or 0)),
         created_at=d.get("created_at", ""), updated_at=d.get("updated_at", ""),
     )
