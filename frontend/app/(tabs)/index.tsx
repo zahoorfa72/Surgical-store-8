@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
@@ -25,7 +25,10 @@ export default function Dashboard() {
   const cashier = user?.role === "cashier";
 
   const [range, setRange] = useState<string>("today");
-  const { data, isLoading, refetch, isRefetching } = useReport(range, !cashier);
+  const [date, setDate] = useState("");
+  const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
+  const reportRange = exactDate ? `date:${exactDate}` : range;
+  const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
 
   return (
@@ -36,7 +39,26 @@ export default function Dashboard() {
         topInset={insets.top}
         right={<IconButton name="cog" testID="settings-button" onPress={() => router.push("/settings")} />}
       />
-      <ChipRow options={RANGES as any} value={range} onChange={setRange} testIDPrefix="range" />
+      <ChipRow options={RANGES as any} value={range} onChange={(value) => { setRange(value); setDate(""); }} testIDPrefix="range" />
+      <View style={styles.dateFilter}>
+        <MaterialDesignIcons name="calendar" size={20} color={colors.muted} />
+        <TextInput
+          testID="finance-date-input"
+          style={styles.dateInput}
+          placeholder="Exact finance date: YYYY-MM-DD"
+          placeholderTextColor={colors.muted}
+          value={date}
+          onChangeText={setDate}
+          autoCapitalize="none"
+          keyboardType="numbers-and-punctuation"
+        />
+        {!!date && (
+          <Pressable onPress={() => setDate("")}>
+            <Text style={styles.clearDate}>Clear</Text>
+          </Pressable>
+        )}
+      </View>
+      {!!date && !exactDate && <Text style={styles.dateHint}>Enter a valid date as YYYY-MM-DD.</Text>}
 
       {cashier ? (
         dayCloseLoading || !dayClose ? <Loader /> : (
@@ -91,7 +113,7 @@ export default function Dashboard() {
             <View style={styles.chartHeader}>
               <View>
                 <Text style={styles.cardTitle}>Finance chart</Text>
-                <Text style={styles.chartSub}>Quick view for {range === "all" ? "all time" : range}</Text>
+                <Text style={styles.chartSub}>Quick view for {exactDate ? exactDate : range === "all" ? "all time" : range}</Text>
               </View>
               <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
             </View>
@@ -212,6 +234,10 @@ function PLRow({
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  dateFilter: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 14, height: 46, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
+  dateInput: { flex: 1, fontSize: 14, color: colors.onSurface },
+  clearDate: { color: colors.brandPrimary, fontWeight: "800", fontSize: 12 },
+  dateHint: { marginHorizontal: 18, marginTop: 5, fontSize: 11, color: colors.warning },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
   chartHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   chartSub: { fontSize: 12, color: colors.muted, marginTop: -6, marginBottom: 8 },
