@@ -2060,8 +2060,12 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
 
     low_stock = [product_public(p).model_dump() for p in products
                  if p.get("quantity", 0) <= p.get("low_stock_threshold", 5)]
-    inventory_value = round(sum(p.get("quantity", 0) * p.get("purchase_price", 0) for p in products), 2)
-
+    inventory_value = round(sum(
+        sum(float(layer.get("quantity", 0) or 0) * float(layer.get("unit_cost", 0) or 0) for layer in p.get("cost_layers", []))
+        if p.get("cost_layers")
+        else float(p.get("quantity", 0) or 0) * float(p.get("purchase_price", 0) or 0)
+        for p in products
+    ), 2)
     return {
         "range": range,
         "revenue": revenue,
