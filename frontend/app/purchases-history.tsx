@@ -44,9 +44,10 @@ export default function PurchasesHistory() {
     const q = search.trim().toLowerCase();
     const d = date.trim();
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
+    const localDate = (iso: string) => { const x = new Date(iso); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
     return (purchases ?? []).filter((p) => {
       const matchesSearch = !q || p.ref_no.toLowerCase().includes(q) || p.supplier_name.toLowerCase().includes(q);
-      const matchesDate = !validDate || String(p.created_at ?? "").slice(0, 10) === d;
+      const matchesDate = !validDate || localDate(String(p.created_at ?? "")) === d;
       return matchesSearch && matchesDate;
     });
   }, [purchases, search, date]);
