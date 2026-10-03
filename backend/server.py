@@ -1352,10 +1352,13 @@ async def create_purchase(body: PurchaseIn, user: Staff):
     doc["_id"] = res.inserted_id
 
     for it in body.items:
+        product = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
+        layers = await _ensure_cost_layers(product or {})
+        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, oid(doc["_id"]))
         await db.products.update_one(
             {"_id": ObjectId(it.product_id)},
             {"$inc": {"quantity": it.quantity},
-             "$set": {"purchase_price": it.unit_cost, "updated_at": now_iso()}},
+             "$set": {"purchase_price": it.unit_cost, "cost_layers": layers, "updated_at": now_iso()}},
         )
     return purchase_public(doc)
 
