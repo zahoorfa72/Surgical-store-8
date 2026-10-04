@@ -17,6 +17,28 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
 
+async function receiptLogoDataUrl(settings?: { has_logo: boolean; logo_version: number; pending_logo_uri?: string | null }): Promise<string | undefined> {
+  if (!settings?.has_logo) return undefined;
+  const source = settings.pending_logo_uri || logoUrl(settings.logo_version);
+  try {
+    const response = await fetch(source);
+    if (!response.ok) return undefined;
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const value = reader.result;
+        if (typeof value === "string" && value.startsWith("data:")) resolve(value);
+        else reject(new Error("Could not encode logo"));
+      };
+      reader.onerror = () => reject(new Error("Could not read logo"));
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string, storeName = STORE_NAME, showDiscount = true): string {
   const rows = sale.items
     .map(
@@ -108,7 +130,8 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME, showSellProfitDiscount) });
+      const logo = await receiptLogoDataUrl(settings);
+      await Print.printAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, logo, settings?.store_name ?? STORE_NAME, showSellProfitDiscount) });
     } catch (e: any) {
       toast("Printing not available on this device", "error");
     } finally {
@@ -120,7 +143,8 @@ export default function Receipt() {
     if (!sale) return;
     setBusy(true);
     try {
-      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, settings?.has_logo ? logoUrl(settings.logo_version) : undefined, settings?.store_name ?? STORE_NAME, showSellProfitDiscount) });
+      const logo = await receiptLogoDataUrl(settings);
+      const { uri } = await Print.printToFileAsync({ html: receiptHtml(sale, receiptFormat, receiptWidth, logo, settings?.store_name ?? STORE_NAME, showSellProfitDiscount) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
       else toast("Sharing not available", "error");
     } catch (e: any) {
