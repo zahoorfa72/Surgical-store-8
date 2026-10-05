@@ -129,7 +129,7 @@ export default function Purchase() {
         body: { name, barcode, purchase_price: 0, sale_price: salePrice, low_stock_threshold: 5, expiry_date: null },
       });
       const id = String(created.id);
-      setLines((prev) => [...prev, { id, name, quantity: 1, unit_cost: 0 }]);
+      setLines((prev) => [...prev, { id, name: created.name ?? name, quantity: 1, unit_cost: Number(created.purchase_price ?? 0) }]);
       await queryClient.invalidateQueries({ queryKey: qk.products });
       setProductCreateOpen(false);
       setPickerOpen(false);
