@@ -955,6 +955,83 @@ async def delete_product(product_id: str, _: AdminOnly):
     return {"ok": True}
 
 
+@api.post("/inventory-adjustments")
+async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
+    if not ObjectId.is_valid(body.product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+    delta = float(body.delta)
+    if abs(delta) < 1e-9:
+        raise HTTPException(status_code=400, detail="Adjustment quantity cannot be zero")
+    product = await db.products.find_one({"_id": ObjectId(body.product_id), "deleted": {"$ne": True}})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    layers = await _ensure_cost_layers(product)
+    current = float(product.get("quantity", 0) or 0)
+    if delta < 0:
+        layers, _ = _consume_cost_layers(layers, -delta)
+    else:
+        layers = _append_cost_layer(layers, delta, float(product.get("purchase_price", 0) or 0), None)
+    next_qty = current + delta
+    if next_qty < -1e-9:
+        raise HTTPException(status_code=400, detail="Adjustment cannot reduce stock below zero")
+    ts = now_iso()
+    await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {
+        "quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": ts
+    }})
+    await db.inventory_adjustments.insert_one({
+        "product_id": body.product_id, "delta": delta, "reason": body.reason.strip(),
+        "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
+    })
+    return {"ok": True, "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
+
+
+@api.post("/stock-transfers")
+async def create_stock_transfer(body: StockTransferIn, user: Staff):
+    if not ObjectId.is_valid(body.from_product_id) or not ObjectId.is_valid(body.to_product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+    if body.from_product_id == body.to_product_id:
+        raise HTTPException(status_code=400, detail="Source and destination must be different products")
+    source = await db.products.find_one({"_id": ObjectId(body.from_product_id), "deleted": {"$ne": True}})
+    target = await db.products.find_one({"_id": ObjectId(body.to_product_id), "deleted": {"$ne": True}})
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Source or destination product not found")
+    qty = float(body.quantity)
+    source_layers = await _ensure_cost_layers(source)
+    target_layers = await _ensure_cost_layers(target)
+    if qty > float(source.get("quantity", 0) or 0) + 1e-9:
+        raise HTTPException(status_code=400, detail="Transfer quantity exceeds available stock")
+    remaining = qty
+    moved_layers = []
+    kept_layers = []
+    for layer in source_layers:
+        q = float(layer.get("quantity", 0) or 0)
+        take = min(q, remaining)
+        if take > 0:
+            moved_layers.append({**layer, "quantity": take, "purchase_id": None})
+            remaining -= take
+        left = q - take
+        if left > 1e-9:
+            kept_layers.append({**layer, "quantity": left})
+        if remaining <= 1e-9:
+            kept_layers.extend(source_layers[len(kept_layers) + len(moved_layers):])
+            break
+    if remaining > 1e-9:
+        raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock")
+    ts = now_iso()
+    await db.products.update_one({"_id": ObjectId(source["_id"])}, {"$set": {
+        "quantity": round(float(source.get("quantity", 0)) - qty, 8), "cost_layers": kept_layers, "updated_at": ts
+    }})
+    await db.products.update_one({"_id": ObjectId(target["_id"])}, {"$set": {
+        "quantity": round(float(target.get("quantity", 0)) + qty, 8), "cost_layers": [*target_layers, *moved_layers], "updated_at": ts
+    }})
+    await db.stock_transfers.insert_one({
+        "from_product_id": body.from_product_id, "to_product_id": body.to_product_id, "quantity": qty,
+        "reason": body.reason.strip(), "user_id": oid(user["_id"]), "user_name": user.get("name", ""),
+        "created_at": ts, "deleted": False,
+    })
+    return {"ok": True, "quantity": qty}
+
+
 # ---------------------------------------------------------------------------
 # Parties (suppliers + customers)
 # ---------------------------------------------------------------------------
