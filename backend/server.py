@@ -671,13 +671,6 @@ AdminOnly = Annotated[dict, Depends(require_role(Role.admin))]
 AnyUser = Annotated[dict, Depends(require_role(Role.admin, Role.partner, Role.cashier))]
 
 
-async def next_seq(name: str) -> int:
-    doc = await db.counters.find_one_and_update(
-        {"_id": name}, {"$inc": {"seq": 1}}, upsert=True, return_document=True,
-    )
-    return doc["seq"]
-
-
 # ---------------------------------------------------------------------------
 # Audit log
 # ---------------------------------------------------------------------------
@@ -696,6 +689,13 @@ async def list_audit(_: AdminOnly, limit: int = Query(500, ge=1, le=1000)):
         }
         for row in rows
     ]
+
+async def next_seq(name: str) -> int:
+    doc = await db.counters.find_one_and_update(
+        {"_id": name}, {"$inc": {"seq": 1}}, upsert=True, return_document=True,
+    )
+    return doc["seq"]
+
 
 # ---------------------------------------------------------------------------
 # Auth routes
