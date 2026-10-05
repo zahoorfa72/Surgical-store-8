@@ -77,7 +77,7 @@ export default function PurchasesHistory() {
         return { title, data, gross, refunded, net: Math.max(0, gross - refunded) };
       })
       .sort((a, b) => a.title.localeCompare(b.title));
-  }, [filtered, refundByPurchase]);
+  }, [filtered, refundByPurchase, fakeFinanceDisplay, products]);
 
   const doDelete = async () => {
     if (!toDelete) return;
