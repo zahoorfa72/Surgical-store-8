@@ -181,15 +181,11 @@ export default function Sell() {
   };
 
   const addToCart = (p: Product) => {
-    if (p.quantity <= 0 && !allowNegativeStock) {
-      toast(`${p.name} is out of stock — enable “Sell below zero stock” first`, "error");
-      return;
-    }
     setCart((prev) => {
       const found = prev.find((c) => c.id === p.id);
       if (found) {
         if (found.quantity >= p.quantity) {
-          toast(`Only ${p.quantity} in stock`, "error");
+          toast(`Only ${p.quantity} in stock — checkout can still be completed below zero only when the permission box is checked`, "error");
           return prev;
         }
         return prev.map((c) => (c.id === p.id ? { ...c, quantity: c.quantity + 1 } : c));
@@ -429,8 +425,7 @@ export default function Sell() {
               ) : (
                 <Pressable
                   testID={`add-${item.id}`}
-                  disabled={out && !allowNegativeStock}
-                  style={[styles.addBtn, out && !allowNegativeStock && { opacity: 0.4 }]}
+                  style={styles.addBtn}
                   onPress={() => addToCart(item)}
                 >
                   <MaterialDesignIcons name="cart-plus" size={20} color={colors.onBrandPrimary} />
