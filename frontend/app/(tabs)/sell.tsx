@@ -198,6 +198,18 @@ export default function Sell() {
     });
   };
 
+  // Checkout has its own add path: every inventory product, including zero/negative stock,
+  // can be placed in the cart. The final checkout remains blocked until the below-zero box is enabled.
+  const addToCheckout = (p: Product) => {
+    setCart((prev) => {
+      const found = prev.find((c) => c.id === p.id);
+      if (found) {
+        return prev.map((c) => c.id === p.id ? { ...c, quantity: c.quantity + 1, stock: Number(p.quantity ?? 0) } : c);
+      }
+      return [...prev, { id: p.id, name: p.name, stock: Number(p.quantity ?? 0), quantity: 1, unit_price: p.sale_price, threshold: p.low_stock_threshold }];
+    });
+  };
+
   const setQty = (id: string, qty: number) => {
     setCart((prev) =>
       prev
@@ -346,13 +358,6 @@ export default function Sell() {
     <View style={styles.root}>
       <ScreenHeader title="Sell" subtitle="Add items to the cart" topInset={insets.top} showStatus />
 
-      <Pressable testID="allow-negative-stock-toggle" style={styles.forceStockRow} onPress={() => setAllowNegativeStock((v) => !v)}>
-        <MaterialDesignIcons name={allowNegativeStock ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={allowNegativeStock ? colors.warning : colors.muted} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.forceStockText}>Sell below zero stock</Text>
-          <Text style={styles.forceStockHint}>Only use when you intentionally want negative inventory.</Text>
-        </View>
-      </Pressable>
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
           <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
@@ -459,15 +464,36 @@ export default function Sell() {
             topInset={insets.top}
             onBack={() => setReviewOpen(false)}
           />
+          <View style={styles.reviewActionRow}>
+            <Pressable testID="create-product-from-sell" onPress={() => setSellProductCreateOpen(true)} style={styles.scanOrderBtn}>
+              <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.scanOrderText}>Add product not in inventory</Text>
+            </Pressable>
+            <Pressable testID="scan-order-image-button" onPress={() => setOrderImageScanOpen(true)} style={styles.scanOrderBtn}>
+              <MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.scanOrderText}>Scan order image</Text>
+            </Pressable>
+          </View>
           <View style={styles.reviewSearchRow}>
-          <Pressable testID="create-product-from-sell" onPress={() => setSellProductCreateOpen(true)} style={styles.scanOrderBtn}>
-            <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
-            <Text style={styles.scanOrderText}>Add product not in inventory</Text>
-          </Pressable><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View><Pressable testID="scan-order-image-button" onPress={() => setOrderImageScanOpen(true)} style={styles.scanOrderBtn}><MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} /><Text style={styles.scanOrderText}>Scan order image</Text></Pressable>
+            <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
+            <TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} />
+            <Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}>
+              <MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.reviewAddText}>Add</Text>
+            </Pressable>
+          </View>
           <KeyboardAwareScrollView
             contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}
             bottomOffset={20}
           >
+            <Pressable testID="allow-negative-stock-toggle" style={styles.forceStockRow} onPress={() => setAllowNegativeStock((v) => !v)}>
+              <MaterialDesignIcons name={allowNegativeStock ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={allowNegativeStock ? colors.warning : colors.muted} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.forceStockText}>Allow out-of-stock / negative stock sale</Text>
+                <Text style={styles.forceStockHint}>All products can be added above. Checkout is blocked if any line exceeds stock until this box is checked.</Text>
+              </View>
+            </Pressable>
+
             <Pressable
               testID="select-customer-button"
               style={styles.customerRow}
@@ -540,7 +566,7 @@ export default function Sell() {
                     </View>
                     <Pressable
                       testID={`review-add-inventory-${p.id}`}
-                      onPress={() => { addToCart(p); setReviewSearch(""); }}
+                      onPress={() => { addToCheckout(p); setReviewSearch(""); }}
                       style={styles.reviewInventoryAdd}
                     >
                       <MaterialDesignIcons name="plus" size={18} color={colors.onBrandPrimary} />
@@ -695,7 +721,7 @@ export default function Sell() {
           </ScrollView>
         </View>
       </Modal>
-      <Modal visible={addProductOpen} animationType="slide" onRequestClose={() => setAddProductOpen(false)}><View style={styles.root}><ScreenHeader title="Add products" subtitle="Search and add to this sale" topInset={insets.top} onBack={() => setAddProductOpen(false)} /><View style={[styles.searchWrap,{margin:16}]}><MaterialDesignIcons name="magnify" size={20} color={colors.muted}/><TextInput testID="review-product-search-input" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={addProductSearch} onChangeText={setAddProductSearch} autoFocus /></View><FlatList data={(products??[]).filter(p=>{const q=addProductSearch.trim().toLowerCase();return !q||p.name.toLowerCase().includes(q)||String(p.category??"").toLowerCase().includes(q)||String(p.barcode??p.sku??"").toLowerCase().includes(q)})} keyExtractor={p=>p.id} contentContainerStyle={{padding:16,gap:8}} renderItem={({item})=><Pressable disabled={item.quantity<=0} style={[styles.addProductOption,item.quantity<=0&&{opacity:.45}]} onPress={()=>addToCart(item)}><View style={{flex:1}}><Text style={styles.prodName}>{item.name}</Text><Text style={styles.prodMeta}>{item.quantity} in stock · {money(item.sale_price)}</Text></View><MaterialDesignIcons name="plus-circle" size={22} color={colors.brandPrimary}/></Pressable>} /></View></Modal>
+      <Modal visible={addProductOpen} animationType="slide" onRequestClose={() => setAddProductOpen(false)}><View style={styles.root}><ScreenHeader title="Add products" subtitle="Search and add to this sale" topInset={insets.top} onBack={() => setAddProductOpen(false)} /><View style={[styles.searchWrap,{margin:16}]}><MaterialDesignIcons name="magnify" size={20} color={colors.muted}/><TextInput testID="review-product-search-input" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={addProductSearch} onChangeText={setAddProductSearch} autoFocus /></View><FlatList data={(products??[]).filter(p=>{const q=addProductSearch.trim().toLowerCase();return !q||p.name.toLowerCase().includes(q)||String(p.category??"").toLowerCase().includes(q)||String(p.barcode??p.sku??"").toLowerCase().includes(q)})} keyExtractor={p=>p.id} contentContainerStyle={{padding:16,gap:8}} renderItem={({item})=><Pressable style={styles.addProductOption} onPress={()=>{ addToCheckout(item); setAddProductOpen(false); }}><View style={{flex:1}}><Text style={styles.prodName}>{item.name}</Text><Text style={styles.prodMeta}>{item.quantity} in stock · {money(item.sale_price)}</Text></View><MaterialDesignIcons name="plus-circle" size={22} color={colors.brandPrimary}/></Pressable>} /></View></Modal>
 
       <Modal visible={sellProductCreateOpen} animationType="slide" onRequestClose={() => setSellProductCreateOpen(false)}>
         <View style={styles.root}>
@@ -892,6 +918,7 @@ const useStyles = makeStyles((colors) => ({
   heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
   heldBtnText: { fontSize:13, fontWeight:"800", color:colors.brandPrimary },
   holdCheckoutRow: { paddingHorizontal:16, paddingTop:8, backgroundColor:colors.surface },
+  reviewActionRow: { flexDirection: "row", gap: 8, marginHorizontal: 16, marginTop: 8, flexWrap: "wrap" },
   reviewSearchRow: { marginHorizontal:16, marginBottom:4, minHeight:46, borderWidth:1, borderColor:colors.border, borderRadius:12, flexDirection:"row", alignItems:"center", paddingLeft:12, paddingRight:6, gap:7, backgroundColor:colors.surfaceSecondary },
   reviewAddBtn: { minHeight:36, paddingHorizontal:10, borderRadius:9, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:4 },
   reviewAddText: { color:colors.onBrandPrimary, fontWeight:"800", fontSize:12 },
