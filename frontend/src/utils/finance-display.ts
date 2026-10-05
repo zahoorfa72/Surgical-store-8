@@ -96,6 +96,7 @@ export function fakeReportNetProfit(report: {
 
 export const HIDDEN_SUPPLIERS_KEY = "ssm.hiddenSupplierIds";
 export const SECRET_CONTROLS_KEY = "ssm.secretControlsUnlocked";
+export const FINANCE_DETAIL_DRILLDOWN_KEY = "ssm.financeDetailDrilldown";
 
 export async function getHiddenSupplierIds(): Promise<string[]> {
   try {
@@ -119,4 +120,12 @@ export async function getSecretControlsUnlocked(): Promise<boolean> {
 
 export async function setSecretControlsUnlocked(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(SECRET_CONTROLS_KEY, enabled ? "1" : "0");
+}
+
+export async function getFinanceDetailDrilldown(): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(FINANCE_DETAIL_DRILLDOWN_KEY)) !== "0"; } catch { return true; }
+}
+
+export async function setFinanceDetailDrilldown(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(FINANCE_DETAIL_DRILLDOWN_KEY, enabled ? "1" : "0");
 }
