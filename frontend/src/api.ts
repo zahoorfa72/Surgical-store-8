@@ -831,6 +831,20 @@ export async function rawRequest<T = any>(
   return (await res.json()) as T;
 }
 
+function findLocalPartyDuplicate(body: any): any | null {
+  if (!body || body.type !== "customer" && body.type !== "supplier") return null;
+  const rows = queryClient.getQueryData<any[]>(["parties", body.type]) ?? [];
+  const normalizeName = (v: any) => String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalizePhone = (v: any) => String(v ?? "").replace(/[^0-9]/g, "");
+  const nameKey = normalizeName(body.name);
+  const phoneKey = normalizePhone(body.phone);
+  return rows.find((p: any) => {
+    const samePhone = !!phoneKey && !!normalizePhone(p.phone) && phoneKey === normalizePhone(p.phone);
+    const sameName = !!nameKey && nameKey === normalizeName(p.name);
+    return samePhone || sameName;
+  }) ?? null;
+}
+
 export async function apiRequest<T = any>(
   path: string,
   options: { method?: string; body?: any } = {},
@@ -838,6 +852,13 @@ export async function apiRequest<T = any>(
   const method = options.method ?? "GET";
   const mode = await getConnectionMode();
   const expectedUpdatedAt = (method === "PUT" || method === "DELETE") ? getCachedUpdatedAt(path) : undefined;
+
+  // Customer/supplier creation is idempotent locally as well as on the server.
+  // This covers every creation entry point, including Purchase and Sell.
+  if (method === "POST" && path === "/parties") {
+    const duplicate = findLocalPartyDuplicate(options.body);
+    if (duplicate) return { ...duplicate, existing: true } as T;
+  }
 
   // Manual Offline mode: never touch the server. Writes are queued locally;
   // reads are served from the React Query cache populated by local persistence.
