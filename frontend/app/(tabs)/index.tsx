@@ -8,6 +8,7 @@ import { useAuth } from "@/src/auth";
 import { useDayClose, useReport } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
 
 const RANGES = [
   { key: "today", label: "Today" },
@@ -21,6 +22,7 @@ export default function Dashboard() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const { user } = useAuth();
   const cashier = user?.role === "cashier";
 
@@ -97,8 +99,8 @@ export default function Dashboard() {
         >
           <View style={styles.grid}>
             <StatTile label="Revenue" value={money(data.revenue)} icon="cash" tone="brand" testID="stat-revenue" />
-            <StatTile label="Net Profit" value={money(data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" />
-            <StatTile label="Gross Profit" value={money(data.gross_profit)} icon="chart-line" tone="info" />
+            <StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" />
+            <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
             <StatTile
               label="Remaining Balance"
               value={money(data.remaining_balance)}
@@ -119,8 +121,8 @@ export default function Dashboard() {
             </View>
             {[
               { label: "Revenue", value: Number(data.revenue ?? 0), tone: colors.brandPrimary },
-              { label: "Gross Profit", value: Number(data.gross_profit ?? 0), tone: colors.info },
-              { label: "Net Profit", value: Number(data.net_profit ?? 0), tone: colors.success },
+              { label: "Gross Profit", value: Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), tone: colors.info },
+              { label: "Net Profit", value: Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), tone: colors.success },
               { label: "Remaining Balance", value: Number(data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
             ].map((item) => {
               const max = Math.max(1, Math.abs(Number(data.revenue ?? 0)), Math.abs(Number(data.gross_profit ?? 0)), Math.abs(Number(data.net_profit ?? 0)), Math.abs(Number(data.remaining_balance ?? 0)));
@@ -178,7 +180,7 @@ export default function Dashboard() {
 
           <View style={styles.grid}>
             <StatTile label="Units sold" value={String(data.units_sold)} icon="cube-outline" tone="brand" />
-            <StatTile label="Purchases" value={money(data.purchase_total)} icon="truck" tone="warning" />
+            <StatTile label="Purchases" value={money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)} icon="truck" tone="warning" />
             <StatTile label="Inventory value" value={money(data.inventory_value)} icon="warehouse" tone="info" />
             <StatTile label="Products" value={String(data.product_count)} icon="package-variant-closed" tone="muted" />
           </View>
