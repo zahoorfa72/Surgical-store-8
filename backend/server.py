@@ -363,14 +363,30 @@ class StockTransferIn(BaseModel):
 
 
 async def _ensure_cost_layers(product: dict) -> list:
-    """Keep old stock at its original purchase cost instead of overwriting it."""
-    layers = product.get("cost_layers")
-    if layers:
-        return layers
+    """Reconcile historical cost lots to the authoritative stock quantity."""
     qty = float(product.get("quantity", 0) or 0)
     if qty <= 0:
         return []
-    return [{"quantity": qty, "unit_cost": float(product.get("purchase_price", 0) or 0), "purchase_id": None}]
+    layers = [
+        {**x, "quantity": float(x.get("quantity", 0) or 0)}
+        for x in (product.get("cost_layers") or [])
+        if float(x.get("quantity", 0) or 0) > 1e-9
+    ]
+    total = sum(float(x.get("quantity", 0) or 0) for x in layers)
+    if abs(total - qty) <= 1e-9:
+        return layers
+    if total < qty:
+        return _append_cost_layer(layers, qty - total, float(product.get("purchase_price", 0) or 0), None)
+    result = []
+    remaining = qty
+    for layer in layers:
+        if remaining <= 1e-9:
+            break
+        take = min(float(layer.get("quantity", 0) or 0), remaining)
+        if take > 1e-9:
+            result.append({**layer, "quantity": take})
+            remaining -= take
+    return result
 
 
 def _consume_cost_layers(layers: list, quantity: float) -> tuple[list, float]:
