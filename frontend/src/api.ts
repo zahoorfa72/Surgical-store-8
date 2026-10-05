@@ -626,6 +626,47 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       const old = queryClient.getQueryData<any>(["settings"]) ?? {};
       queryClient.setQueryData(["settings"], { ...old, ...body, pending: true });
     }
+  } else if (entity === "inventory-adjustments") {
+    if (method === "POST") {
+      const pid = String(body.product_id ?? "");
+      const delta = Number(body.delta ?? 0);
+      queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((p: any) => {
+        if (p.id !== pid || !Number.isFinite(delta) || delta === 0) return p;
+        let layers = ensureCostLayers(p);
+        if (delta > 0) {
+          layers = [...layers, { quantity: delta, unit_cost: Number(p.purchase_price ?? 0), purchase_id: null }];
+        } else {
+          layers = consumeCostLayers(layers, Math.abs(delta)).layers;
+        }
+        return { ...p, quantity: Math.max(0, Number(p.quantity ?? 0) + delta), cost_layers: layers, updated_at: now(), pending: true };
+      }));
+    }
+  } else if (entity === "stock-transfers") {
+    if (method === "POST") {
+      const fromId = String(body.from_product_id ?? "");
+      const toId = String(body.to_product_id ?? "");
+      const qty = Math.max(0, Number(body.quantity ?? 0));
+      if (!fromId || !toId || fromId === toId || qty <= 0) return;
+      const rows = queryClient.getQueryData<any[]>(["products"]) ?? [];
+      const source = rows.find((p: any) => p.id === fromId);
+      const target = rows.find((p: any) => p.id === toId);
+      if (!source || !target || qty > Number(source.quantity ?? 0)) return;
+      const consumed = consumeCostLayers(ensureCostLayers(source), qty);
+      const original = ensureCostLayers(source);
+      let remaining = qty;
+      const moved: any[] = [];
+      for (const layer of original) {
+        if (remaining <= 1e-9) break;
+        const take = Math.min(Number(layer.quantity ?? 0), remaining);
+        if (take > 0) moved.push({ ...layer, quantity: take, purchase_id: null });
+        remaining -= take;
+      }
+      queryClient.setQueryData<any[]>(["products"], rows.map((p: any) => {
+        if (p.id === fromId) return { ...p, quantity: Number(p.quantity ?? 0) - qty, cost_layers: consumed.layers, updated_at: now(), pending: true };
+        if (p.id === toId) return { ...p, quantity: Number(p.quantity ?? 0) + qty, cost_layers: [...ensureCostLayers(p), ...moved], updated_at: now(), pending: true };
+        return p;
+      }));
+    }
   }
 }
 
