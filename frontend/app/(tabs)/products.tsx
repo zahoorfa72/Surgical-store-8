@@ -184,6 +184,24 @@ export default function Products() {
           }
           renderItem={({ item }) => {
             const low = item.quantity <= item.low_stock_threshold;
+            const displayStockCost = item.cost_layers?.length
+              ? item.cost_layers.reduce(
+                  (sum, layer, index) =>
+                    sum +
+                    Number(layer.quantity ?? 0) *
+                      (fakeFinanceDisplay
+                        ? fakeUnitCost(
+                            Number(item.sale_price ?? 0),
+                            String(item.id) + ":lot:" + index,
+                          )
+                        : Number(layer.unit_cost ?? 0)),
+                  0,
+                )
+              : Number(item.quantity ?? 0) *
+                (fakeFinanceDisplay
+                  ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id))
+                  : Number(item.purchase_price ?? 0));
+            const displayMargin = Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - displayStockCost;
             return (
               <Pressable
                 testID={`product-row-${item.id}`}
@@ -210,11 +228,7 @@ export default function Products() {
                   )}
                   {showInventoryProfitMargin && (
                     <Text style={styles.itemFinance}>
-                      Stock value {money(item.cost_layers?.length
-                        ? item.cost_layers.reduce((sum, layer, index) => sum + Number(layer.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0)), 0)
-                        : Number(item.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0)))} · Margin {money(Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - (item.cost_layers?.length
-                          ? item.cost_layers.reduce((sum, layer, index) => sum + Number(layer.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0)), 0)
-                          : Number(item.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0)))}
+                      Stock value {money(displayStockCost)} · Margin {money(displayMargin)}
                     </Text>
                   )}
                 </View>
