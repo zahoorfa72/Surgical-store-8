@@ -1,14 +1,14 @@
-import { useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
-import { useDayClose, useReport } from "@/src/data";
+import { useDayClose, useReport, useSales, usePayments, useExpenses, useReturns } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
 
 const RANGES = [
   { key: "today", label: "Today" },
@@ -28,10 +28,17 @@ export default function Dashboard() {
 
   const [range, setRange] = useState<string>("today");
   const [date, setDate] = useState("");
+  const [financeDetailsOpen, setFinanceDetailsOpen] = useState(null);
+  const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
   const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
   const reportRange = exactDate ? `date:${exactDate}` : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
+  const { data: sales = [] } = useSales();
+  const { data: payments = [] } = usePayments();
+  const { data: expenses = [] } = useExpenses();
+  const { data: returns = [] } = useReturns();
+  useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
   return (
     <View style={styles.root}>
@@ -98,18 +105,24 @@ export default function Dashboard() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}
         >
           <View style={styles.grid}>
-            <StatTile label="Revenue" value={money(data.revenue)} icon="cash" tone="brand" testID="stat-revenue" />
-            <StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" />
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
-            <StatTile
-              label="Remaining Balance"
-              value={money(data.remaining_balance)}
-              icon="wallet"
-              tone={data.remaining_balance >= 0 ? "success" : "error"}
-              testID="stat-remaining-balance"
-            />
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("balance")} style={styles.statPressable}><StatTile label="Remaining Balance" value={money(data.remaining_balance)} icon="wallet" tone={data.remaining_balance >= 0 ? "success" : "error"} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
+
+          <Modal visible={!!financeDetailsOpen} animationType="slide" onRequestClose={() => setFinanceDetailsOpen(null)}>
+            <View style={styles.root}>
+              <ScreenHeader title={financeDetailsOpen === "revenue" ? "Revenue details" : financeDetailsOpen === "net" ? "Net profit details" : "Remaining balance details"} subtitle="Complete money in / money out" topInset={insets.top} onBack={() => setFinanceDetailsOpen(null)} />
+              <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30, gap: 12 }}>
+                {financeDetailsOpen === "revenue" && <Card><Text style={styles.detailHeader}>Revenue & returns</Text>{sales.map((s:any) => <View key={s.id} style={styles.detailLine}><Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}
+{new Date(s.created_at).toLocaleString()}</Text><Text style={styles.detailValue}>{money(s.total)}</Text></View>)}{returns.map((r:any) => <View key={"r"+r.id} style={styles.detailLine}><Text style={styles.detailLabel}>Return · {r.invoice_no}</Text><Text style={styles.detailOut}>-{money(r.refund_total)}</Text></View>)}</Card>}
+                {financeDetailsOpen === "net" && <Card><Text style={styles.detailHeader}>Profit details</Text>{sales.map((s:any) => <View key={s.id} style={styles.detailLine}><Text style={styles.detailLabel}>{s.invoice_no} · Revenue {money(s.total)} · COGS {money(s.cogs)}</Text><Text style={styles.detailValue}>{money(fakeFinanceDisplay ? fakeReportNetProfit({ revenue: s.total }) : s.profit)}</Text></View>)}{expenses.map((e:any) => <View key={e.id} style={styles.detailLine}><Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text><Text style={styles.detailOut}>-{money(e.amount)}</Text></View>)}</Card>}
+                {financeDetailsOpen === "balance" && <><Card><Text style={styles.detailHeader}>Money in</Text>{sales.filter((s:any)=>!s.credit).map((s:any)=><View key={s.id} style={styles.detailLine}><Text style={styles.detailLabel}>{s.invoice_no} · Customer sale</Text><Text style={styles.detailValue}>+{money(s.total)}</Text></View>)}{payments.filter((p:any)=>p.kind==="receive"||p.kind==="supplier_refund").map((p:any)=><View key={p.id} style={styles.detailLine}><Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text><Text style={styles.detailValue}>+{money(p.amount)}</Text></View>)}</Card><Card><Text style={styles.detailHeader}>Money out</Text>{payments.filter((p:any)=>p.kind==="pay"||p.kind==="customer_refund").map((p:any)=><View key={p.id} style={styles.detailLine}><Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text><Text style={styles.detailOut}>-{money(p.amount)}</Text></View>)}{expenses.filter((e:any)=>e.bucket==="cogs"||e.bucket==="operating").map((e:any)=><View key={e.id} style={styles.detailLine}><Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text><Text style={styles.detailOut}>-{money(e.amount)}</Text></View>)}</Card><Card><Text style={styles.detailHeader}>Remaining balance</Text><Text style={styles.detailBig}>{money(data.remaining_balance)}</Text></Card></>}
+              </ScrollView>
+            </View>
+          </Modal>
 
           <Card>
             <View style={styles.chartHeader}>
@@ -236,6 +249,13 @@ function PLRow({
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  statPressable: { flex: 1, minWidth: "30%" },
+  detailHeader: { fontSize: 16, fontWeight: "900", color: colors.onSurface, marginBottom: 8 },
+  detailLine: { flexDirection: "row", justifyContent: "space-between", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.divider },
+  detailLabel: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.onSurfaceSecondary },
+  detailValue: { fontSize: 13, fontWeight: "800", color: colors.success },
+  detailOut: { fontSize: 13, fontWeight: "800", color: colors.error },
+  detailBig: { fontSize: 28, fontWeight: "900", color: colors.brandPrimary },
   dateFilter: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 14, height: 46, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
   dateInput: { flex: 1, fontSize: 14, color: colors.onSurface },
   clearDate: { color: colors.brandPrimary, fontWeight: "800", fontSize: 12 },
