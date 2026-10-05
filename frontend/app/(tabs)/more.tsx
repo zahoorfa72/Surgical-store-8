@@ -31,6 +31,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
     items: [
       { label: "Reports", sub: "Daily, weekly, monthly & yearly", icon: "chart-box", route: "/reports", testID: "more-reports" },
       { label: "Smart Store Center", sub: "Reorder, stock movement, statements & audit", icon: "brain", route: "/business-intelligence", testID: "more-smart-center" },
+      { label: "Offline Tools", sub: "Adjustments, expiry, transfers, shifts & attachments", icon: "toolbox-outline", route: "/offline-tools", testID: "more-offline-tools" },
       { label: "Expenses", sub: "Operating, direct & personal", icon: "cash-multiple", route: "/expenses", testID: "more-expenses" },
       { label: "Payments", sub: "Pay suppliers, receive from customers", icon: "cash-sync", route: "/payments", testID: "more-payments" },
       { label: "Customer report", sub: "Who bought how much", icon: "chart-donut", route: "/customers-report", testID: "more-customer-report" },
