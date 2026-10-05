@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
@@ -106,7 +108,7 @@ export default function BusinessIntelligence() {
       for (const item of sale.items ?? []) {
         const row = map.get(item.product_id) ?? { name: item.name, qty: 0, revenue: 0 };
         row.qty += Number(item.quantity ?? 0);
-        row.revenue += Number(item.line_total ?? item.quantity * item.unit_price ?? 0);
+        row.revenue += Number(item.line_total ?? (Number(item.quantity ?? 0) * Number(item.unit_price ?? 0)));
         map.set(item.product_id, row);
       }
     }
@@ -145,6 +147,30 @@ export default function BusinessIntelligence() {
       })))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [purchases, selectedProduct]);
+
+  const exportStatementPdf = async () => {
+    if (!selectedParty) return;
+    const title = `${selectedParty.name} Statement`;
+    const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{font-size:22px;margin:0 0 6px}
+      .muted{color:#666;font-size:12px}.bal{font-size:20px;font-weight:700;margin:14px 0}
+      table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #ddd;padding:8px;text-align:left;font-size:12px}
+      th:last-child,td:last-child{text-align:right}.neg{color:#b42318}.pos{color:#157347}
+    </style></head><body><h1>${selectedParty.name.replace(/[<>&"]/g,"")}</h1>
+      <div class="muted">${partyType === "supplier" ? "Supplier statement" : "Customer statement"}</div>
+      <div class="bal">Current balance: ${money(Number(selectedParty.balance ?? 0))}</div>
+      <div class="muted">Generated ${new Date().toLocaleString()}</div>
+      <table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Amount</th></tr></thead><tbody>
+      ${statementRows.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${String(r.detail).replace(/[<>&"]/g,"")}</td><td class="${r.amount < 0 ? "neg" : "pos"}">${r.amount < 0 ? "- " : "+ "}${money(Math.abs(r.amount))}</td></tr>`).join("")}
+      </tbody></table></body></html>`;
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: title });
+      else toast("Statement PDF created, but sharing is not available", "error");
+    } catch (e: any) {
+      toast(e?.message || "Could not create statement PDF", "error");
+    }
+  };
 
   const statementRows = useMemo(() => {
     if (!selectedParty) return [];
@@ -289,6 +315,10 @@ export default function BusinessIntelligence() {
                 <Text style={styles.balance}>{money(Number(selectedParty.balance ?? 0))}</Text>
                 <Text style={styles.cardHint}>{partyType === "supplier" ? "Current payable balance from the existing ledger" : "Current receivable balance from the existing ledger"}</Text>
                 <Text style={styles.statementNote}>The balance shown above is not recalculated here; the app's existing finance engine remains the source of truth.</Text>
+                <Pressable testID="export-party-statement-pdf" style={styles.exportBtn} onPress={() => void exportStatementPdf()}>
+                  <MaterialDesignIcons name="file-pdf-box" size={18} color={colors.onBrandPrimary} />
+                  <Text style={styles.exportText}>Export statement PDF</Text>
+                </Pressable>
                 {statementRows.map((r, i) => <View key={r.type + r.date + i} style={styles.historyRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.type}</Text><Text style={styles.rowSub}>{fmtDate(r.date)} · {r.detail}</Text></View><Text style={[styles.value, { color: r.amount < 0 ? colors.error : colors.onSurface }]}>{r.amount < 0 ? "- " : "+ "}{money(Math.abs(r.amount))}</Text></View>)}
                 {!statementRows.length && <Text style={styles.empty}>No transactions for this party.</Text>}
               </Card>
@@ -382,6 +412,8 @@ const useStyles = makeStyles((colors) => ({
   smallBtn: { flex: 1, minHeight: 38, borderRadius: 9, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   smallBtnText: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
   refresh: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  exportBtn: { marginTop: 10, minHeight: 44, borderRadius: 11, backgroundColor: colors.brandPrimary, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
+  exportText: { color: colors.onBrandPrimary, fontSize: 13, fontWeight: "800" },
   auditRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.divider },
   auditIcon: { width: 34, height: 34, borderRadius: 9, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
   healthRow: { marginTop: 10, gap: 8 },
