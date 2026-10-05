@@ -58,7 +58,7 @@ export default function OfflineTools() {
         const remoteAttachments = await apiRequest<any[]>("/attachments");
         if (Array.isArray(remoteAttachments)) {
           const merged = [...remoteAttachments, ...(localAttachments || []).filter((x: any) => x.pending)];
-          const unique = Array.from(new Map(merged.map((x: any) => [x.id || x.created_at, x])).values()).slice(0, 100);
+          const unique = Array.from(new Map(merged.map((x: any) => [x.client_id || x.id || x.created_at, x])).values()).slice(0, 100);
           await storage.setItem(ATTACH_KEY, unique);
           setAttachments(unique);
         }
@@ -165,7 +165,7 @@ export default function OfflineTools() {
     try {
       const saved = await apiRequest<any>("/attachments", {
         method: "POST",
-        body: { name: a.name, data_url: a.data_url, created_at: a.created_at, user: a.user },
+        body: { client_id: a.client_id, name: a.name, data_url: a.data_url, created_at: a.created_at, user: a.user },
       });
       const synced = { ...a, ...saved, pending: false, uri: saved?.data_url || a.uri };
       const finalList = [synced, ...next.filter((x) => x.id !== a.id)].slice(0, 100);
