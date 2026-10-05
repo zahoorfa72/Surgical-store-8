@@ -19,7 +19,7 @@ import {
 import { storage } from "@/src/utils/storage";
 import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay, getSecretControlsUnlocked, setSecretControlsUnlocked, getHiddenSupplierIds, setSupplierHidden } from "@/src/utils/finance-display";
+import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay, getSecretControlsUnlocked, setSecretControlsUnlocked, getHiddenSupplierIds, setSupplierHidden, getFinanceDetailDrilldown, setFinanceDetailDrilldown } from "@/src/utils/finance-display";
 
 export default function Settings() {
   const styles = useStyles();
@@ -48,6 +48,7 @@ export default function Settings() {
   const [adminNameTaps, setAdminNameTaps] = useState(0);
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
+  const [financeDetailDrilldown, setFinanceDetailDrilldownState] = useState(true);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
@@ -62,7 +63,8 @@ export default function Settings() {
       storage.getItem<number>("ssm.saleEditLockHours", 0),
       getFakeFinanceDisplay(),
       getHiddenSupplierIds(),
-    ]).then(async ([format, width, sellDetails, inventoryMargin, lockHours, fakeFinance, hiddenIds]) => {
+      getFinanceDetailDrilldown(),
+    ]).then(async ([format, width, sellDetails, inventoryMargin, lockHours, fakeFinance, hiddenIds, detailDrilldown]) => {
       setReceiptFormat(format === "a4" ? "a4" : "thermal");
       setReceiptWidth(width === "56" ? 56 : 72);
       setShowSellProfitDiscount(sellDetails !== false);
@@ -71,6 +73,7 @@ export default function Settings() {
       setFakeFinanceDisplayState(fakeFinance === true);
       setSecretControlsUnlockedState(await getSecretControlsUnlocked());
       setHiddenSupplierIds(hiddenIds);
+      setFinanceDetailDrilldownState(detailDrilldown);
     });
   }, []);
 
@@ -327,6 +330,29 @@ export default function Settings() {
               >
                 <View style={[styles.visibilityThumb, fakeFinanceDisplay && styles.visibilityThumbOn]} />
               </Pressable>
+            </View>
+            <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.divider }}>
+              <Text style={styles.cardTitle}>Finance detail drill-down</Text>
+              <Text style={styles.cardHint}>When enabled, tapping Revenue, Net Profit or Remaining Balance opens the detailed money in/out statement.</Text>
+              <View style={styles.visibilityRow}>
+                <View style={styles.visibilityText}>
+                  <Text style={styles.visibilityLabel}>Open finance details when tapping totals</Text>
+                  <Text style={styles.visibilityHint}>ON = dashboard totals are interactive. OFF = totals remain display-only.</Text>
+                </View>
+                <Pressable
+                  testID="finance-detail-drilldown-toggle"
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: financeDetailDrilldown }}
+                  onPress={async () => {
+                    const next = !financeDetailDrilldown;
+                    await setFinanceDetailDrilldown(next);
+                    setFinanceDetailDrilldownState(next);
+                  }}
+                  style={[styles.visibilityToggle, financeDetailDrilldown && styles.visibilityToggleOn]}
+                >
+                  <View style={[styles.visibilityThumb, financeDetailDrilldown && styles.visibilityThumbOn]} />
+                </Pressable>
+              </View>
             </View>
             {suppliers.length > 0 && (
             <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.divider }}>
