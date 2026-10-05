@@ -686,6 +686,29 @@ async function queueWrite(method: string, path: string, body: any, expectedUpdat
       return { id: targetId, ...(body ?? {}), pending: true };
     }
   }
+  // Consolidate repeated offline edits to the same existing server record.
+  // This prevents repeated replays from using an obsolete timestamp after the
+  // first local edit and keeps only the latest intended state.
+  if ((method === "PUT" || method === "DELETE") && targetId && !targetId.startsWith("local-")) {
+    const existingIndex = queue.findIndex((op) => op.path === path && (op.method === "PUT" || op.method === "DELETE"));
+    if (existingIndex >= 0) {
+      const existingExpected = queue[existingIndex].expected_updated_at ?? expectedUpdatedAt;
+      if (method === "PUT") {
+        queue[existingIndex] = {
+          ...queue[existingIndex],
+          method: "PUT",
+          body,
+          expected_updated_at: existingExpected,
+        };
+      } else {
+        queue.splice(existingIndex, 1);
+        queue.push({ id: tempId, method, path, body, expected_updated_at: existingExpected });
+      }
+      await setWriteQueue(queue);
+      await persistLiveCache();
+      return { id: targetId, ...(body ?? {}), pending: true };
+    }
+  }
   queue.push({ id: tempId, method, path, body, expected_updated_at: expectedUpdatedAt });
   await setWriteQueue(queue);
   await persistLiveCache();
