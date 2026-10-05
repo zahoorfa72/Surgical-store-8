@@ -4,17 +4,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/src/api";
-import { usePurchase, usePurchaseReturns, qk } from "@/src/data";
+import { usePurchase, usePurchaseReturns, useProducts, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Field, Loader, PrimaryButton, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
 export default function PurchaseReturnForm() {
   const styles=useStyles(); const {colors}=useTheme(); const insets=useSafeAreaInsets();
+  const fakeFinanceDisplay=useFakeFinanceDisplay();
   const router=useRouter(); const queryClient=useQueryClient(); const toast=useToast();
   const {purchase_id, return_id}=useLocalSearchParams<{purchase_id:string;return_id?:string}>();
   const {user}=useAuth(); const admin=isAdmin(user?.role); const editing=!!return_id&&admin;
   const {data:purchase,isLoading}=usePurchase(purchase_id ?? "");
+  const {data:products=[]}=useProducts();
   const {data:returnRows=[]}=usePurchaseReturns();
 
   const [qtys,setQtys]=useState<Record<string,string>>({}); const [reason,setReason]=useState(""); const [busy,setBusy]=useState(false);
@@ -22,7 +25,7 @@ export default function PurchaseReturnForm() {
   const returned=(purchase as any)?.returned_items ?? {};
   const rows=useMemo(()=>!purchase?[]:purchase.items.map(it=>{const already=Number(returned[it.product_id]??0);const own=editing?Number(existingReturn?.items?.find((x:any)=>x.product_id===it.product_id)?.quantity??0):0;return {...it,already,remaining:Math.max(0,it.quantity-already+own)}}),[purchase,returned,editing,existingReturn]);
   useEffect(()=>{if(editing&&existingReturn){const initial:any={};for(const it of existingReturn.items??[])initial[it.product_id]=String(it.quantity);setQtys(initial);setReason(existingReturn.reason??"");}},[editing,existingReturn]);
-  const total=rows.reduce((s,r)=>s+Math.min(parseFloat(qtys[r.product_id]||"0")||0,r.remaining)*r.unit_cost,0);
+  const total=rows.reduce((s,r)=>{const p=products.find((x:any)=>x.id===r.product_id);const cost=fakeFinanceDisplay?fakeUnitCost(Number(p?.sale_price??0),String(r.product_id)):Number(r.unit_cost);return s+Math.min(parseFloat(qtys[r.product_id]||"0")||0,r.remaining)*cost;},0);
   const submit=async()=>{
     const items=rows.map(r=>({product_id:r.product_id,quantity:Math.min(parseFloat(qtys[r.product_id]||"0")||0,r.remaining)})).filter(x=>x.quantity>0);
     if(!items.length){toast("Enter quantity to return","error");return;}
@@ -44,7 +47,7 @@ export default function PurchaseReturnForm() {
       <View style={{padding:16,gap:12}}>
         <Text style={styles.help}>Choose quantities being returned to the supplier. Stock is reduced and the supplier amount is adjusted.</Text>
         {rows.map(r=><View key={r.product_id} style={styles.line} testID={`purchase-return-row-${r.product_id}`}>
-          <View style={{flex:1}}><Text style={styles.name}>{r.name}</Text><Text style={styles.meta}>Purchased {r.quantity} · returned {r.already} · {money(r.unit_cost)} each</Text></View>
+          <View style={{flex:1}}><Text style={styles.name}>{r.name}</Text><Text style={styles.meta}>Purchased {r.quantity} · returned {r.already} · {money(fakeFinanceDisplay ? fakeUnitCost(Number(products.find((p:any)=>p.id===r.product_id)?.sale_price??0),String(r.product_id)) : r.unit_cost)} each</Text></View>
           <TextInput testID={`purchase-return-qty-${r.product_id}`} style={styles.qty} keyboardType="numeric" placeholder="0" placeholderTextColor={colors.muted} editable={r.remaining>0} value={qtys[r.product_id]??""}
             onChangeText={t=>setQtys(p=>({...p,[r.product_id]:t===""?"":String(Math.min(parseFloat(t)||0,r.remaining))}))}/>
         </View>)}
