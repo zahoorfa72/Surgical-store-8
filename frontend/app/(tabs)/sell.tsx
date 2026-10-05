@@ -16,6 +16,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 import { storage } from "@/src/utils/storage";
+import { apiRequest } from "@/src/api";
 
 import { useParties, useProducts, qk } from "@/src/data";
 import { useAuth } from "@/src/auth";
@@ -136,7 +137,7 @@ export default function Sell() {
       return;
     }
     try {
-      const created = await (await import("@/src/api")).apiRequest<any>("/parties", {
+      const created = await apiRequest<any>("/parties", {
         method: "POST",
         body: { name, type: "customer", phone: newCustomerPhone.trim(), address: newCustomerAddress.trim() },
       });
