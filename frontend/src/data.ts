@@ -81,9 +81,9 @@ function localReport(range: string): ReportSummary {
   const exactEnd = exactStart ? new Date(exactStart.getTime() + 86400000) : null;
   const fromStart = dateRange?.[0] ? new Date(dateRange[0] + "T00:00:00") : null;
   const toEnd = dateRange?.[1] ? new Date(new Date(dateRange[1] + "T00:00:00").getTime() + 86400000) : null;
-  const monthStart = monthValue && /^\\d{4}-\\d{2}$/.test(monthValue) ? new Date(monthValue + "-01T00:00:00") : null;
+  const monthStart = monthValue && /^\d{4}-\d{2}$/.test(monthValue) ? new Date(monthValue + "-01T00:00:00") : null;
   const monthEnd = monthStart ? new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1) : null;
-  const yearStart = yearValue && /^\\d{4}$/.test(yearValue) ? new Date(yearValue + "-01-01T00:00:00") : null;
+  const yearStart = yearValue && /^\d{4}$/.test(yearValue) ? new Date(yearValue + "-01-01T00:00:00") : null;
   const yearEnd = yearStart ? new Date(yearStart.getFullYear() + 1, 0, 1) : null;
   const matchesDate = (iso?: string) => {
     if (!iso) return false;
