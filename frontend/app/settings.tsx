@@ -40,6 +40,7 @@ export default function Settings() {
   const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
+  const [saleEditLockHours, setSaleEditLockHours] = useState("0");
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
@@ -51,11 +52,13 @@ export default function Settings() {
       storage.getItem<string>("ssm.receiptWidth", "72"),
       storage.getItem<boolean>("ssm.showSellProfitDiscount", true),
       storage.getItem<boolean>("ssm.showInventoryProfitMargin", true),
+      storage.getItem<number>("ssm.saleEditLockHours", 0),
     ]).then(([format, width, sellDetails, inventoryMargin]) => {
       setReceiptFormat(format === "a4" ? "a4" : "thermal");
       setReceiptWidth(width === "56" ? 56 : 72);
       setShowSellProfitDiscount(sellDetails !== false);
       setShowInventoryProfitMargin(inventoryMargin !== false);
+      setSaleEditLockHours(String(Math.max(0, Number(lockHours ?? 0))));
     });
   }, []);
 
@@ -265,6 +268,33 @@ export default function Settings() {
                 <View style={[styles.visibilityThumb, showInventoryProfitMargin && styles.visibilityThumbOn]} />
               </Pressable>
             </View>
+          </View>
+        )}
+
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Sale edit protection</Text>
+            <Text style={styles.cardHint}>Optional safety lock for old sales. Enter 0 to keep unlimited editing. This changes only editing access, not finance calculations.</Text>
+            <View style={{ height: 10 }} />
+            <Field
+              label="Lock sales older than (hours)"
+              testID="sale-edit-lock-hours"
+              value={saleEditLockHours}
+              onChangeText={setSaleEditLockHours}
+              keyboardType="numeric"
+              placeholder="0"
+            />
+            <View style={{ height: 10 }} />
+            <PrimaryButton
+              label="Save edit protection"
+              onPress={async () => {
+                const hours = Math.max(0, Math.floor(Number(saleEditLockHours) || 0));
+                setSaleEditLockHours(String(hours));
+                await storage.setItem("ssm.saleEditLockHours", hours);
+                toast(hours ? `Sales older than ${hours} hours will be locked` : "Sale editing is unlocked", "success");
+              }}
+              testID="save-sale-edit-lock"
+            />
           </View>
         )}
 
