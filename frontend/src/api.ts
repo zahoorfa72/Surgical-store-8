@@ -723,7 +723,7 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
       const result = await rawRequest<any>(resolvedPath, {
         method: op.method,
         body: resolvedBody,
-        headers: op.expected_updated_at ? { "If-Unmodified-Since": op.expected_updated_at } : undefined,
+        headers: op.expected_updated_at ? { "x-expected-updated-at": op.expected_updated_at } : undefined,
       });
       // Keep a local->server ID map for every generic POST. This is important
       // when an offline record is created and then edited/deleted before sync.
@@ -752,6 +752,7 @@ export async function rawRequest<T = any>(
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  Object.assign(headers, options.headers ?? {});
   const res = await fetch(`${base()}${path}`, {
     method: options.method ?? "GET",
     headers,
