@@ -1513,6 +1513,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
         "cashier_id": oid(user["_id"]),
         "cashier_name": user.get("name", user["email"]),
         "credit": credit,
+        "allow_negative_stock": bool(body.allow_negative_stock),
         "deleted": False,
         "created_at": now_iso(),
     }
@@ -1682,6 +1683,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             "cogs": round(cogs, 2),
             "profit": round(total - cogs, 2),
             "note": body.note,
+            "allow_negative_stock": bool(body.allow_negative_stock),
             "edited_at": now_iso(),
         }},
     )
