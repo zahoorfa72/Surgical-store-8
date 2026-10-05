@@ -275,7 +275,6 @@ export default function Sell() {
     const barcode = newSellProductBarcode.trim();
     const salePrice = Math.max(0, parseFloat(newSellProductSalePrice) || 0);
     if (!name) { toast("Enter product name", "error"); return; }
-    if (!allowNegativeStock) { toast("Enable “Sell below zero stock” before adding a new zero-stock product to a sale.", "error"); return; }
     const normalize = (v: string) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
     const existing = (products ?? []).find((p: any) =>
       (barcode && String(p.barcode ?? "").trim() === barcode) || normalize(p.name) === normalize(name)
