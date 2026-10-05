@@ -16,9 +16,11 @@ const displayFinanceAmount = (value: unknown, fake: boolean) => {
 };
 
 const RANGES = [
-  { key: "today", label: "Today" },
+  { key: "day", label: "Day" },
   { key: "week", label: "This Week" },
-  { key: "month", label: "This Month" },
+  { key: "month", label: "Month" },
+  { key: "year", label: "Year" },
+  { key: "custom", label: "From / To" },
   { key: "all", label: "All Time" },
 ] as const;
 
@@ -31,12 +33,24 @@ export default function Dashboard() {
   const { user } = useAuth();
   const cashier = user?.role === "cashier";
 
-  const [range, setRange] = useState<string>("today");
-  const [date, setDate] = useState("");
+  const now = new Date();
+  const localDay = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+  const localMonth = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+  const localYear = String(now.getFullYear());
+  const [range, setRange] = useState<string>("day");
+  const [date, setDate] = useState(localDay);
+  const [month, setMonth] = useState(localMonth);
+  const [year, setYear] = useState(localYear);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
   const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
-  const reportRange = exactDate ? `date:${exactDate}` : range;
+  const validMonth = /^\d{4}-\d{2}$/.test(month.trim()) ? month.trim() : "";
+  const validYear = /^\d{4}$/.test(year.trim()) ? year.trim() : "";
+  const validFrom = /^\d{4}-\d{2}-\d{2}$/.test(fromDate.trim()) ? fromDate.trim() : "";
+  const validTo = /^\d{4}-\d{2}-\d{2}$/.test(toDate.trim()) ? toDate.trim() : "";
+  const reportRange = range === "day" && exactDate ? "date:" + exactDate : range === "month" && validMonth ? "month:" + validMonth : range === "year" && validYear ? "year:" + validYear : range === "custom" && validFrom && validTo ? "date-range:" + validFrom + ":" + validTo : range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
   const { data: sales = [] } = useSales();
@@ -53,26 +67,39 @@ export default function Dashboard() {
         topInset={insets.top}
         right={<IconButton name="cog" testID="settings-button" onPress={() => router.push("/settings")} />}
       />
-      <ChipRow options={RANGES as any} value={range} onChange={(value) => { setRange(value); setDate(""); }} testIDPrefix="range" />
-      <View style={styles.dateFilter}>
-        <MaterialDesignIcons name="calendar" size={20} color={colors.muted} />
-        <TextInput
-          testID="finance-date-input"
-          style={styles.dateInput}
-          placeholder="Exact finance date: YYYY-MM-DD"
-          placeholderTextColor={colors.muted}
-          value={date}
-          onChangeText={setDate}
-          autoCapitalize="none"
-          keyboardType="numbers-and-punctuation"
-        />
-        {!!date && (
-          <Pressable onPress={() => setDate("")}>
-            <Text style={styles.clearDate}>Clear</Text>
-          </Pressable>
-        )}
-      </View>
-      {!!date && !exactDate && <Text style={styles.dateHint}>Enter a valid date as YYYY-MM-DD.</Text>}
+      <ChipRow options={RANGES as any} value={range} onChange={(value) => setRange(value)} testIDPrefix="range" />
+      {range === "day" && (
+        <View style={styles.dateFilter}>
+          <MaterialDesignIcons name="calendar" size={20} color={colors.muted} />
+          <TextInput testID="finance-day-input" style={styles.dateInput} placeholder="Day: YYYY-MM-DD" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
+        </View>
+      )}
+      {range === "month" && (
+        <View style={styles.dateFilter}>
+          <MaterialDesignIcons name="calendar-month" size={20} color={colors.muted} />
+          <TextInput testID="finance-month-input" style={styles.dateInput} placeholder="Month: YYYY-MM" placeholderTextColor={colors.muted} value={month} onChangeText={setMonth} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
+        </View>
+      )}
+      {range === "year" && (
+        <View style={styles.dateFilter}>
+          <MaterialDesignIcons name="calendar-range" size={20} color={colors.muted} />
+          <TextInput testID="finance-year-input" style={styles.dateInput} placeholder="Year: YYYY" placeholderTextColor={colors.muted} value={year} onChangeText={setYear} autoCapitalize="none" keyboardType="number-pad" />
+        </View>
+      )}
+      {range === "custom" && (
+        <View style={styles.customDateRow}>
+          <View style={[styles.dateFilter, styles.customDateBox]}>
+            <TextInput testID="finance-from-date" style={styles.dateInput} placeholder="From: YYYY-MM-DD" placeholderTextColor={colors.muted} value={fromDate} onChangeText={setFromDate} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
+          </View>
+          <View style={[styles.dateFilter, styles.customDateBox]}>
+            <TextInput testID="finance-to-date" style={styles.dateInput} placeholder="To: YYYY-MM-DD" placeholderTextColor={colors.muted} value={toDate} onChangeText={setToDate} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
+          </View>
+        </View>
+      )}
+      {range === "day" && !!date && !exactDate && <Text style={styles.dateHint}>Enter a valid day as YYYY-MM-DD.</Text>}
+      {range === "month" && !!month && !validMonth && <Text style={styles.dateHint}>Enter a valid month as YYYY-MM.</Text>}
+      {range === "year" && !!year && !validYear && <Text style={styles.dateHint}>Enter a valid year as YYYY.</Text>}
+      {range === "custom" && (!!fromDate || !!toDate) && (!validFrom || !validTo) && <Text style={styles.dateHint}>Enter both dates as YYYY-MM-DD.</Text>}
 
       {cashier ? (
         dayCloseLoading || !dayClose ? <Loader /> : (
@@ -205,7 +232,7 @@ export default function Dashboard() {
             <View style={styles.chartHeader}>
               <View>
                 <Text style={styles.cardTitle}>Finance chart</Text>
-                <Text style={styles.chartSub}>Quick view for {exactDate ? exactDate : range === "all" ? "all time" : range}</Text>
+                <Text style={styles.chartSub}>Quick view for {range === "day" ? (exactDate || "selected day") : range === "month" ? (validMonth || "selected month") : range === "year" ? (validYear || "selected year") : range === "custom" ? (validFrom && validTo ? validFrom + " to " + validTo : "selected dates") : range === "all" ? "all time" : range}</Text>
               </View>
               <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
             </View>
@@ -338,6 +365,8 @@ const useStyles = makeStyles((colors) => ({
   dateInput: { flex: 1, fontSize: 14, color: colors.onSurface },
   clearDate: { color: colors.brandPrimary, fontWeight: "800", fontSize: 12 },
   dateHint: { marginHorizontal: 18, marginTop: 5, fontSize: 11, color: colors.warning },
+  customDateRow: { flexDirection: "row", gap: 8, marginHorizontal: 16 },
+  customDateBox: { flex: 1, marginHorizontal: 0 },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
   chartHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   chartSub: { fontSize: 12, color: colors.muted, marginTop: -6, marginBottom: 8 },
