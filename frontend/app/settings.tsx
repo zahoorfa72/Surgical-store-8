@@ -58,7 +58,7 @@ export default function Settings() {
       storage.getItem<boolean>("ssm.showInventoryProfitMargin", true),
       storage.getItem<number>("ssm.saleEditLockHours", 0),
       getFakeFinanceDisplay(),
-    }).then(([format, width, sellDetails, inventoryMargin, lockHours, fakeFinance]) => {
+    }).then(async ([format, width, sellDetails, inventoryMargin, lockHours, fakeFinance]) => {
       setReceiptFormat(format === "a4" ? "a4" : "thermal");
       setReceiptWidth(width === "56" ? 56 : 72);
       setShowSellProfitDiscount(sellDetails !== false);
