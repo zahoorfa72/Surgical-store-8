@@ -235,11 +235,9 @@ export function useReport(range: string, enabled = true) {
     if (!(await online())) return localReport(range);
     try {
       const tzOffsetMinutes = new Date().getTimezoneOffset();
-      const customPeriod = !!(exactDate || range.startsWith("date-range:") || range.startsWith("month:") || range.startsWith("year:"));
-      if (customPeriod) return localReport(range);
       const url = exactDate
         ? `/reports/summary?range=today&date=${encodeURIComponent(exactDate)}&tz_offset_minutes=${tzOffsetMinutes}`
-        : `/reports/summary?range=${range}&tz_offset_minutes=${tzOffsetMinutes}`;
+        : `/reports/summary?range=${encodeURIComponent(range)}&tz_offset_minutes=${tzOffsetMinutes}`;
       return await apiRequest<ReportSummary>(url);
     } catch { return localReport(range); }
   }});
