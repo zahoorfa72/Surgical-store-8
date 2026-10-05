@@ -213,7 +213,7 @@ export default function Sell() {
     const n = parseInt(text || "0", 10);
     const qty = isNaN(n) ? 0 : n;
     setCart((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, quantity: Math.min(Math.max(0, qty), c.stock) } : c))
+      prev.map((c) => (c.id === id ? { ...c, quantity: allowNegativeStock ? Math.max(0, qty) : Math.min(Math.max(0, qty), c.stock) } : c))
     );
   };
   const setPrice = (id: string, price: number) =>
@@ -876,11 +876,18 @@ const useStyles = makeStyles((colors) => ({
     justifyContent: "center",
   },
   stepQty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  forceStockRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 4, minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.surfaceSecondary },
+  forceStockText: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  forceStockHint: { fontSize: 11, color: colors.muted, marginTop: 2 },
   bottomActions: { position:"absolute", left:12, right:12, bottom:10, flexDirection:"row", alignItems:"center", gap:8 },
   reviewHoldRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.surface },
   holdSaleBtn: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
   holdSaleText: { color: colors.brandPrimary, fontSize: 14, fontWeight: "800" },
   holdHint: { flex: 1, fontSize: 11, color: colors.muted },
+  formLabel: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 4 },
+  formInput: { backgroundColor: colors.surfaceTertiary, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 48, fontSize: 15, color: colors.onSurface },
+  hint: { fontSize: 11, color: colors.muted, lineHeight: 16 },
+  createPartySaveBtn: { minHeight: 50, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
   heldBtnText: { fontSize:13, fontWeight:"800", color:colors.brandPrimary },
   holdCheckoutRow: { paddingHorizontal:16, paddingTop:8, backgroundColor:colors.surface },
