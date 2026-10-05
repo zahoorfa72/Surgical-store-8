@@ -30,7 +30,7 @@ from bson import ObjectId, Binary
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, APIRouter, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from supabase_store import SupabaseDocumentDB
@@ -559,6 +559,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Surgical Store Manager API", lifespan=lifespan)
 api = APIRouter(prefix="/api")
+
+@app.middleware("http")
+async def stale_edit_guard(request: Request, call_next):
+    # Client sends the last-known updated_at for records being edited/deleted.
+    # Reject a stale write so one device cannot silently overwrite another.
+    if request.method in ("PUT", "DELETE"):
+        match = re.match(r"^/api/(products|sales|purchases)/([0-9a-fA-F]{24})$", request.url.path)
+        expected = request.headers.get("x-expected-updated-at")
+        if match and expected:
+            collection_name, record_id = match.groups()
+            collection = getattr(db, collection_name)
+            try:
+                current = await collection.find_one({"_id": ObjectId(record_id), "deleted": {"$ne": True}})
+            except Exception:
+                current = None
+            if current and str(current.get("updated_at", "")) != expected:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "This record changed on another device. Refresh before saving your changes."},
+                )
+    return await call_next(request)
+
 
 
 # ---------------------------------------------------------------------------
