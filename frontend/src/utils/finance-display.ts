@@ -92,3 +92,31 @@ export function fakeReportNetProfit(report: {
     + Math.max(0, Number(report.personal_expenses) || 0);
   return gross - expenses;
 }
+
+
+export const HIDDEN_SUPPLIERS_KEY = "ssm.hiddenSupplierIds";
+export const SECRET_CONTROLS_KEY = "ssm.secretControlsUnlocked";
+
+export async function getHiddenSupplierIds(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_SUPPLIERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setSupplierHidden(id: string, hidden: boolean): Promise<void> {
+  const ids = new Set(await getHiddenSupplierIds());
+  if (hidden) ids.add(id); else ids.delete(id);
+  await AsyncStorage.setItem(HIDDEN_SUPPLIERS_KEY, JSON.stringify(Array.from(ids)));
+}
+
+export async function getSecretControlsUnlocked(): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(SECRET_CONTROLS_KEY)) === "1"; } catch { return false; }
+}
+
+export async function setSecretControlsUnlocked(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(SECRET_CONTROLS_KEY, enabled ? "1" : "0");
+}
