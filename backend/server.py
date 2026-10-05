@@ -1013,7 +1013,8 @@ async def create_stock_transfer(body: StockTransferIn, user: Staff):
         if left > 1e-9:
             kept_layers.append({**layer, "quantity": left})
         if remaining <= 1e-9:
-            kept_layers.extend(source_layers[len(kept_layers) + len(moved_layers):])
+            idx = source_layers.index(layer)
+            kept_layers.extend(source_layers[idx + 1:])
             break
     if remaining > 1e-9:
         raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock")
