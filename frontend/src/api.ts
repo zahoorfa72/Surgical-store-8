@@ -91,11 +91,11 @@ const WRITE_SEQ = "ssm.writeseq.v1";
 
 type WriteOp = { id: string; method: string; path: string; body: any; expected_updated_at?: string };
 
-const QUEUEABLE = ["/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers"];
+const QUEUEABLE = ["/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments"];
 function isQueueable(path: string): boolean {
   return QUEUEABLE.some((p) => path === p || path.startsWith(p + "/"));
 }
-function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | null {
+function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | null {
   if (path.startsWith("/products")) return "products";
   if (path.startsWith("/parties")) return "parties";
   if (path.startsWith("/expenses")) return "expenses";
@@ -109,6 +109,8 @@ function entityOf(path: string): "products" | "parties" | "expenses" | "payments
   if (path.startsWith("/settings")) return "settings";
   if (path.startsWith("/inventory-adjustments")) return "inventory-adjustments";
   if (path.startsWith("/stock-transfers")) return "stock-transfers";
+  if (path.startsWith("/cash-shifts")) return "cash-shifts";
+  if (path.startsWith("/attachments")) return "attachments";
   return null;
 }
 function idFromPath(path: string): string | null {
