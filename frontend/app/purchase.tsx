@@ -37,6 +37,10 @@ export default function Purchase() {
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [productSearch, setProductSearch] = useState("");
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
+  const [supplierCreateOpen, setSupplierCreateOpen] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierPhone, setNewSupplierPhone] = useState("");
+  const [newSupplierAddress, setNewSupplierAddress] = useState("");
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
@@ -60,6 +64,31 @@ export default function Purchase() {
   const lineIds = useMemo(() => new Set(lines.map((l) => l.id)), [lines]);
   const total = lines.reduce((s, l) => s + l.quantity * l.unit_cost, 0);
   const supplierName = suppliers?.find((s) => s.id === supplierId)?.name ?? "No supplier";
+
+  const createSupplier = async () => {
+    const name = newSupplierName.trim();
+    if (!name) {
+      toast("Enter supplier name", "error");
+      return;
+    }
+    try {
+      const created = await apiRequest<any>("/parties", {
+        method: "POST",
+        body: { name, type: "supplier", phone: newSupplierPhone.trim(), address: newSupplierAddress.trim() },
+      });
+      setSupplierId(created.id);
+      await queryClient.invalidateQueries({ queryKey: qk.parties("supplier") });
+      await queryClient.invalidateQueries({ queryKey: qk.parties() });
+      setNewSupplierName("");
+      setNewSupplierPhone("");
+      setNewSupplierAddress("");
+      setSupplierCreateOpen(false);
+      setSupplierPickerOpen(false);
+      toast("Supplier created and selected", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not create supplier", "error");
+    }
+  };
 
   const toggleProduct = (pid: string) => {
     setSelectedProductIds((prev) => {
@@ -233,6 +262,14 @@ export default function Purchase() {
         <View style={styles.root}>
           <ScreenHeader title="Select supplier" topInset={insets.top} onBack={() => setSupplierPickerOpen(false)} />
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 8 }}>
+            <Pressable
+              testID="create-supplier-button"
+              style={styles.createPartyBtn}
+              onPress={() => setSupplierCreateOpen(true)}
+            >
+              <MaterialDesignIcons name="account-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.createPartyText}>+ Create new supplier</Text>
+            </Pressable>
             <Pressable testID="supplier-none" style={styles.pickRow} onPress={() => { setSupplierId(null); setSupplierPickerOpen(false); }}>
               <Text style={styles.pickName}>No supplier</Text>
               {!supplierId && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
@@ -246,6 +283,25 @@ export default function Purchase() {
             {(!suppliers || suppliers.length === 0) && (
               <Text style={styles.hint}>No suppliers yet. Add them in More → Suppliers.</Text>
             )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Create supplier directly from purchase */}
+      <Modal visible={supplierCreateOpen} animationType="slide" onRequestClose={() => setSupplierCreateOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Create supplier" subtitle="Add supplier without leaving purchase" topInset={insets.top} onBack={() => setSupplierCreateOpen(false)} />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}>
+            <Text style={styles.formLabel}>Supplier name *</Text>
+            <TextInput testID="new-supplier-name" style={styles.formInput} placeholder="Supplier name" placeholderTextColor={colors.muted} value={newSupplierName} onChangeText={setNewSupplierName} />
+            <Text style={styles.formLabel}>Phone</Text>
+            <TextInput testID="new-supplier-phone" style={styles.formInput} placeholder="Phone number" placeholderTextColor={colors.muted} keyboardType="phone-pad" value={newSupplierPhone} onChangeText={setNewSupplierPhone} />
+            <Text style={styles.formLabel}>Address</Text>
+            <TextInput testID="new-supplier-address" style={[styles.formInput, styles.formInputMulti]} placeholder="Address (optional)" placeholderTextColor={colors.muted} multiline value={newSupplierAddress} onChangeText={setNewSupplierAddress} />
+            <Pressable testID="save-new-supplier-button" style={styles.createPartySaveBtn} onPress={createSupplier}>
+              <MaterialDesignIcons name="account-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.saveText}>Create & Select Supplier</Text>
+            </Pressable>
           </ScrollView>
         </View>
       </Modal>
@@ -340,4 +396,10 @@ const useStyles = makeStyles((colors) => ({
   pickName: { fontSize: 15, fontWeight: "700", color: colors.onSurface },
   pickMeta: { fontSize: 13, color: colors.muted, marginTop: 2 },
   hint: { fontSize: 14, color: colors.muted, textAlign: "center", marginTop: 20 },
+  createPartyBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.brandPrimary, borderRadius: 12, paddingVertical: 14, marginBottom: 4 },
+  createPartyText: { color: colors.onBrandPrimary, fontSize: 15, fontWeight: "800" },
+  formLabel: { fontSize: 13, color: colors.muted, fontWeight: "700", marginTop: 4 },
+  formInput: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, paddingHorizontal: 14, color: colors.onSurface, fontSize: 15 },
+  formInputMulti: { minHeight: 90, paddingTop: 12, textAlignVertical: "top" },
+  createPartySaveBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.brandPrimary, borderRadius: 14, minHeight: 52, marginTop: 8 }
 }));
