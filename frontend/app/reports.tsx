@@ -7,6 +7,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { useReport } from "@/src/data";
 import { Card, ChipRow, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
 
 // Daily / Weekly / Monthly / Yearly. The keys map to the ranges the offline
 // report engine (src/data.ts -> localReport) already understands.
@@ -45,6 +46,7 @@ export default function Reports() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
 
   const [range, setRange] = useState<string>("today");
   const [date, setDate] = useState("");
@@ -53,7 +55,9 @@ export default function Reports() {
   const { data, isLoading, refetch, isRefetching } = useReport(selectedRange);
 
   const label = useMemo(() => exactDate ? new Date(`${exactDate}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "2-digit", month: "short", year: "numeric" }) : periodLabel(range), [range, exactDate]);
-  const netPurchases = data ? Number(data.purchase_total ?? 0) : 0;
+  const netPurchases = data ? (fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : Number(data.purchase_total ?? 0)) : 0;
+  const displayGrossProfit = data ? (fakeFinanceDisplay ? fakeReportProfit(data) : Number(data.gross_profit ?? 0)) : 0;
+  const displayNetProfit = data ? (fakeFinanceDisplay ? fakeReportNetProfit(data) : Number(data.net_profit ?? 0)) : 0;
 
   return (
     <View style={styles.root}>
@@ -108,9 +112,9 @@ export default function Reports() {
 
           <StatTile
             label="Net profit"
-            value={money(data.net_profit)}
+            value={money(displayNetProfit)}
             icon="trending-up"
-            tone={data.net_profit >= 0 ? "success" : "error"}
+            tone={displayNetProfit >= 0 ? "success" : "error"}
             testID="report-net-profit"
           />
 
@@ -128,7 +132,7 @@ export default function Reports() {
           {/* Purchases */}
           <Card>
             <SectionHead icon="truck" title="Purchases" tone={colors.warning} />
-            <Row label="Gross purchases" value={money(data.purchase_gross ?? data.purchase_total)} />
+            <Row label="Gross purchases" value={money(fakeFinanceDisplay ? netPurchases : Number(data.purchase_gross ?? data.purchase_total))} />
             <Row label="Less: purchase returns" value={"- " + money(data.purchase_returns_total ?? 0)} muted />
             <Divider />
             <Row label="Net purchases" value={money(netPurchases)} bold tone="warning" />
@@ -155,12 +159,12 @@ export default function Reports() {
           {/* Profit */}
           <Card>
             <SectionHead icon="chart-line" title="Profit" tone={colors.success} />
-            <Row label="Gross profit" value={money(data.gross_profit)} />
+            <Row label="Gross profit" value={money(displayGrossProfit)} />
             <Row label="Less: personal expenses" value={"- " + money(data.personal_expenses)} muted />
             <Divider />
             <Row
               label="Net profit"
-              value={money(data.net_profit)}
+              value={money(displayNetProfit)}
               bold
               tone={data.net_profit >= 0 ? "success" : "error"}
             />
