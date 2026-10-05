@@ -1186,10 +1186,10 @@ async def list_parties(_: AnyUser, type: Optional[PartyType] = None):
 
 def _party_name_key(value: str) -> str:
     # Stable, human-friendly duplicate key: ignore case, spaces and punctuation.
-    return re.sub(r"[^\\w]+", "", (value or "").strip().casefold(), flags=re.UNICODE)
+    return re.sub(r"[^\w]+", "", (value or "").strip().casefold(), flags=re.UNICODE)
 
 def _party_phone_key(value: str) -> str:
-    return re.sub(r"\\D+", "", value or "")
+    return re.sub(r"\D+", "", value or "")
 
 @api.post("/parties", status_code=201)
 async def create_party(body: PartyIn, _: Staff):
