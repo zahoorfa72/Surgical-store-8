@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const FAKE_FINANCE_KEY = ["fake-finance-display"] as const;
 export const FAKE_FINANCE_STORAGE_KEY = "ssm.fakeFinanceDisplay.v1";
+// Display-only finance masking. This file intentionally never changes stored finance values.
 
 export async function getFakeFinanceDisplay(): Promise<boolean> {
   try {
