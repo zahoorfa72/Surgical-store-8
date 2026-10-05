@@ -137,10 +137,26 @@ function now() {
   return new Date().toISOString();
 }
 function ensureCostLayers(product: any): any[] {
-  if (Array.isArray(product?.cost_layers) && product.cost_layers.length) return product.cost_layers;
   const qty = Number(product?.quantity ?? 0);
   if (qty <= 0) return [];
-  return [{ quantity: qty, unit_cost: Number(product?.purchase_price ?? 0), purchase_id: null }];
+  const layers = (Array.isArray(product?.cost_layers) ? product.cost_layers : [])
+    .filter((x: any) => Number(x?.quantity ?? 0) > 1e-9)
+    .map((x: any) => ({ ...x, quantity: Number(x.quantity ?? 0) }));
+  const total = layers.reduce((sum: number, x: any) => sum + Number(x.quantity ?? 0), 0);
+  if (Math.abs(total - qty) <= 1e-9) return layers;
+  if (total < qty) {
+    layers.push({ quantity: qty - total, unit_cost: Number(product?.purchase_price ?? 0), purchase_id: null });
+    return layers;
+  }
+  const result: any[] = [];
+  let remaining = qty;
+  for (const layer of layers) {
+    if (remaining <= 1e-9) break;
+    const take = Math.min(Number(layer.quantity ?? 0), remaining);
+    if (take > 1e-9) result.push({ ...layer, quantity: take });
+    remaining -= take;
+  }
+  return result;
 }
 
 function consumeCostLayersMatching(layers: any[], quantity: number, unitCost: number): { layers: any[]; totalCost: number } {
