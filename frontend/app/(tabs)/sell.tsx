@@ -139,10 +139,10 @@ export default function Sell() {
     }
     const normalizeParty = (v: string) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
     const nameKey = normalizeParty(name);
-    const phoneKey = phone.replace(/\\D/g, "");
+    const phoneKey = phone.replace(/[^0-9]/g, "");
     const possible = (customers ?? []).find((c: any) => {
       const existingName = normalizeParty(String(c.name ?? ""));
-      const existingPhone = String(c.phone ?? "").replace(/\\D/g, "");
+      const existingPhone = String(c.phone ?? "").replace(/[^0-9]/g, "");
       return (phoneKey && existingPhone && phoneKey === existingPhone) ||
         (nameKey && existingName === nameKey);
     });
