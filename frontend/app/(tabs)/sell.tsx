@@ -64,6 +64,11 @@ export default function Sell() {
   const [addProductSearch, setAddProductSearch] = useState("");
   const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+  const [allowNegativeStock, setAllowNegativeStock] = useState(false);
+  const [sellProductCreateOpen, setSellProductCreateOpen] = useState(false);
+  const [newSellProductName, setNewSellProductName] = useState("");
+  const [newSellProductBarcode, setNewSellProductBarcode] = useState("");
+  const [newSellProductSalePrice, setNewSellProductSalePrice] = useState("");
 
   useFocusEffect(
     useCallback(() => {
@@ -176,8 +181,8 @@ export default function Sell() {
   };
 
   const addToCart = (p: Product) => {
-    if (p.quantity <= 0) {
-      toast(`${p.name} is out of stock`, "error");
+    if (p.quantity <= 0 && !allowNegativeStock) {
+      toast(`${p.name} is out of stock — enable “Sell below zero stock” first`, "error");
       return;
     }
     setCart((prev) => {
@@ -196,7 +201,7 @@ export default function Sell() {
   const setQty = (id: string, qty: number) => {
     setCart((prev) =>
       prev
-        .map((c) => (c.id === id ? { ...c, quantity: Math.min(Math.max(0, qty), c.stock) } : c))
+        .map((c) => (c.id === id ? { ...c, quantity: allowNegativeStock ? Math.max(0, qty) : Math.min(Math.max(0, qty), c.stock) } : c))
         .filter((c) => c.quantity > 0)
     );
   };
@@ -253,6 +258,42 @@ export default function Sell() {
     }
   };
 
+  const createProductFromSell = async () => {
+    const name = newSellProductName.trim();
+    const barcode = newSellProductBarcode.trim();
+    const salePrice = Math.max(0, parseFloat(newSellProductSalePrice) || 0);
+    if (!name) { toast("Enter product name", "error"); return; }
+    const normalize = (v: string) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const existing = (products ?? []).find((p: any) =>
+      (barcode && String(p.barcode ?? "").trim() === barcode) || normalize(p.name) === normalize(name)
+    );
+    if (existing) {
+      if (existing.quantity <= 0 && !allowNegativeStock) {
+        toast("Existing product found, but it is out of stock. Enable “Sell below zero stock” to sell it.", "error");
+        return;
+      }
+      addToCart(existing);
+      setSellProductCreateOpen(false);
+      setNewSellProductName(""); setNewSellProductBarcode(""); setNewSellProductSalePrice("");
+      toast("Existing product found — no duplicate created", "info");
+      return;
+    }
+    try {
+      const created = await apiRequest<any>("/products", {
+        method: "POST",
+        body: { name, barcode, purchase_price: 0, sale_price: salePrice, low_stock_threshold: 5, expiry_date: null },
+      });
+      const product: Product = { ...created, quantity: Number(created.quantity ?? 0) };
+      setCart((prev) => [...prev, { id: product.id, name: product.name, stock: 0, quantity: 1, unit_price: product.sale_price, threshold: product.low_stock_threshold }]);
+      await queryClient.invalidateQueries({ queryKey: qk.products });
+      setSellProductCreateOpen(false);
+      setNewSellProductName(""); setNewSellProductBarcode(""); setNewSellProductSalePrice("");
+      toast("Product created and added — sale will put stock below zero", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not create product", "error");
+    }
+  };
+
   const checkout = async () => {
     if (!cart.length) return;
     const lines = cart.filter((c) => c.quantity > 0);
@@ -266,7 +307,7 @@ export default function Sell() {
       return;
     }
     const overStock = lines.find((c) => c.quantity > c.stock);
-    if (overStock) {
+    if (overStock && !allowNegativeStock) {
       toast(`${overStock.name} has only ${overStock.stock} in stock`, "error");
       return;
     }
@@ -278,6 +319,7 @@ export default function Sell() {
           customer_id: customerId,
           discount: Number(discountNum),
           credit,
+          allow_negative_stock: allowNegativeStock,
         },
         user?.name || user?.email || "Staff",
       );
@@ -303,6 +345,13 @@ export default function Sell() {
     <View style={styles.root}>
       <ScreenHeader title="Sell" subtitle="Add items to the cart" topInset={insets.top} showStatus />
 
+      <Pressable testID="allow-negative-stock-toggle" style={styles.forceStockRow} onPress={() => setAllowNegativeStock((v) => !v)}>
+        <MaterialDesignIcons name={allowNegativeStock ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={allowNegativeStock ? colors.warning : colors.muted} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.forceStockText}>Sell below zero stock</Text>
+          <Text style={styles.forceStockHint}>Only use when you intentionally want negative inventory.</Text>
+        </View>
+      </Pressable>
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
           <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
@@ -375,8 +424,8 @@ export default function Sell() {
               ) : (
                 <Pressable
                   testID={`add-${item.id}`}
-                  disabled={out}
-                  style={[styles.addBtn, out && { opacity: 0.4 }]}
+                  disabled={out && !allowNegativeStock}
+                  style={[styles.addBtn, out && !allowNegativeStock && { opacity: 0.4 }]}
                   onPress={() => addToCart(item)}
                 >
                   <MaterialDesignIcons name="cart-plus" size={20} color={colors.onBrandPrimary} />
@@ -409,7 +458,11 @@ export default function Sell() {
             topInset={insets.top}
             onBack={() => setReviewOpen(false)}
           />
-          <View style={styles.reviewSearchRow}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View><Pressable testID="scan-order-image-button" onPress={() => setOrderImageScanOpen(true)} style={styles.scanOrderBtn}><MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} /><Text style={styles.scanOrderText}>Scan order image</Text></Pressable>
+          <View style={styles.reviewSearchRow}>
+          <Pressable testID="create-product-from-sell" onPress={() => setSellProductCreateOpen(true)} style={styles.scanOrderBtn}>
+            <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
+            <Text style={styles.scanOrderText}>Add product not in inventory</Text>
+          </Pressable><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="review-search-input" style={styles.searchInput} placeholder="Search cart + all inventory" placeholderTextColor={colors.muted} value={reviewSearch} onChangeText={setReviewSearch} /><Pressable testID="review-add-products" onPress={() => setAddProductOpen(true)} style={styles.reviewAddBtn}><MaterialDesignIcons name="plus" size={20} color={colors.onBrandPrimary} /><Text style={styles.reviewAddText}>Add</Text></Pressable></View><Pressable testID="scan-order-image-button" onPress={() => setOrderImageScanOpen(true)} style={styles.scanOrderBtn}><MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} /><Text style={styles.scanOrderText}>Scan order image</Text></Pressable>
           <KeyboardAwareScrollView
             contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}
             bottomOffset={20}
@@ -642,6 +695,25 @@ export default function Sell() {
         </View>
       </Modal>
       <Modal visible={addProductOpen} animationType="slide" onRequestClose={() => setAddProductOpen(false)}><View style={styles.root}><ScreenHeader title="Add products" subtitle="Search and add to this sale" topInset={insets.top} onBack={() => setAddProductOpen(false)} /><View style={[styles.searchWrap,{margin:16}]}><MaterialDesignIcons name="magnify" size={20} color={colors.muted}/><TextInput testID="review-product-search-input" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={addProductSearch} onChangeText={setAddProductSearch} autoFocus /></View><FlatList data={(products??[]).filter(p=>{const q=addProductSearch.trim().toLowerCase();return !q||p.name.toLowerCase().includes(q)||String(p.category??"").toLowerCase().includes(q)||String(p.barcode??p.sku??"").toLowerCase().includes(q)})} keyExtractor={p=>p.id} contentContainerStyle={{padding:16,gap:8}} renderItem={({item})=><Pressable disabled={item.quantity<=0} style={[styles.addProductOption,item.quantity<=0&&{opacity:.45}]} onPress={()=>addToCart(item)}><View style={{flex:1}}><Text style={styles.prodName}>{item.name}</Text><Text style={styles.prodMeta}>{item.quantity} in stock · {money(item.sale_price)}</Text></View><MaterialDesignIcons name="plus-circle" size={22} color={colors.brandPrimary}/></Pressable>} /></View></Modal>
+
+      <Modal visible={sellProductCreateOpen} animationType="slide" onRequestClose={() => setSellProductCreateOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Add product" subtitle="Create it directly from Sell" topInset={insets.top} onBack={() => setSellProductCreateOpen(false)} />
+          <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}>
+            <Text style={styles.formLabel}>Product name *</Text>
+            <TextInput testID="new-sell-product-name" style={styles.formInput} placeholder="Product name" placeholderTextColor={colors.muted} value={newSellProductName} onChangeText={setNewSellProductName} />
+            <Text style={styles.formLabel}>Barcode / SKU</Text>
+            <TextInput testID="new-sell-product-barcode" style={styles.formInput} placeholder="Optional barcode" placeholderTextColor={colors.muted} value={newSellProductBarcode} onChangeText={setNewSellProductBarcode} />
+            <Text style={styles.formLabel}>Sale price</Text>
+            <TextInput testID="new-sell-product-sale-price" style={styles.formInput} keyboardType="numeric" placeholder="0" placeholderTextColor={colors.muted} value={newSellProductSalePrice} onChangeText={setNewSellProductSalePrice} />
+            <Text style={styles.hint}>If the product is new and has zero stock, enable “Sell below zero stock” before saving the sale. Existing matching products are reused.</Text>
+            <Pressable testID="save-new-sell-product" style={styles.createPartySaveBtn} onPress={createProductFromSell}>
+              <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.saveText}>Create & Add to Sale</Text>
+            </Pressable>
+          </KeyboardAwareScrollView>
+        </View>
+      </Modal>
 
       {/* Customer picker */}
       <Modal visible={custPickerOpen} animationType="slide" onRequestClose={() => setCustPickerOpen(false)}>
