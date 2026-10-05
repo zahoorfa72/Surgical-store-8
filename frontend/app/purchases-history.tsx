@@ -163,7 +163,8 @@ export default function PurchasesHistory() {
           renderItem={({ item }) => {
             const canEdit = admin;
             const refunded = refundByPurchase[item.id] ?? 0;
-            const realNet = Math.max(0, Number(item.total ?? 0) - refunded);\n            const net = fakeFinanceDisplay ? fakePurchaseTotal(item.items ?? [], productsById, String(item.id)) : realNet;
+            const realNet = Math.max(0, Number(item.total ?? 0) - refunded);
+            const net = fakeFinanceDisplay ? fakePurchaseTotal(item.items ?? [], productsById, String(item.id)) : realNet;
             return (
               <View style={styles.row} testID={`purchase-row-${item.id}`}>
                 <View style={styles.rowIcon}>
