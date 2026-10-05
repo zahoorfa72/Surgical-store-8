@@ -12,12 +12,14 @@ import { useAuth } from "@/src/auth";
 import { useOffline } from "@/src/offline";
 import { EmptyState, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
 type Line = { id: string; name: string; quantity: number; unit_cost: number };
 
 export default function Purchase() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -62,7 +64,7 @@ export default function Purchase() {
   }, [isEdit, editing, prefilled]);
 
   const lineIds = useMemo(() => new Set(lines.map((l) => l.id)), [lines]);
-  const total = lines.reduce((s, l) => s + l.quantity * l.unit_cost, 0);
+  const total = lines.reduce((s, l) => { const p = products?.find((x: any) => x.id === l.id); const cost = fakeFinanceDisplay ? fakeUnitCost(Number(p?.sale_price ?? 0), String(l.id)) : l.unit_cost; return s + l.quantity * cost; }, 0);
   const supplierName = suppliers?.find((s) => s.id === supplierId)?.name ?? "No supplier";
 
   const createSupplier = async () => {
@@ -188,13 +190,14 @@ export default function Purchase() {
                     testID={`purchase-cost-${l.id}`}
                     style={styles.miniInput}
                     keyboardType="numeric"
-                    value={String(l.unit_cost)}
+                    value={String(fakeFinanceDisplay ? fakeUnitCost(Number(products?.find((p: any) => p.id === l.id)?.sale_price ?? 0), String(l.id)) : l.unit_cost)}
+                    editable={!fakeFinanceDisplay}
                     onChangeText={(t) => setCost(l.id, parseFloat(t || "0"))}
                   />
                 </View>
                 <View style={styles.miniField}>
                   <Text style={styles.miniLabel}>Total</Text>
-                  <Text style={styles.lineTotal}>{money(l.quantity * l.unit_cost)}</Text>
+                  <Text style={styles.lineTotal}>{money(l.quantity * (fakeFinanceDisplay ? fakeUnitCost(Number(products?.find((p: any) => p.id === l.id)?.sale_price ?? 0), String(l.id)) : l.unit_cost))}</Text>
                 </View>
               </View>
             </View>
@@ -209,7 +212,7 @@ export default function Purchase() {
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.totalWrap}>
-          <Text style={styles.totalLabel}>Total cost</Text>
+          <Text style={styles.totalLabel}>{fakeFinanceDisplay ? "Displayed purchase cost" : "Total cost"}</Text>
           <Text style={styles.totalValue}>{money(total)}</Text>
         </View>
         <Pressable testID="save-purchase-button" disabled={busy} style={[styles.saveBtn, busy && { opacity: 0.6 }]} onPress={save}>
@@ -240,7 +243,7 @@ export default function Purchase() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pickName}>{p.name}</Text>
-                    <Text style={styles.pickMeta}>Cost {money(p.purchase_price)} · {p.quantity} in stock</Text>
+                    <Text style={styles.pickMeta}>Cost {money(fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id)) : Number(p.purchase_price ?? 0))} · {p.quantity} in stock</Text>
                   </View>
                 </Pressable>
               );
