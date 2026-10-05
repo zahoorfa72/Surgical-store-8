@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
-import { apiRequest } from "@/src/api";
+import { apiRequest, getConnectionMode } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { useProducts, useSales } from "@/src/data";
 import { storage } from "@/src/utils/storage";
@@ -38,10 +39,31 @@ export default function OfflineTools() {
   const [attachments, setAttachments] = useState<any[]>([]);
 
   useEffect(() => {
-    void Promise.all([
-      storage.getItem<any>(SHIFT_KEY, null),
-      storage.getItem<any[]>(ATTACH_KEY, []),
-    ]).then(([s, a]) => { setShift(s); setAttachments(a || []); });
+    void (async () => {
+      const [localShift, localAttachments] = await Promise.all([
+        storage.getItem<any>(SHIFT_KEY, null),
+        storage.getItem<any[]>(ATTACH_KEY, []),
+      ]);
+      setShift(localShift);
+      setAttachments(localAttachments || []);
+      if ((await getConnectionMode()) !== "online") return;
+      try {
+        const remoteShift = await apiRequest<any>("/cash-shifts/current");
+        if (remoteShift) {
+          await storage.setItem(SHIFT_KEY, remoteShift);
+          setShift(remoteShift);
+        }
+      } catch {}
+      try {
+        const remoteAttachments = await apiRequest<any[]>("/attachments");
+        if (Array.isArray(remoteAttachments)) {
+          const merged = [...remoteAttachments, ...(localAttachments || []).filter((x: any) => x.pending)];
+          const unique = Array.from(new Map(merged.map((x: any) => [x.id || x.created_at, x])).values()).slice(0, 100);
+          await storage.setItem(ATTACH_KEY, unique);
+          setAttachments(unique);
+        }
+      } catch {}
+    })();
   }, []);
 
   const selected = products.find((p) => p.id === productId);
@@ -101,22 +123,58 @@ export default function OfflineTools() {
     const n = Number(openingCash);
     if (!Number.isFinite(n) || n < 0) return toast("Enter opening cash", "error");
     const next = { opened_at: new Date().toISOString(), opened_by: user?.name || "", opening_cash: n, closing_cash: null };
-    await storage.setItem(SHIFT_KEY, next); setShift(next); setOpeningCash(""); toast("Shift started", "success");
+    await storage.setItem(SHIFT_KEY, next); setShift(next);
+    try {
+      const saved = await apiRequest<any>("/cash-shifts", { method: "POST", body: next });
+      await storage.setItem(SHIFT_KEY, saved || next);
+      setShift(saved || next);
+    } catch {}
+    setOpeningCash(""); toast("Shift started", "success");
   };
 
   const closeShift = async () => {
     const n = Number(closingCash);
     if (!shift || !Number.isFinite(n) || n < 0) return toast("Enter closing cash", "error");
     const next = { ...shift, closed_at: new Date().toISOString(), closing_cash: n };
-    await storage.setItem(SHIFT_KEY, next); setShift(next); setClosingCash(""); toast("Shift closed", "success");
+    await storage.setItem(SHIFT_KEY, next); setShift(next);
+    try {
+      const saved = await apiRequest<any>("/cash-shifts", { method: "POST", body: next });
+      await storage.setItem(SHIFT_KEY, saved || next);
+      setShift(saved || next);
+    } catch {}
+    setClosingCash(""); toast("Shift closed", "success");
   };
 
   const addAttachment = async () => {
     const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
     if (r.canceled || !r.assets[0]) return;
-    const a = { id: "att-" + Date.now(), uri: r.assets[0].uri, name: r.assets[0].fileName || "Store photo", created_at: new Date().toISOString(), user: user?.name || "" };
+    const asset = r.assets[0];
+    const mime = asset.mimeType || "image/jpeg";
+    const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+    const a = {
+      id: "att-" + Date.now(),
+      uri: asset.uri,
+      data_url: "data:" + mime + ";base64," + base64,
+      name: asset.fileName || "Store photo",
+      created_at: new Date().toISOString(),
+      user: user?.name || "",
+      pending: true,
+    };
     const next = [a, ...attachments].slice(0, 100);
-    await storage.setItem(ATTACH_KEY, next); setAttachments(next); toast("Attachment saved on phone", "success");
+    await storage.setItem(ATTACH_KEY, next); setAttachments(next);
+    try {
+      const saved = await apiRequest<any>("/attachments", {
+        method: "POST",
+        body: { name: a.name, data_url: a.data_url, created_at: a.created_at, user: a.user },
+      });
+      const synced = { ...a, ...saved, pending: false, uri: saved?.data_url || a.uri };
+      const finalList = [synced, ...next.filter((x) => x.id !== a.id)].slice(0, 100);
+      await storage.setItem(ATTACH_KEY, finalList);
+      setAttachments(finalList);
+      toast("Attachment saved and queued/synced", "success");
+    } catch (e: any) {
+      toast(e?.message || "Attachment saved on phone; sync pending", "success");
+    }
   };
 
   const items: Array<[Tool, string, string]> = [
@@ -152,7 +210,7 @@ export default function OfflineTools() {
 
       {tool === "shift" && <Card><Text style={styles.title}>Cash Register / Shift</Text>{!shift || shift.closed_at ? <><TextInput style={styles.input} keyboardType="decimal-pad" placeholder="Opening cash" placeholderTextColor={colors.muted} value={openingCash} onChangeText={setOpeningCash} /><PrimaryButton label="Start shift" onPress={startShift} /></> : <><Text style={styles.name}>Opened {formatDateTime(shift.opened_at)}</Text><Text style={styles.meta}>Opening cash {money(shift.opening_cash)}</Text><TextInput style={styles.input} keyboardType="decimal-pad" placeholder="Closing cash" placeholderTextColor={colors.muted} value={closingCash} onChangeText={setClosingCash} /><PrimaryButton label="Close shift" onPress={closeShift} /></>}</Card>}
 
-      {tool === "attachments" && <Card><Text style={styles.title}>Document Attachment Center</Text><Text style={styles.hint}>Store order/receipt photos locally. No internet is required.</Text><PrimaryButton label="Add photo" onPress={addAttachment} />{attachments.map((a) => <View key={a.id} style={styles.attachment}><Image source={{ uri: a.uri }} style={styles.thumb} /><View style={{ flex: 1 }}><Text style={styles.name}>{a.name}</Text><Text style={styles.meta}>{a.user} · {formatDateTime(a.created_at)}</Text></View></View>)}</Card>}
+      {tool === "attachments" && <Card><Text style={styles.title}>Document Attachment Center</Text><Text style={styles.hint}>Store order/receipt photos locally. No internet is required.</Text><PrimaryButton label="Add photo" onPress={addAttachment} />{attachments.map((a) => <View key={a.id} style={styles.attachment}><Image source={{ uri: a.data_url || a.uri }} style={styles.thumb} /><View style={{ flex: 1 }}><Text style={styles.name}>{a.name}</Text><Text style={styles.meta}>{a.user} · {formatDateTime(a.created_at)}</Text></View></View>)}</Card>}
 
       {tool === "security" && <Card><Text style={styles.title}>Security Activity Center</Text><Text style={styles.hint}>Local audit events remain available offline; server audit remains available when online.</Text><Text style={styles.name}>{user?.name || "User"}</Text><Text style={styles.meta}>Role: {user?.role || "—"}</Text><Text style={styles.meta}>Business write actions are recorded locally by the app.</Text></Card>}
     </ScrollView>
