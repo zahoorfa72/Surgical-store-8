@@ -19,7 +19,7 @@ import {
 import { storage } from "@/src/utils/storage";
 import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay } from "@/src/utils/finance-display";
+import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay, getSecretControlsUnlocked, setSecretControlsUnlocked } from "@/src/utils/finance-display";
 
 export default function Settings() {
   const styles = useStyles();
@@ -43,6 +43,8 @@ export default function Settings() {
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState("0");
   const [fakeFinanceDisplay, setFakeFinanceDisplayState] = useState(false);
+  const [secretControlsUnlocked, setSecretControlsUnlockedState] = useState(false);
+  const [adminNameTaps, setAdminNameTaps] = useState(0);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
@@ -63,6 +65,7 @@ export default function Settings() {
       setShowInventoryProfitMargin(inventoryMargin !== false);
       setSaleEditLockHours(String(Math.max(0, Number(lockHours ?? 0))));
       setFakeFinanceDisplayState(fakeFinance === true);
+      setSecretControlsUnlockedState(await getSecretControlsUnlocked());
     });
   }, []);
 
@@ -138,7 +141,23 @@ export default function Settings() {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{(user?.name?.[0] ?? "?").toUpperCase()}</Text>
           </View>
-          <Text style={styles.name}>{user?.name}</Text>
+          <Pressable
+            testID="administrator-name-secret"
+            onPress={async () => {
+              if (!admin) return;
+              const next = adminNameTaps + 1;
+              if (next >= 5) {
+                setAdminNameTaps(0);
+                setSecretControlsUnlockedState(true);
+                await setSecretControlsUnlocked(true);
+                toast("Private controls unlocked", "success");
+              } else {
+                setAdminNameTaps(next);
+              }
+            }}
+          >
+            <Text style={styles.name}>{user?.name}</Text>
+          </Pressable>
           <Text style={styles.email}>{user?.email}</Text>
           <Badge text={user?.role ?? ""} tone="brand" />
         </View>
@@ -275,7 +294,7 @@ export default function Settings() {
           </View>
         )}
 
-        {admin && (
+        {admin && secretControlsUnlocked && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Private financial display</Text>
             <Text style={styles.cardHint}>
