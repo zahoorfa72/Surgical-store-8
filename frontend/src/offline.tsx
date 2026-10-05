@@ -164,7 +164,23 @@ function applyStockDelta(items: any[], sign: 1 | -1) {
     (old ?? []).map((p) => {
       const line = items.find((i) => i.product_id === p.id);
       if (!line) return p;
-      return { ...p, quantity: p.quantity + sign * line.quantity };
+      const qty = Number(line.quantity ?? 0);
+      const currentQty = Number(p.quantity ?? 0);
+      const layers = (Array.isArray(p.cost_layers) ? p.cost_layers : [])
+        .filter((x: any) => Number(x?.quantity ?? 0) > 1e-9)
+        .map((x: any) => ({ ...x, quantity: Number(x.quantity ?? 0) }));
+      if (sign > 0) {
+        layers.push({ quantity: qty, unit_cost: Number(line.unit_cost ?? p.purchase_price ?? 0), purchase_id: null });
+      } else {
+        let remaining = Math.min(qty, Math.max(0, currentQty));
+        for (let i = 0; i < layers.length && remaining > 1e-9; i += 1) {
+          const take = Math.min(Number(layers[i].quantity ?? 0), remaining);
+          layers[i].quantity = Number(layers[i].quantity ?? 0) - take;
+          remaining -= take;
+        }
+      }
+      const nextQty = currentQty + sign * qty;
+      return { ...p, quantity: nextQty, cost_layers: nextQty > 0 ? layers.filter((x: any) => Number(x.quantity ?? 0) > 1e-9) : [] };
     }),
   );
 }
