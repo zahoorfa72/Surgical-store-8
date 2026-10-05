@@ -28,7 +28,7 @@ export default function Dashboard() {
 
   const [range, setRange] = useState<string>("today");
   const [date, setDate] = useState("");
-  const [financeDetailsOpen, setFinanceDetailsOpen] = useState(null);
+  const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
   const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
   const reportRange = exactDate ? `date:${exactDate}` : range;
