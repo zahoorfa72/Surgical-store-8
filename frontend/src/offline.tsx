@@ -180,7 +180,7 @@ function applyStockDelta(items: any[], sign: 1 | -1) {
         }
       }
       const nextQty = currentQty + sign * qty;
-      return { ...p, quantity: nextQty, cost_layers: nextQty > 0 ? layers.filter((x: any) => Number(x.quantity ?? 0) > 1e-9) : [] };
+      return { ...p, quantity: nextQty, purchase_price: sign > 0 ? Number(line.unit_cost ?? p.purchase_price ?? 0) : p.purchase_price, cost_layers: nextQty > 0 ? layers.filter((x: any) => Number(x.quantity ?? 0) > 1e-9) : [] };
     }),
   );
 }
