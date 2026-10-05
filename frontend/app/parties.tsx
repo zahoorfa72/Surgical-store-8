@@ -11,7 +11,7 @@ import { useParties, qk } from "@/src/data";
 import { Party, PartyType } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { getHiddenSupplierIds, getSecretControlsUnlocked, setSupplierHidden } from "@/src/utils/finance-display";
+import { getHiddenSupplierIds } from "@/src/utils/finance-display";
 
 export default function Parties() {
   const styles = useStyles();
@@ -28,14 +28,10 @@ export default function Parties() {
   const { data: parties, isLoading } = useParties(partyType);
   const [toDelete, setToDelete] = useState<Party | null>(null);
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
-  const [secretControlsUnlocked, setSecretControlsUnlockedState] = useState(false);
 
   useEffect(() => {
     if (!isSupplier) return;
-    void Promise.all([getHiddenSupplierIds(), getSecretControlsUnlocked()]).then(([ids, unlocked]) => {
-      setHiddenSupplierIds(ids);
-      setSecretControlsUnlockedState(unlocked);
-    });
+    void getHiddenSupplierIds().then(setHiddenSupplierIds);
   }, [isSupplier]);
 
   const visibleParties = isSupplier
