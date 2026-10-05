@@ -1446,7 +1446,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
         if not p:
             raise HTTPException(status_code=400, detail="Product not found in cart")
         available = float(p.get("quantity", 0) or 0)
-        if requested_qty > available:
+        if requested_qty > available and not body.allow_negative_stock:
             raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
     items = []
     subtotal = 0.0
@@ -1460,15 +1460,20 @@ async def create_sale(body: SaleIn, user: AnyUser):
             raise HTTPException(status_code=400, detail="Product not found in cart")
         if it.quantity <= 0:
             raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
-        if it.quantity > p.get("quantity", 0):
-            raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
+        available = float(p.get("quantity", 0) or 0)
+        if it.quantity > available and not body.allow_negative_stock:
+            raise HTTPException(status_code=400, detail=f"Only {available:g} of {p['name']} in stock")
         line_total = round(it.quantity * it.unit_price, 2)
         layers = working_cost_layers.get(it.product_id)
         if layers is None:
             layers = await _ensure_cost_layers(p)
-        next_layers, line_cogs = _consume_cost_layers(layers, it.quantity)
+        in_stock_qty = min(float(it.quantity), max(0.0, available))
+        if in_stock_qty > 0:
+            next_layers, line_cogs = _consume_cost_layers(layers, in_stock_qty)
+        else:
+            next_layers, line_cogs = layers, 0.0
         working_cost_layers[it.product_id] = next_layers
-        unit_cost = round(line_cogs / it.quantity, 8)
+        unit_cost = round(line_cogs / it.quantity, 8) if it.quantity > 0 else 0.0
         subtotal += line_total
         cogs += line_cogs
         items.append({
@@ -1596,7 +1601,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         if not p:
             raise HTTPException(status_code=400, detail="Product not found in cart")
         available_after_restore = float(p.get("quantity", 0) or 0) + old_qty.get(product_id, 0)
-        if requested_qty > available_after_restore:
+        if requested_qty > available_after_restore and not body.allow_negative_stock:
             raise HTTPException(status_code=400, detail=f"Only {available_after_restore:g} of {p['name']} available for this sale")
 
     # Put back the old items at their recorded sale cost.
@@ -1622,15 +1627,20 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                 raise HTTPException(status_code=400, detail="Product not found in cart")
             if it.quantity <= 0:
                 raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
-            if it.quantity > p.get("quantity", 0):
-                raise HTTPException(status_code=400, detail=f"Only {p.get('quantity', 0)} of {p['name']} in stock")
+            available = float(p.get("quantity", 0) or 0)
+            if it.quantity > available and not body.allow_negative_stock:
+                raise HTTPException(status_code=400, detail=f"Only {available:g} of {p['name']} in stock")
             line_total = round(it.quantity * it.unit_price, 2)
             layers = working_cost_layers.get(it.product_id)
             if layers is None:
                 layers = await _ensure_cost_layers(p)
-            next_layers, line_cogs = _consume_cost_layers(layers, it.quantity)
+            in_stock_qty = min(float(it.quantity), max(0.0, available))
+            if in_stock_qty > 0:
+                next_layers, line_cogs = _consume_cost_layers(layers, in_stock_qty)
+            else:
+                next_layers, line_cogs = layers, 0.0
             working_cost_layers[it.product_id] = next_layers
-            unit_cost = round(line_cogs / it.quantity, 8)
+            unit_cost = round(line_cogs / it.quantity, 8) if it.quantity > 0 else 0.0
             subtotal += line_total
             cogs += line_cogs
             items.append({
