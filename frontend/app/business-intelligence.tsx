@@ -318,25 +318,30 @@ function BackupHealthCard() {
   const styles = useStyles();
   const { colors } = useTheme();
   const [queue, setQueue] = useState<number | null>(null);
-  const [phoneBackup, setPhoneBackup] = useState(false);
-  const [driveBackup, setDriveBackup] = useState(false);
+  const [phoneAt, setPhoneAt] = useState<string | null>(null);
+  const [driveAt, setDriveAt] = useState<string | null>(null);
 
   const refresh = async () => {
-    const [q, phone, drive] = await Promise.all([
+    const [q, phone, phoneStamp, drive] = await Promise.all([
       getWriteQueueCount(),
       storage.getItem<string | null>("ssm.auto-backup-dir", null),
+      storage.getItem<string | null>("ssm.last-phone-backup-at", null),
       storage.getItem<string | null>("ssm.last-drive-backup-at", null),
     ]);
     setQueue(q);
-    setPhoneBackup(!!phone);
-    setDriveBackup(!!drive);
+    setPhoneAt(phone && phoneStamp ? phoneStamp : null);
+    setDriveAt(drive);
   };
 
   useEffect(() => { void refresh(); }, []);
   return (
     <Card>
       <View style={styles.headRow}><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Backup & sync health</Text><Text style={styles.cardHint}>Device backup, Drive backup and unsynced write queue.</Text></View><Pressable onPress={() => void refresh()} style={styles.refresh}><MaterialDesignIcons name="refresh" size={18} color={colors.brandPrimary} /></Pressable></View>
-      <View style={styles.healthRow}><HealthItem label="Phone backup folder" ok={phoneBackup} /><HealthItem label="Drive backup" ok={driveBackup} /><HealthItem label="Sync queue" ok={queue === 0} text={queue === null ? "…" : String(queue)} /></View>
+      <View style={styles.healthRow}>
+        <HealthItem label="Phone backup" ok={!!phoneAt} text={phoneAt ? fmtDate(phoneAt) : "Not backed up"} />
+        <HealthItem label="Drive backup" ok={!!driveAt} text={driveAt ? fmtDate(driveAt) : "Not backed up"} />
+        <HealthItem label="Sync queue" ok={queue === 0} text={queue === null ? "…" : String(queue)} />
+      </View>
     </Card>
   );
 }
