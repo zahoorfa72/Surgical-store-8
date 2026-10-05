@@ -198,9 +198,14 @@ export default function OfflineTools() {
       </View>
       <Badge text={fakeFinanceDisplay ? "Private finance ON" : "Real finance"} tone={fakeFinanceDisplay ? "warning" : "success"} />
     </View>
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-      {items.map(([k, label, icon]) => <Pressable key={k} onPress={() => setTool(k)} style={[styles.tab, tool === k && { backgroundColor: colors.brandPrimary }]}><MaterialDesignIcons name={icon as any} size={17} color={tool === k ? colors.onBrandPrimary : colors.brandPrimary} /><Text style={[styles.tabText, tool === k && { color: colors.onBrandPrimary }]}>{label}</Text></Pressable>)}
-    </ScrollView>
+    <View style={styles.tabs}>
+      {items.map(([k, label, icon]) => (
+        <Pressable key={k} onPress={() => setTool(k)} style={[styles.tab, tool === k && { backgroundColor: colors.brandPrimary }]}>
+          <MaterialDesignIcons name={icon as any} size={17} color={tool === k ? colors.onBrandPrimary : colors.brandPrimary} />
+          <Text style={[styles.tabText, tool === k && { color: colors.onBrandPrimary }]} numberOfLines={1}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 12 }}>
       {tool === "adjust" && <Card><Text style={styles.title}>Stock Adjustment & Damage</Text><Text style={styles.hint}>Changes quantity and cost layers only. No sale, purchase or finance entry is created.</Text><TextInput style={styles.input} placeholder="Search product" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.slice(0, 8).map((p) => <Pressable key={p.id} onPress={() => setProductId(p.id)} style={[styles.row, productId === p.id && { backgroundColor: colors.brandTertiary }]}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} in stock</Text></Pressable>)}<TextInput style={styles.input} keyboardType="decimal-pad" placeholder="+10 or -5" placeholderTextColor={colors.muted} value={delta} onChangeText={setDelta} /><TextInput style={styles.input} placeholder="Reason" placeholderTextColor={colors.muted} value={reason} onChangeText={setReason} /><PrimaryButton label="Save adjustment" onPress={adjust} /></Card>}
 
@@ -233,8 +238,8 @@ const useStyles = makeStyles((colors) => ({
   statusIcon: { width: 38, height: 38, borderRadius: 11, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
   statusTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
   statusHint: { fontSize: 10.5, color: colors.muted, marginTop: 2, lineHeight: 15 },
-  tabs: { gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  tab: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20, backgroundColor: colors.surfaceTertiary },
+  tabs: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  tab: { flexGrow: 1, flexBasis: "30%", maxWidth: "32%", minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 9, borderRadius: 12, backgroundColor: colors.surfaceTertiary },
   tabText: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
   title: { fontSize: 18, fontWeight: "800", color: colors.onSurface, marginBottom: 6 },
   hint: { fontSize: 12, color: colors.muted, lineHeight: 18, marginBottom: 10 },
