@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
@@ -332,7 +332,7 @@ function BackupHealthCard() {
     setDriveBackup(!!drive);
   };
 
-  useMemo(() => { void refresh(); }, []);
+  useEffect(() => { void refresh(); }, []);
   return (
     <Card>
       <View style={styles.headRow}><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Backup & sync health</Text><Text style={styles.cardHint}>Device backup, Drive backup and unsynced write queue.</Text></View><Pressable onPress={() => void refresh()} style={styles.refresh}><MaterialDesignIcons name="refresh" size={18} color={colors.brandPrimary} /></Pressable></View>
