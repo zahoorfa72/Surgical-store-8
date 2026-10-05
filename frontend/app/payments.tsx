@@ -123,7 +123,7 @@ export default function Payments() {
   const recentPayments = (payments ?? []).filter((p) => visiblePartyIds.has(p.party_id) && (
     isSupplier
       ? p.kind === "pay" || p.kind === "supplier_refund"
-      : p.kind === "receive" || p.kind === "customer_refund",
+      : p.kind === "receive" || p.kind === "customer_refund"
   ));
   // Group each party's payment history so every supplier/customer is shown
   // separately, and refunds are clearly labelled.
