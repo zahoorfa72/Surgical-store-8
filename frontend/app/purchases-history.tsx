@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
-import { usePurchases, usePurchaseReturns, qk } from "@/src/data";
+import { usePurchases, usePurchaseReturns, useProducts, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Purchase } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
@@ -17,7 +17,6 @@ export default function PurchasesHistory() {
   const styles = useStyles();
   const { colors } = useTheme();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
-  const productsById = new Map(products.map((p: any) => [String(p.id), p]));
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -26,6 +25,8 @@ export default function PurchasesHistory() {
   const admin = isAdmin(user?.role);
 
   const { data: purchases, isLoading } = usePurchases();
+  const { data: products = [] } = useProducts();
+  const productsById = new Map(products.map((p: any) => [String(p.id), p]));
   const { data: purchaseReturns } = usePurchaseReturns();
   const [search, setSearch] = useState("");
   const [date, setDate] = useState("");
