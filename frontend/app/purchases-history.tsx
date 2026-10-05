@@ -62,6 +62,15 @@ export default function PurchasesHistory() {
 
   // Group purchases by supplier so each supplier is shown separately, each with
   // its own net (after supplier returns) subtotal.
+  const allSupplierTotal = useMemo(() => {
+    return filtered.reduce((sum, p) => {
+      if (fakeFinanceDisplay) {
+        return sum + fakePurchaseTotal(p.items ?? [], Object.fromEntries(products.map((x: any) => [String(x.id), x])), String(p.id));
+      }
+      return sum + Number(p.total ?? 0);
+    }, 0);
+  }, [filtered, fakeFinanceDisplay, products]);
+
   const sections = useMemo(() => {
     const bySupplier: Record<string, Purchase[]> = {};
     for (const p of filtered) {
@@ -135,6 +144,16 @@ export default function PurchasesHistory() {
       {isLoading ? (
         <Loader />
       ) : (
+        <>
+        <View style={styles.allSupplierCard} testID="all-suppliers-purchase-total">
+          <View style={{ flex: 1 }}>
+            <Text style={styles.allSupplierLabel}>All suppliers</Text>
+            <Text style={styles.allSupplierSub}>
+              {date.trim() ? "Total for selected date" : "Total purchases — all time"}
+            </Text>
+          </View>
+          <Text style={styles.allSupplierTotal}>{money(allSupplierTotal)}</Text>
+        </View>
         <SectionList
           sections={sections}
           keyExtractor={(p) => p.id}
@@ -236,6 +255,7 @@ export default function PurchasesHistory() {
             );
           }}
         />
+        </>
       )}
 
       <Pressable
@@ -324,6 +344,22 @@ const useStyles = makeStyles((colors) => ({
     borderRadius: 6,
   },
   returnedText: { fontSize: 10, fontWeight: "700", color: colors.error },
+  allSupplierCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 10,
+  },
+  allSupplierLabel: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  allSupplierSub: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  allSupplierTotal: { fontSize: 18, fontWeight: "900", color: colors.brandPrimary },
   supplierHeader: {
     flexDirection: "row",
     alignItems: "center",
