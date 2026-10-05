@@ -62,7 +62,7 @@ export default function Products() {
       : Number(p.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id)) : Number(p.purchase_price ?? 0))), 0);
     const retailValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.sale_price ?? 0), 0);
     return { costValue, retailValue, potentialProfit: retailValue - costValue };
-  }, [products]);
+  }, [products, fakeFinanceDisplay]);
 
   const confirmDelete = async () => {
     if (!toDelete) return;
@@ -203,7 +203,7 @@ export default function Products() {
                     <View style={{ gap: 2, marginTop: 3 }}>
                       {item.cost_layers.map((layer, index) => (
                         <Text key={`${item.id}-lot-${index}`} style={styles.lotText}>
-                          Lot {index + 1}: {Number(layer.quantity)} × {money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost)}
+                          Lot {index + 1}: {Number(layer.quantity)} × {money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0))}
                         </Text>
                       ))}
                     </View>
