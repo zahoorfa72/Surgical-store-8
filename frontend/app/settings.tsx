@@ -8,7 +8,7 @@ import * as ImagePicker from "expo-image-picker";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth, isAdmin } from "@/src/auth";
-import { useSettings, qk } from "@/src/data";
+import { useSettings, useParties, qk } from "@/src/data";
 import {
   getApiBaseOverride,
   logoUrl,
@@ -19,7 +19,7 @@ import {
 import { storage } from "@/src/utils/storage";
 import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay, getSecretControlsUnlocked, setSecretControlsUnlocked } from "@/src/utils/finance-display";
+import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay, getSecretControlsUnlocked, setSecretControlsUnlocked, getHiddenSupplierIds, setSupplierHidden } from "@/src/utils/finance-display";
 
 export default function Settings() {
   const styles = useStyles();
@@ -31,6 +31,7 @@ export default function Settings() {
   const { user, logout } = useAuth();
   const admin = isAdmin(user?.role);
   const { data: settings } = useSettings();
+  const { data: suppliers = [] } = useParties("supplier");
 
   const [confirm, setConfirm] = useState(false);
   const [storeName, setStoreName] = useState("");
@@ -45,6 +46,8 @@ export default function Settings() {
   const [fakeFinanceDisplay, setFakeFinanceDisplayState] = useState(false);
   const [secretControlsUnlocked, setSecretControlsUnlockedState] = useState(false);
   const [adminNameTaps, setAdminNameTaps] = useState(0);
+  const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
@@ -58,7 +61,8 @@ export default function Settings() {
       storage.getItem<boolean>("ssm.showInventoryProfitMargin", true),
       storage.getItem<number>("ssm.saleEditLockHours", 0),
       getFakeFinanceDisplay(),
-    ]).then(async ([format, width, sellDetails, inventoryMargin, lockHours, fakeFinance]) => {
+      getHiddenSupplierIds(),
+    ]).then(async ([format, width, sellDetails, inventoryMargin, lockHours, fakeFinance, hiddenIds]) => {
       setReceiptFormat(format === "a4" ? "a4" : "thermal");
       setReceiptWidth(width === "56" ? 56 : 72);
       setShowSellProfitDiscount(sellDetails !== false);
@@ -66,6 +70,7 @@ export default function Settings() {
       setSaleEditLockHours(String(Math.max(0, Number(lockHours ?? 0))));
       setFakeFinanceDisplayState(fakeFinance === true);
       setSecretControlsUnlockedState(await getSecretControlsUnlocked());
+      setHiddenSupplierIds(hiddenIds);
     });
   }, []);
 
@@ -148,9 +153,10 @@ export default function Settings() {
               const next = adminNameTaps + 1;
               if (next >= 5) {
                 setAdminNameTaps(0);
-                setSecretControlsUnlockedState(true);
-                await setSecretControlsUnlocked(true);
-                toast("Private controls unlocked", "success");
+                const nextUnlocked = !secretControlsUnlocked;
+                setSecretControlsUnlockedState(nextUnlocked);
+                await setSecretControlsUnlocked(nextUnlocked);
+                toast(nextUnlocked ? "Private controls unlocked" : "Private controls hidden", "success");
               } else {
                 setAdminNameTaps(next);
               }
@@ -323,6 +329,35 @@ export default function Settings() {
               </Pressable>
             </View>
           </View>
+          {suppliers.length > 0 && (
+            <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.divider }}>
+              <Text style={styles.cardTitle}>Hide supplier from financial screens</Text>
+              <Text style={styles.cardHint}>Select a supplier, then use Hide supplier. Hidden suppliers disappear from supplier financial, purchase-history and payment-history screens. Their data is not deleted.</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 10 }}>
+                {suppliers.map((s) => (
+                  <Pressable key={s.id} testID={`select-hide-supplier-${s.id}`} onPress={() => setSelectedSupplierId(s.id)} style={[styles.supplierChip, selectedSupplierId === s.id && styles.supplierChipActive]}>
+                    <Text style={[styles.supplierChipText, selectedSupplierId === s.id && styles.supplierChipTextActive]}>{s.name}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {selectedSupplierId && (
+                <Pressable
+                  testID="hide-selected-supplier"
+                  style={styles.hideSupplierButton}
+                  onPress={async () => {
+                    const hidden = !hiddenSupplierIds.includes(selectedSupplierId);
+                    await setSupplierHidden(selectedSupplierId, hidden);
+                    const next = hidden ? [...hiddenSupplierIds, selectedSupplierId] : hiddenSupplierIds.filter((id) => id !== selectedSupplierId);
+                    setHiddenSupplierIds(next);
+                  }}
+                >
+                  <MaterialDesignIcons name={hiddenSupplierIds.includes(selectedSupplierId) ? "eye-off" : "eye-off-outline"} size={19} color={colors.onBrandPrimary} />
+                  <Text style={styles.hideSupplierText}>{hiddenSupplierIds.includes(selectedSupplierId) ? "Unhide selected supplier" : "Hide selected supplier"}</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+        </View>
         )}
 
         {admin && (
@@ -447,6 +482,12 @@ const useStyles = makeStyles((colors) => ({
   widthBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   widthText: { fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
   widthTextActive: { color: colors.onBrandPrimary },
+  supplierChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  supplierChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  supplierChipText: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
+  supplierChipTextActive: { color: colors.onBrandPrimary },
+  hideSupplierButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, minHeight: 44, borderRadius: 11, paddingHorizontal: 14, backgroundColor: colors.brandPrimary },
+  hideSupplierText: { color: colors.onBrandPrimary, fontWeight: "800" },
   visibilityRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.divider },
   visibilityText: { flex: 1, gap: 3 },
   visibilityLabel: { fontSize: 14, fontWeight: "700", color: colors.onSurface },
