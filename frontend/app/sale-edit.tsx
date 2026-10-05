@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -36,12 +36,16 @@ export default function SaleEdit() {
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+  const [saleEditLockHours, setSaleEditLockHours] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       void storage.getItem<boolean>("ssm.showSellProfitDiscount", true).then((value) => {
         if (active) setShowSellProfitDiscount(value !== false);
+      });
+      void storage.getItem<number>("ssm.saleEditLockHours", 0).then((value) => {
+        if (active) setSaleEditLockHours(Math.max(0, Number(value ?? 0)));
       });
       return () => { active = false; };
     }, []),
@@ -83,6 +87,13 @@ export default function SaleEdit() {
   const customerName = customers?.find((c) => c.id === customerId)?.name ?? "Walk-in customer";
 
   const save = async () => {
+    if (saleEditLockHours > 0 && sale?.created_at) {
+      const ageHours = Math.max(0, (Date.now() - new Date(sale.created_at).getTime()) / 3600000);
+      if (ageHours > saleEditLockHours) {
+        Alert.alert("Sale is locked", `This sale is older than ${saleEditLockHours} hours and is protected by the store edit policy.`);
+        return;
+      }
+    }
     const valid = lines.filter((l) => l.quantity > 0);
     if (!valid.length) {
       toast("A sale needs at least one item", "error");
@@ -124,7 +135,7 @@ export default function SaleEdit() {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={`Edit ${sale.invoice_no}`} subtitle={showSellProfitDiscount ? "Adjust items, price & discount" : "Adjust items & price"} topInset={insets.top} onBack={() => router.back()} />
+      <ScreenHeader title={`Edit ${sale.invoice_no}`} subtitle={saleEditLockHours > 0 ? `Edit policy: ${saleEditLockHours}h` : (showSellProfitDiscount ? "Adjust items, price & discount" : "Adjust items & price")} topInset={insets.top} onBack={() => router.back()} />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }} bottomOffset={20}>
         <Pressable testID="edit-select-customer-button" style={styles.customerRow} onPress={() => setCustPickerOpen(true)}>
           <MaterialDesignIcons name="account" size={20} color={colors.brandPrimary} />
