@@ -347,6 +347,19 @@ class PurchaseIn(BaseModel):
     note: str = ""
 
 
+class InventoryAdjustmentIn(BaseModel):
+    product_id: str
+    delta: float
+    reason: str = ""
+
+
+class StockTransferIn(BaseModel):
+    from_product_id: str
+    to_product_id: str
+    quantity: float = Field(gt=0)
+    reason: str = ""
+
+
 
 async def _ensure_cost_layers(product: dict) -> list:
     """Keep old stock at its original purchase cost instead of overwriting it."""
