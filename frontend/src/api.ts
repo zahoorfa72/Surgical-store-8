@@ -786,7 +786,7 @@ export async function apiRequest<T = any>(
   }
 
   try {
-    const result = await rawRequest<T>(path, { ...options, headers: expectedUpdatedAt ? { "If-Unmodified-Since": expectedUpdatedAt } : undefined });
+    const result = await rawRequest<T>(path, { ...options, headers: expectedUpdatedAt ? { "x-expected-updated-at": expectedUpdatedAt } : undefined });
     await recordLocalAudit(method, path, 200, options.body);
     return result;
   } catch (e) {
