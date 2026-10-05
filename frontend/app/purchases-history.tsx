@@ -70,8 +70,10 @@ export default function PurchasesHistory() {
     }
     return Object.entries(bySupplier)
       .map(([title, data]) => {
-        const gross = data.reduce((s, p) => s + Number(p.total ?? 0), 0);
-        const refunded = data.reduce((s, p) => s + (refundByPurchase[p.id] ?? 0), 0);
+        const gross = fakeFinanceDisplay
+          ? data.reduce((s, p) => s + fakePurchaseTotal(p.items ?? [], Object.fromEntries(products.map((x: any) => [String(x.id), x])), String(p.id)), 0)
+          : data.reduce((s, p) => s + Number(p.total ?? 0), 0);
+        const refunded = fakeFinanceDisplay ? 0 : data.reduce((s, p) => s + (refundByPurchase[p.id] ?? 0), 0);
         return { title, data, gross, refunded, net: Math.max(0, gross - refunded) };
       })
       .sort((a, b) => a.title.localeCompare(b.title));
@@ -181,7 +183,7 @@ export default function PurchasesHistory() {
                         <Text style={styles.pendingText}>Pending</Text>
                       </View>
                     )}
-                    {refunded > 0 && (
+                    {!fakeFinanceDisplay && refunded > 0 && (
                       <View style={styles.returnedTag} testID={`purchase-returned-tag-${item.id}`}>
                         <MaterialDesignIcons name="undo-variant" size={11} color={colors.error} />
                         <Text style={styles.returnedText}>Returned</Text>
@@ -195,7 +197,7 @@ export default function PurchasesHistory() {
                 </View>
                 <View style={styles.rowRight}>
                   <Text style={styles.total} testID={`purchase-net-${item.id}`}>{money(net)}</Text>
-                  {refunded > 0 && (
+                  {!fakeFinanceDisplay && refunded > 0 && (
                     <View style={styles.refundLine} testID={`purchase-refund-info-${item.id}`}>
                       <Text style={styles.origStruck}>{money(fakeFinanceDisplay ? fakePurchaseTotal(item.items ?? [], productsById, String(item.id)) : item.total)}</Text>
                       <Text style={styles.refundAmt}>-{money(refunded)}</Text>
