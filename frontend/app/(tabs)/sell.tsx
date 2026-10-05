@@ -132,14 +132,34 @@ export default function Sell() {
 
   const createCustomer = async () => {
     const name = newCustomerName.trim();
+    const phone = newCustomerPhone.trim();
     if (!name) {
       toast("Enter customer name", "error");
+      return;
+    }
+    const normalizeParty = (v: string) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const nameKey = normalizeParty(name);
+    const phoneKey = phone.replace(/\\D/g, "");
+    const possible = (customers ?? []).find((c: any) => {
+      const existingName = normalizeParty(String(c.name ?? ""));
+      const existingPhone = String(c.phone ?? "").replace(/\\D/g, "");
+      return (phoneKey && existingPhone && phoneKey === existingPhone) ||
+        (nameKey && existingName === nameKey);
+    });
+    if (possible) {
+      setCustomerId(possible.id);
+      setNewCustomerName("");
+      setNewCustomerPhone("");
+      setNewCustomerAddress("");
+      setCustomerCreateOpen(false);
+      setCustPickerOpen(false);
+      toast("Existing customer found and selected — no duplicate created", "info");
       return;
     }
     try {
       const created = await apiRequest<any>("/parties", {
         method: "POST",
-        body: { name, type: "customer", phone: newCustomerPhone.trim(), address: newCustomerAddress.trim() },
+        body: { name, type: "customer", phone, address: newCustomerAddress.trim() },
       });
       setCustomerId(created.id);
       await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
