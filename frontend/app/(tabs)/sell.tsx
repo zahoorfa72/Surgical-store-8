@@ -46,6 +46,10 @@ export default function Sell() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [custPickerOpen, setCustPickerOpen] = useState(false);
+  const [customerCreateOpen, setCustomerCreateOpen] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [newCustomerAddress, setNewCustomerAddress] = useState("");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [discount, setDiscount] = useState("0");
   const [credit, setCredit] = useState(false);
@@ -124,6 +128,31 @@ export default function Sell() {
 
   const customerName =
     customers?.find((c) => c.id === customerId)?.name ?? "Walk-in customer";
+
+  const createCustomer = async () => {
+    const name = newCustomerName.trim();
+    if (!name) {
+      toast("Enter customer name", "error");
+      return;
+    }
+    try {
+      const created = await (await import("@/src/api")).apiRequest<any>("/parties", {
+        method: "POST",
+        body: { name, type: "customer", phone: newCustomerPhone.trim(), address: newCustomerAddress.trim() },
+      });
+      setCustomerId(created.id);
+      await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
+      await queryClient.invalidateQueries({ queryKey: qk.parties() });
+      setNewCustomerName("");
+      setNewCustomerPhone("");
+      setNewCustomerAddress("");
+      setCustomerCreateOpen(false);
+      setCustPickerOpen(false);
+      toast("Customer created and selected", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not create customer", "error");
+    }
+  };
 
   const addToCart = (p: Product) => {
     if (p.quantity <= 0) {
@@ -599,6 +628,14 @@ export default function Sell() {
           <ScreenHeader title="Select customer" topInset={insets.top} onBack={() => setCustPickerOpen(false)} />
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 8 }}>
             <Pressable
+              testID="create-customer-button"
+              style={styles.createPartyBtn}
+              onPress={() => setCustomerCreateOpen(true)}
+            >
+              <MaterialDesignIcons name="account-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.createPartyText}>+ Create new customer</Text>
+            </Pressable>
+            <Pressable
               testID="customer-walkin"
               style={styles.custOption}
               onPress={() => {
@@ -631,6 +668,25 @@ export default function Sell() {
             {(!customers || customers.length === 0) && (
               <Text style={styles.custHint}>No customers yet. Add them in More → Customers.</Text>
             )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Create customer directly from sale */}
+      <Modal visible={customerCreateOpen} animationType="slide" onRequestClose={() => setCustomerCreateOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Create customer" subtitle="Add customer without leaving sale" topInset={insets.top} onBack={() => setCustomerCreateOpen(false)} />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}>
+            <Text style={styles.formLabel}>Customer name *</Text>
+            <TextInput testID="new-customer-name" style={styles.formInput} placeholder="Customer name" placeholderTextColor={colors.muted} value={newCustomerName} onChangeText={setNewCustomerName} />
+            <Text style={styles.formLabel}>Phone</Text>
+            <TextInput testID="new-customer-phone" style={styles.formInput} placeholder="Phone number" placeholderTextColor={colors.muted} keyboardType="phone-pad" value={newCustomerPhone} onChangeText={setNewCustomerPhone} />
+            <Text style={styles.formLabel}>Address</Text>
+            <TextInput testID="new-customer-address" style={[styles.formInput, styles.formInputMulti]} placeholder="Address (optional)" placeholderTextColor={colors.muted} multiline value={newCustomerAddress} onChangeText={setNewCustomerAddress} />
+            <Pressable testID="save-new-customer-button" style={styles.createPartySaveBtn} onPress={createCustomer}>
+              <MaterialDesignIcons name="account-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.checkoutText}>Create & Select Customer</Text>
+            </Pressable>
           </ScrollView>
         </View>
       </Modal>
