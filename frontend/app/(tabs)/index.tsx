@@ -146,7 +146,7 @@ export default function Dashboard() {
                       const fakeCogs = Math.max(0, Number(s.total || 0) - fakeProfit);
                       return (
                         <View key={s.id} style={styles.detailLine}>
-                          <Text style={styles.detailLabel}>{s.invoice_no} · Revenue {money(displayFinanceAmount(s.total))} · COGS {money(fakeFinanceDisplay ? fakeCogs : s.cogs)}</Text>
+                          <Text style={styles.detailLabel}>{s.invoice_no} · Revenue {money(displayFinanceAmount(s.total, fakeFinanceDisplay))} · COGS {money(fakeFinanceDisplay ? fakeCogs : s.cogs)}</Text>
                           <Text style={styles.detailValue}>{money(fakeFinanceDisplay ? fakeProfit : s.profit)}</Text>
                         </View>
                       );
@@ -166,7 +166,7 @@ export default function Dashboard() {
                       {sales.filter((s: any) => !s.credit).map((s: any) => (
                         <View key={s.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{s.invoice_no} · Customer sale</Text>
-                          <Text style={styles.detailValue}>+{money(displayFinanceAmount(s.total))}</Text>
+                          <Text style={styles.detailValue}>+{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
                       {payments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").map((p: any) => (
@@ -181,13 +181,13 @@ export default function Dashboard() {
                       {payments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").map((p: any) => (
                         <View key={p.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
-                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(p.amount))}</Text>
+                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
                       {expenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").map((e: any) => (
                         <View key={e.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text>
-                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount))}</Text>
+                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
                     </Card>
