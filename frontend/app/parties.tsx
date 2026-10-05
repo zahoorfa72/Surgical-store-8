@@ -29,6 +29,7 @@ export default function Parties() {
   const [toDelete, setToDelete] = useState<Party | null>(null);
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
   const [secretControlsUnlocked, setSecretControlsUnlockedState] = useState(false);
+  const [showHiddenSuppliers, setShowHiddenSuppliers] = useState(false);
 
   useEffect(() => {
     if (!isSupplier) return;
@@ -38,7 +39,9 @@ export default function Parties() {
     });
   }, [isSupplier]);
 
-  const visibleParties = isSupplier ? (parties ?? []).filter((party) => !hiddenSupplierIds.includes(party.id)) : (parties ?? []);
+  const visibleParties = isSupplier
+    ? (showHiddenSuppliers ? (parties ?? []) : (parties ?? []).filter((party) => !hiddenSupplierIds.includes(party.id)))
+    : (parties ?? []);
 
   const confirmDelete = async () => {
     if (!toDelete) return;
@@ -61,6 +64,18 @@ export default function Parties() {
         topInset={insets.top}
         onBack={() => router.back()}
       />
+      {isSupplier && secretControlsUnlocked && hiddenSupplierIds.length > 0 && (
+        <Pressable
+          testID="toggle-hidden-suppliers"
+          onPress={() => setShowHiddenSuppliers((value) => !value)}
+          style={{ marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" }}
+        >
+          <Text style={{ color: colors.brandPrimary, fontWeight: "700" }}>
+            {showHiddenSuppliers ? "Hide hidden suppliers" : "Show hidden suppliers (" + hiddenSupplierIds.length + ")"}
+          </Text>
+        </Pressable>
+      )}
+
       {isLoading ? (
         <Loader />
       ) : (
@@ -95,13 +110,14 @@ export default function Parties() {
                   testID={`hide-supplier-${item.id}`}
                   hitSlop={8}
                   onPress={async () => {
-                    await setSupplierHidden(item.id, true);
-                    setHiddenSupplierIds((current) => current.includes(item.id) ? current : [...current, item.id]);
-                    toast("Supplier hidden", "success");
+                    const hidden = !hiddenSupplierIds.includes(item.id);
+                    await setSupplierHidden(item.id, hidden);
+                    setHiddenSupplierIds((current) => hidden ? (current.includes(item.id) ? current : [...current, item.id]) : current.filter((id) => id !== item.id));
+                    toast(hidden ? "Supplier hidden" : "Supplier shown", "success");
                   }}
                   style={styles.delBtn}
                 >
-                  <MaterialDesignIcons name="eye-off-outline" size={20} color={colors.muted} />
+                  <MaterialDesignIcons name={hiddenSupplierIds.includes(item.id) ? "eye-outline" : "eye-off-outline"} size={20} color={colors.muted} />
                 </Pressable>
               )}
               {admin && <Pressable testID={`delete-party-${item.id}`} hitSlop={8} onPress={() => setToDelete(item)} style={styles.delBtn}>
