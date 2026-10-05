@@ -327,6 +327,7 @@ export function StatTile({
   icon: string;
   tone?: "brand" | "success" | "warning" | "error" | "info" | "muted";
   testID?: string;
+  onPress?: () => void;
 }) {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -339,7 +340,7 @@ export function StatTile({
     muted: colors.muted,
   }[tone];
   return (
-    <View style={styles.statTile} testID={testID}>
+    <Pressable disabled={!onPress} onPress={onPress} style={({ pressed }) => [styles.statTile, pressed && styles.pressed]} testID={testID}>
       <View style={[styles.statIcon, { backgroundColor: toneColor + "1A" }]}>
         <MaterialDesignIcons name={icon as any} size={20} color={toneColor} />
       </View>
@@ -347,7 +348,7 @@ export function StatTile({
         {value}
       </Text>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 
