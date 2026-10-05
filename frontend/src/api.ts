@@ -627,6 +627,35 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
   }
 }
 
+const AUDIT_KEY = "ssm.auditlog.v1";
+const AUDIT_MAX = 500;
+
+async function recordLocalAudit(method: string, path: string, status?: number, body?: any) {
+  try {
+    if (method === "GET") return;
+    const current = (await storage.getItem<any[]>(AUDIT_KEY, [])) ?? [];
+    const safeBody = body && typeof body === "object"
+      ? Object.fromEntries(Object.entries(body).map(([key, value]) => {
+          const k = key.toLowerCase();
+          return [key, /(password|token|secret|authorization)/i.test(k) ? "[redacted]" : value];
+        }))
+      : body;
+    const user = await storage.getItem<any>("ssm.user", null);
+    const row = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      method,
+      path,
+      status,
+      body: safeBody,
+      user_name: user?.name ?? user?.email ?? "",
+      created_at: now(),
+    };
+    await storage.setItem(AUDIT_KEY, [row, ...current].slice(0, AUDIT_MAX) as any);
+  } catch {
+    // Audit logging must never block a business transaction.
+  }
+}
+
 async function persistLiveCache() {
   try {
     const { dehydrate } = await import("@tanstack/react-query");
@@ -740,7 +769,9 @@ export async function apiRequest<T = any>(
   // reads are served from the React Query cache populated by local persistence.
   if (mode === "offline") {
     if (method !== "GET" && isQueueable(path)) {
-      return (await queueWrite(method, path, options.body)) as T;
+      const queued = await queueWrite(method, path, options.body);
+      await recordLocalAudit(method, path, undefined, options.body);
+      return queued as T;
     }
     if (method === "GET") {
       const local = localCacheForPath(path);
@@ -750,11 +781,15 @@ export async function apiRequest<T = any>(
   }
 
   try {
-    return await rawRequest<T>(path, options);
+    const result = await rawRequest<T>(path, options);
+    await recordLocalAudit(method, path, 200, options.body);
+    return result;
   } catch (e) {
     if (e instanceof ApiError) throw e;
     if (method !== "GET" && isQueueable(path)) {
-      return (await queueWrite(method, path, options.body)) as T;
+      const queued = await queueWrite(method, path, options.body);
+      await recordLocalAudit(method, path, undefined, options.body);
+      return queued as T;
     }
     throw e;
   }
