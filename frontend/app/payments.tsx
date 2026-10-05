@@ -14,6 +14,7 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Party, Payment } from "@/src/models";
 import { ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { getHiddenSupplierIds } from "@/src/utils/finance-display";
 
 const TABS = [
   { key: "supplier", label: "Suppliers" },
@@ -58,13 +59,17 @@ export default function Payments() {
   const [busy, setBusy] = useState(false);
   const [receiptPhoto, setReceiptPhoto] = useState<string | null>(null);
   const [receiptPhotos, setReceiptPhotos] = useState<Record<string, string>>({});
+  const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
+  useEffect(() => { void getHiddenSupplierIds().then(setHiddenSupplierIds); }, []);
   useEffect(() => { void AsyncStorage.getAllKeys().then(async (keys) => { const ks = keys.filter((k) => k.startsWith("ssm.paymentReceipt.")); if (!ks.length) return; const pairs = await AsyncStorage.multiGet(ks); const map: Record<string,string> = {}; for (const [k,v] of pairs) if (v) map[k.replace("ssm.paymentReceipt.","")] = v; setReceiptPhotos(map); }); }, [payments?.length]);
   const pickReceiptPhoto = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, quality: 0.55, base64: true, exif: false }); if (result.canceled) return; const asset = result.assets[0]; if (!asset?.base64) { toast("Could not read the receipt photo", "error"); return; } if (asset.base64.length > 4_000_000) { toast("Photo is too large. Please choose a smaller receipt photo.", "error"); return; } setReceiptPhoto("data:image/jpeg;base64," + asset.base64); };
   const removeReceiptPhoto = () => setReceiptPhoto(null);
 
+  const visibleParties = useMemo(() => isSupplier ? (parties ?? []).filter((p) => !hiddenSupplierIds.includes(p.id)) : (parties ?? []), [parties, isSupplier, hiddenSupplierIds]);
+  const visiblePartyIds = useMemo(() => new Set(visibleParties.map((p) => p.id)), [visibleParties]);
   const totalOutstanding = useMemo(
-    () => (parties ?? []).reduce((s, p) => s + Math.max(0, p.balance), 0),
-    [parties],
+    () => visibleParties.reduce((s, p) => s + Math.max(0, p.balance), 0),
+    [visibleParties],
   );
 
   const openFor = (p: Party) => {
@@ -115,11 +120,11 @@ export default function Payments() {
     }
   };
 
-  const recentPayments = (payments ?? []).filter((p) =>
+  const recentPayments = (payments ?? []).filter((p) => visiblePartyIds.has(p.party_id) && (
     isSupplier
       ? p.kind === "pay" || p.kind === "supplier_refund"
       : p.kind === "receive" || p.kind === "customer_refund",
-  );
+  ));
   // Group each party's payment history so every supplier/customer is shown
   // separately, and refunds are clearly labelled.
   const paymentsByParty = (() => {
@@ -134,7 +139,7 @@ export default function Payments() {
   // Supplier purchases are payable ledger entries. They create the supplier
   // balance when purchased; only a recorded Pay entry settles/cuts cash.
   const supplierPurchases = (purchases ?? [])
-    .filter((p) => isSupplier && p.supplier_id)
+    .filter((p) => isSupplier && p.supplier_id && visiblePartyIds.has(p.supplier_id))
     .slice(0, 12);
 
   const confirmDelete = async () => {
@@ -167,7 +172,7 @@ export default function Payments() {
         <Loader />
       ) : (
         <FlatList
-          data={parties}
+          data={visibleParties}
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 10 }}
           ListHeaderComponent={
