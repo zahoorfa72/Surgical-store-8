@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
+import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { canManageStore, useAuth } from "@/src/auth";
 import { useProducts, useInventoryUsage, qk } from "@/src/data";
 import { Product } from "@/src/models";
@@ -29,6 +30,7 @@ export default function Products() {
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,7 +44,10 @@ export default function Products() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q));
+    return (products ?? []).filter((p) => {
+      if (!q) return true;
+      return p.name.toLowerCase().includes(q) || String(p.barcode ?? "").toLowerCase().includes(q);
+    });
   }, [products, search]);
 
   const inventoryFinance = useMemo(() => {
@@ -86,11 +91,14 @@ export default function Products() {
         <TextInput
           testID="stock-search-input"
           style={styles.searchInput}
-          placeholder="Search products"
+          placeholder="Search name or barcode"
           placeholderTextColor={colors.muted}
           value={search}
           onChangeText={setSearch}
         />
+        <Pressable testID="stock-barcode-scan-button" hitSlop={8} onPress={() => setScannerOpen(true)} style={styles.scanBtn}>
+          <MaterialDesignIcons name="barcode-scan" size={21} color={colors.brandPrimary} />
+        </Pressable>
       </View>
 
       {isLoading ? (
@@ -230,6 +238,17 @@ export default function Products() {
         </Pressable>
       )}
 
+      <BarcodeScannerModal
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScanned={(value) => {
+          setSearch(value);
+          setScannerOpen(false);
+          const hit = (products ?? []).find((p) => String(p.barcode ?? "").trim() === String(value).trim());
+          if (!hit) toast("No product matches this barcode. You can still search it manually.", "error");
+        }}
+      />
+
       <ConfirmModal
         visible={!!toDelete}
         title="Remove product?"
@@ -258,6 +277,8 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.border,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
+  scanBtn: { width: 34, height: 34, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+
   usageCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 2 },
   usageTabs: { flexDirection: "row", gap: 6, marginBottom: 10 },
   usageTab: { flex: 1, minHeight: 36, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceTertiary },
