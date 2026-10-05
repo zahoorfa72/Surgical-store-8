@@ -1013,10 +1013,15 @@ async def create_product(body: ProductIn, _: Staff):
     if any(float(v) < 0 for v in (body.purchase_price, body.sale_price, body.low_stock_threshold)):
         raise HTTPException(status_code=400, detail="Product prices and stock threshold cannot be negative")
     barcode = body.barcode.strip()
-    if barcode:
-        duplicate = await db.products.find_one({"barcode": barcode, "deleted": {"$ne": True}})
-        if duplicate:
-            raise HTTPException(status_code=409, detail="A product with this barcode already exists")
+    duplicate = await db.products.find_one({
+        "$or": [
+            {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+            *([{"barcode": barcode}] if barcode else []),
+        ],
+        "deleted": {"$ne": True},
+    })
+    if duplicate:
+        return product_public(duplicate)
     ts = now_iso()
     doc = body.model_dump()
     doc.update({"name": name, "barcode": barcode, "quantity": 0.0, "deleted": False, "created_at": ts, "updated_at": ts})
