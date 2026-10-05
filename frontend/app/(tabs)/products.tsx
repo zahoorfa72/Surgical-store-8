@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,12 +8,14 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { canManageStore, useAuth } from "@/src/auth";
-import { useProducts, useInventoryUsage, qk } from "@/src/data";
+import { useProducts, useInventoryUsage, usePurchases, useSales, qk } from "@/src/data";
 import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeUnitCost, fakeProfit } from "@/src/utils/finance-display";
+
+const formatDetailDate = (value: string) => new Date(value).toLocaleString();
 
 export default function Products() {
   const styles = useStyles();
@@ -28,11 +30,14 @@ export default function Products() {
   const { data: products, isLoading } = useProducts();
   const [usageRange, setUsageRange] = useState<"month" | "year" | "all">("month");
   const { data: usageAnalytics = [] } = useInventoryUsage(usageRange);
+  const { data: purchases = [] } = usePurchases();
+  const { data: sales = [] } = useSales();
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [detailsProduct, setDetailsProduct] = useState<Product | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -205,9 +210,8 @@ export default function Products() {
             return (
               <Pressable
                 testID={`product-row-${item.id}`}
-                disabled={!staff}
                 style={styles.row}
-                onPress={() => router.push(`/product-form?id=${item.id}`)}
+                onPress={() => setDetailsProduct(item)}
               >
                 <View style={styles.rowIcon}>
                   <MaterialDesignIcons name="pill" size={22} color={colors.brandPrimary} />
@@ -256,6 +260,72 @@ export default function Products() {
           <MaterialDesignIcons name="plus" size={28} color={colors.onBrandPrimary} />
         </Pressable>
       )}
+
+      <Modal visible={!!detailsProduct} animationType="slide" onRequestClose={() => setDetailsProduct(null)}>
+        <View style={styles.root}>
+          <ScreenHeader title={detailsProduct?.name ?? "Product details"} subtitle="Complete stock, purchase and sales history" topInset={insets.top} onBack={() => setDetailsProduct(null)} />
+          <FlatList
+            data={[detailsProduct]}
+            keyExtractor={(p) => p?.id ?? "details"}
+            contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30, gap: 12 }}
+            renderItem={() => {
+              const p = detailsProduct;
+              if (!p) return null;
+              const productPurchases = purchases.flatMap((purchase) => purchase.items.filter((line) => line.product_id === p.id).map((line) => ({ purchase, line })));
+              const productSales = sales.flatMap((sale) => sale.items.filter((line) => line.product_id === p.id).map((line, index) => ({ sale, line, index })));
+              return (
+                <View style={{ gap: 12 }}>
+                  <Card>
+                    <Text style={styles.detailTitle}>Current stock</Text>
+                    <Text style={styles.detailBig}>{Number(p.quantity ?? 0)} units</Text>
+                    <Text style={styles.meta}>Sale price {money(p.sale_price)} · Latest buy {money(fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id) + ":latest") : Number(p.cost_layers?.[p.cost_layers.length - 1]?.unit_cost ?? p.purchase_price ?? 0))}</Text>
+                  </Card>
+                  <Card>
+                    <Text style={styles.detailTitle}>Purchase lots ({productPurchases.length})</Text>
+                    {productPurchases.length === 0 && <Text style={styles.meta}>No purchase history found.</Text>}
+                    {productPurchases.map(({ purchase, line }) => {
+                      const unit = fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(purchase.id) + ":" + line.product_id) : Number(line.unit_cost ?? 0);
+                      return <View key={purchase.id + ":" + line.product_id + ":" + String(line.quantity)} style={styles.detailRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.detailName}>{purchase.ref_no} · {line.quantity} units</Text>
+                          <Text style={styles.meta}>{purchase.supplier_name} · {formatDetailDate(purchase.created_at)}</Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.detailValue}>{money(unit)}/unit</Text>
+                          <Text style={styles.meta}>{money(unit * Number(line.quantity ?? 0))}</Text>
+                        </View>
+                      </View>;
+                    })}
+                  </Card>
+                  <Card>
+                    <Text style={styles.detailTitle}>Sales history ({productSales.length})</Text>
+                    {productSales.length === 0 && <Text style={styles.meta}>No sales history found.</Text>}
+                    {productSales.map(({ sale, line, index }) => {
+                      const qty = Number(line.quantity ?? 0);
+                      const sell = Number(line.unit_price ?? 0);
+                      const profit = fakeFinanceDisplay ? fakeProfit(sell, String(sale.id) + ":" + index) * qty : (sell - Number(line.purchase_price ?? 0)) * qty;
+                      return <View key={sale.id + ":" + line.product_id + ":" + String(index)} style={styles.detailRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.detailName}>{sale.invoice_no} · {qty} units</Text>
+                          <Text style={styles.meta}>{sale.customer_name || "Walk-in customer"} · {formatDetailDate(sale.created_at)}</Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.detailValue}>Sell {money(sell * qty)}</Text>
+                          <Text style={styles.detailProfit}>Profit {money(profit)}</Text>
+                        </View>
+                      </View>;
+                    })}
+                  </Card>
+                  {staff && <Pressable testID="edit-product-from-details" style={styles.detailEditBtn} onPress={() => { const id = p.id; setDetailsProduct(null); router.push("/product-form?id=" + id); }}>
+                    <MaterialDesignIcons name="pencil" size={19} color={colors.onBrandPrimary} />
+                    <Text style={styles.detailEditText}>Edit product</Text>
+                  </Pressable>}
+                </View>
+              );
+            }}
+          />
+        </View>
+      </Modal>
 
       <BarcodeScannerModal
         visible={scannerOpen}
@@ -342,6 +412,14 @@ const useStyles = makeStyles((colors) => ({
   rowRight: { alignItems: "flex-end", gap: 2, minWidth: 54 },
   qty: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
   inStock: { fontSize: 11, color: colors.muted },
+  detailTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 5 },
+  detailBig: { fontSize: 26, fontWeight: "900", color: colors.brandPrimary, marginBottom: 4 },
+  detailRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.divider },
+  detailName: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  detailValue: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  detailProfit: { fontSize: 12, fontWeight: "800", color: colors.success },
+  detailEditBtn: { minHeight: 48, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  detailEditText: { color: colors.onBrandPrimary, fontWeight: "800" },
   delBtn: { padding: 4 },
   fab: {
     position: "absolute",
