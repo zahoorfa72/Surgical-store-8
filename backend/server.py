@@ -695,6 +695,7 @@ class CashShiftIn(BaseModel):
 
 
 class AttachmentIn(BaseModel):
+    client_id: str = Field(min_length=8, max_length=100)
     name: str = "Store photo"
     data_url: str = Field(min_length=20)
     created_at: Optional[str] = None
@@ -753,6 +754,14 @@ async def save_attachment(payload: AttachmentIn, user: AnyUser):
         "created_at": payload.created_at or now_iso(),
         "updated_at": now_iso(),
     })
+    existing = await db["attachments"].find_one({
+        "user_id": oid(user["_id"]),
+        "client_id": payload.client_id,
+        "deleted": {"$ne": True},
+    })
+    if existing:
+        await db["attachments"].update_one({"_id": existing["_id"]}, {"$set": doc})
+        return {**doc, "id": oid(existing["_id"])}
     result = await db["attachments"].insert_one(doc)
     return {**doc, "id": oid(result.inserted_id)}
 
