@@ -41,7 +41,7 @@ export default function ProductForm() {
         setName(p.name);
         setBarcode(p.barcode ?? "");
         setExpiryDate(p.expiry_date ?? "");
-        setPurchase(String(p.purchase_price));
+        setPurchase(String(p.cost_layers?.length ? p.cost_layers[p.cost_layers.length - 1].unit_cost : p.purchase_price));
         setSale(String(p.sale_price));
         setThreshold(String(p.low_stock_threshold));
       }
