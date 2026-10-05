@@ -328,8 +328,7 @@ export default function Settings() {
                 <View style={[styles.visibilityThumb, fakeFinanceDisplay && styles.visibilityThumbOn]} />
               </Pressable>
             </View>
-          </View>
-          {suppliers.length > 0 && (
+            {suppliers.length > 0 && (
             <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.divider }}>
               <Text style={styles.cardTitle}>Hide supplier from financial screens</Text>
               <Text style={styles.cardHint}>Select a supplier, then use Hide supplier. Hidden suppliers disappear from supplier financial, purchase-history and payment-history screens. Their data is not deleted.</Text>
