@@ -74,10 +74,28 @@ function inRange(iso: string | undefined, range: string): boolean {
 
 function localReport(range: string): ReportSummary {
   const exactDate = range.startsWith("date:") ? range.slice(5) : null;
-  const exactStart = exactDate ? new Date(`${exactDate}T00:00:00`) : null;
+  const dateRange = range.startsWith("date-range:") ? range.slice(11).split(":") : null;
+  const monthValue = range.startsWith("month:") ? range.slice(6) : null;
+  const yearValue = range.startsWith("year:") ? range.slice(5) : null;
+  const exactStart = exactDate ? new Date(exactDate + "T00:00:00") : null;
   const exactEnd = exactStart ? new Date(exactStart.getTime() + 86400000) : null;
-  const matchesDate = (iso?: string) => !exactStart || (!!iso && new Date(iso) >= exactStart && new Date(iso) < exactEnd!);
-  const filterRows = <T extends { created_at?: string }>(rows: T[]) => exactStart ? rows.filter(r => matchesDate(r.created_at)) : rows.filter(r => inRange(r.created_at, range));
+  const fromStart = dateRange?.[0] ? new Date(dateRange[0] + "T00:00:00") : null;
+  const toEnd = dateRange?.[1] ? new Date(new Date(dateRange[1] + "T00:00:00").getTime() + 86400000) : null;
+  const monthStart = monthValue && /^\\d{4}-\\d{2}$/.test(monthValue) ? new Date(monthValue + "-01T00:00:00") : null;
+  const monthEnd = monthStart ? new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1) : null;
+  const yearStart = yearValue && /^\\d{4}$/.test(yearValue) ? new Date(yearValue + "-01-01T00:00:00") : null;
+  const yearEnd = yearStart ? new Date(yearStart.getFullYear() + 1, 0, 1) : null;
+  const matchesDate = (iso?: string) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    if (exactStart) return d >= exactStart && d < exactEnd!;
+    if (fromStart && toEnd) return d >= fromStart && d < toEnd;
+    if (monthStart && monthEnd) return d >= monthStart && d < monthEnd;
+    if (yearStart && yearEnd) return d >= yearStart && d < yearEnd;
+    return inRange(iso, range);
+  };
+  const customPeriod = !!(exactStart || (fromStart && toEnd) || (monthStart && monthEnd) || (yearStart && yearEnd));
+  const filterRows = <T extends { created_at?: string }>(rows: T[]) => customPeriod ? rows.filter(r => matchesDate(r.created_at)) : rows.filter(r => inRange(r.created_at, range));
   const sales = filterRows(queryClient.getQueryData<Sale[]>(qk.sales) ?? []);
   const purchases = filterRows(queryClient.getQueryData<Purchase[]>(qk.purchases) ?? []);
   const returns = filterRows(queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? []);
@@ -217,6 +235,8 @@ export function useReport(range: string, enabled = true) {
     if (!(await online())) return localReport(range);
     try {
       const tzOffsetMinutes = new Date().getTimezoneOffset();
+      const customPeriod = !!(exactDate || range.startsWith("date-range:") || range.startsWith("month:") || range.startsWith("year:"));
+      if (customPeriod) return localReport(range);
       const url = exactDate
         ? `/reports/summary?range=today&date=${encodeURIComponent(exactDate)}&tz_offset_minutes=${tzOffsetMinutes}`
         : `/reports/summary?range=${range}&tz_offset_minutes=${tzOffsetMinutes}`;
