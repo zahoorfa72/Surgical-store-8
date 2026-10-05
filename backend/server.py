@@ -569,7 +569,7 @@ async def stale_edit_guard(request: Request, call_next):
         expected = request.headers.get("x-expected-updated-at")
         if match and expected:
             collection_name, record_id = match.groups()
-            collection = getattr(db, collection_name)
+            collection = db[collection_name]
             try:
                 current = await collection.find_one({"_id": ObjectId(record_id), "deleted": {"$ne": True}})
             except Exception:
