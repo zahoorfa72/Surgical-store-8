@@ -1,5 +1,5 @@
 import { FlatList, Pressable, Text, View } from "react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import { useParties, qk } from "@/src/data";
 import { Party, PartyType } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { getHiddenSupplierIds, getSecretControlsUnlocked, setSupplierHidden } from "@/src/utils/finance-display";
 
 export default function Parties() {
   const styles = useStyles();
@@ -26,6 +27,18 @@ export default function Parties() {
 
   const { data: parties, isLoading } = useParties(partyType);
   const [toDelete, setToDelete] = useState<Party | null>(null);
+  const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
+  const [secretControlsUnlocked, setSecretControlsUnlockedState] = useState(false);
+
+  useEffect(() => {
+    if (!isSupplier) return;
+    void Promise.all([getHiddenSupplierIds(), getSecretControlsUnlocked()]).then(([ids, unlocked]) => {
+      setHiddenSupplierIds(ids);
+      setSecretControlsUnlockedState(unlocked);
+    });
+  }, [isSupplier]);
+
+  const visibleParties = isSupplier ? (parties ?? []).filter((party) => !hiddenSupplierIds.includes(party.id)) : (parties ?? []);
 
   const confirmDelete = async () => {
     if (!toDelete) return;
@@ -52,7 +65,7 @@ export default function Parties() {
         <Loader />
       ) : (
         <FlatList
-          data={parties}
+          data={visibleParties}
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 120, gap: 10 }}
           ListEmptyComponent={
@@ -77,6 +90,20 @@ export default function Parties() {
                 {!!item.phone && <Text style={styles.meta}>{item.phone}</Text>}
                 {!!item.address && <Text style={styles.sub}>{item.address}</Text>}
               </View>
+              {admin && secretControlsUnlocked && isSupplier && (
+                <Pressable
+                  testID={`hide-supplier-${item.id}`}
+                  hitSlop={8}
+                  onPress={async () => {
+                    await setSupplierHidden(item.id, true);
+                    setHiddenSupplierIds((current) => current.includes(item.id) ? current : [...current, item.id]);
+                    toast("Supplier hidden", "success");
+                  }}
+                  style={styles.delBtn}
+                >
+                  <MaterialDesignIcons name="eye-off-outline" size={20} color={colors.muted} />
+                </Pressable>
+              )}
               {admin && <Pressable testID={`delete-party-${item.id}`} hitSlop={8} onPress={() => setToDelete(item)} style={styles.delBtn}>
                 <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
               </Pressable>}
