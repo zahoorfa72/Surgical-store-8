@@ -20,6 +20,7 @@ import { apiRequest, getWriteQueueCount } from "@/src/api";
 import { isAdmin, useAuth } from "@/src/auth";
 import { money, ScreenHeader, Card, Badge, useToast, formatDateTime } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeUnitCost, fakeReportProfit } from "@/src/utils/finance-display";
 import { storage } from "@/src/utils/storage";
 
 type Tab = "overview" | "stock" | "statements" | "audit";
@@ -46,6 +47,7 @@ function signedAmount(kind: string, amount: number) {
 export default function BusinessIntelligence() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -140,7 +142,7 @@ export default function BusinessIntelligence() {
     if (!selectedProduct) return [];
     const rows: { date: string; type: string; quantity: number; detail: string }[] = [];
     for (const p of purchases) for (const it of p.items ?? []) if (it.product_id === selectedProduct.id)
-      rows.push({ date: p.created_at, type: "Purchase", quantity: Number(it.quantity ?? 0), detail: `${p.ref_no} · ${money(Number(it.unit_cost ?? 0))}/unit · ${p.supplier_name}` });
+      rows.push({ date: p.created_at, type: "Purchase", quantity: Number(it.quantity ?? 0), detail: `${p.ref_no} · ${money(fakeFinanceDisplay ? fakeUnitCost(Number(selectedProduct?.sale_price ?? 0), String(selectedProduct.id)+":"+p.created_at+":"+it.product_id) : Number(it.unit_cost ?? 0))}/unit · ${p.supplier_name}` });
     for (const s of sales) for (const it of s.items ?? []) if (it.product_id === selectedProduct.id)
       rows.push({ date: s.created_at, type: "Sale", quantity: -Number(it.quantity ?? 0), detail: `${s.invoice_no} · ${money(Number(it.unit_price ?? 0))}/unit · ${s.customer_name}` });
     for (const r of returns) for (const it of r.items ?? []) if (it.product_id === selectedProduct.id)
@@ -158,7 +160,7 @@ export default function BusinessIntelligence() {
         ref: p.ref_no,
         supplier: p.supplier_name,
         qty: Number(it.quantity ?? 0),
-        cost: Number(it.unit_cost ?? 0),
+        cost: fakeFinanceDisplay ? fakeUnitCost(Number(selectedProduct?.sale_price ?? 0), String(selectedProduct.id)+":"+p.created_at+":"+it.product_id) : Number(it.unit_cost ?? 0),
       })))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [purchases, selectedProduct]);
@@ -243,7 +245,7 @@ export default function BusinessIntelligence() {
               <Text style={styles.cardHint}>Operational intelligence only — existing finance calculations are read as-is.</Text>
               <View style={styles.stats}>
                 <Stat label="Monthly sales" value={money(Number(report?.revenue ?? 0))} icon="cash" />
-                <Stat label="Gross profit" value={money(Number(report?.gross_profit ?? 0))} icon="chart-line" />
+                <Stat label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(report) : Number(report?.gross_profit ?? 0))} icon="chart-line" />
                 <Stat label="Products" value={String(products.length)} icon="package-variant" />
                 <Stat label="Low stock" value={String(reorderRows.length)} icon="alert-circle" />
               </View>
