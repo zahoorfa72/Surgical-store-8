@@ -215,7 +215,7 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Purchase lots" : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
+                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":latest") : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
                   </Text>
                   {!!item.cost_layers?.length && (
                     <View style={{ gap: 2, marginTop: 3 }}>
