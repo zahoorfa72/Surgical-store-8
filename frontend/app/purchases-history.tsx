@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, SectionList, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -11,6 +11,7 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Purchase } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { getHiddenSupplierIds } from "@/src/utils/finance-display";
 import { useFakeFinanceDisplay, fakePurchaseTotal } from "@/src/utils/finance-display";
 
 export default function PurchasesHistory() {
@@ -32,6 +33,8 @@ export default function PurchasesHistory() {
   const [date, setDate] = useState("");
   const [toDelete, setToDelete] = useState<Purchase | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
+  useEffect(() => { void getHiddenSupplierIds().then(setHiddenSupplierIds); }, []);
 
   // Total refunded per purchase, from the purchase-returns cache (works both
   // offline and online — the /purchases list endpoint omits return data).
@@ -50,11 +53,12 @@ export default function PurchasesHistory() {
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
     const localDate = (iso: string) => { const x = new Date(iso); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
     return (purchases ?? []).filter((p) => {
+      if (p.supplier_id && hiddenSupplierIds.includes(p.supplier_id)) return false;
       const matchesSearch = !q || p.ref_no.toLowerCase().includes(q) || p.supplier_name.toLowerCase().includes(q);
       const matchesDate = !validDate || localDate(String(p.created_at ?? "")) === d;
       return matchesSearch && matchesDate;
     });
-  }, [purchases, search, date]);
+  }, [purchases, search, date, hiddenSupplierIds]);
 
   // Group purchases by supplier so each supplier is shown separately, each with
   // its own net (after supplier returns) subtotal.
