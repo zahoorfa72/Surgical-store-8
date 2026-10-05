@@ -213,7 +213,10 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       // offline returns can safely reference a sale/purchase created offline.
       const box = await getOutbox();
       const idMap: Record<string, string> = {};
-      let dropped = 0;
+      // Sync generic records first so products created directly from
+      // Purchase/Sell exist before their queued transactions are replayed.
+      const preWriteRes = await flushWriteQueue(idMap);
+      let dropped = preWriteRes.dropped;
       const syncedSales: SyncedRow[] = [];
       const syncedPurchases: SyncedRow[] = [];
       if (box.length) {
@@ -255,7 +258,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       }
       await queryClient.invalidateQueries({ queryKey: qk.products });
       const writeRes = await flushWriteQueue(idMap);
-      dropped = writeRes.dropped;
+      dropped += writeRes.dropped;
       // Settings logo uploads use multipart/form-data and therefore have their
       // own small offline queue. Flush it after normal JSON writes.
       await flushOfflineLogo();
@@ -265,8 +268,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       }
       if (!box.length) {
         await refreshPending();
-        if (writeRes.synced > 0 || writeRes.dropped > 0) {
-          setSyncSummary({ sales: [], purchases: [], others: writeRes.synced, dropped: writeRes.dropped });
+        if (preWriteRes.synced > 0 || writeRes.synced > 0 || dropped > 0) {
+          setSyncSummary({ sales: [], purchases: [], others: preWriteRes.synced + writeRes.synced, dropped });
         }
         return;
       }
