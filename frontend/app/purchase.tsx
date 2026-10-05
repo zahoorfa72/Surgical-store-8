@@ -38,6 +38,10 @@ export default function Purchase() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [productSearch, setProductSearch] = useState("");
+  const [productCreateOpen, setProductCreateOpen] = useState(false);
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductBarcode, setNewProductBarcode] = useState("");
+  const [newProductSalePrice, setNewProductSalePrice] = useState("");
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
   const [supplierCreateOpen, setSupplierCreateOpen] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState("");
@@ -103,6 +107,39 @@ export default function Purchase() {
     const q = productSearch.trim().toLowerCase();
     return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q) || String((p as any).category ?? "").toLowerCase().includes(q) || String((p as any).barcode ?? (p as any).sku ?? "").toLowerCase().includes(q));
   }, [products, productSearch]);
+  const createProductForPurchase = async () => {
+    const name = newProductName.trim();
+    const barcode = newProductBarcode.trim();
+    const salePrice = Math.max(0, parseFloat(newProductSalePrice) || 0);
+    if (!name) { toast("Enter product name", "error"); return; }
+    const normalize = (v: string) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const existing = (products ?? []).find((p: any) =>
+      (barcode && String(p.barcode ?? "").trim() === barcode) || normalize(p.name) === normalize(name)
+    );
+    if (existing) {
+      setLines((prev) => prev.some((l) => l.id === existing.id) ? prev : [...prev, { id: existing.id, name: existing.name, quantity: 1, unit_cost: Number(existing.purchase_price ?? 0) }]);
+      setProductCreateOpen(false);
+      setNewProductName(""); setNewProductBarcode(""); setNewProductSalePrice("");
+      toast("Existing product found — added to this purchase", "info");
+      return;
+    }
+    try {
+      const created = await apiRequest<any>("/products", {
+        method: "POST",
+        body: { name, barcode, purchase_price: 0, sale_price: salePrice, low_stock_threshold: 5, expiry_date: null },
+      });
+      const id = String(created.id);
+      setLines((prev) => [...prev, { id, name, quantity: 1, unit_cost: 0 }]);
+      await queryClient.invalidateQueries({ queryKey: qk.products });
+      setProductCreateOpen(false);
+      setPickerOpen(false);
+      setNewProductName(""); setNewProductBarcode(""); setNewProductSalePrice("");
+      toast("Product created — enter quantity and purchase cost, then save. Stock will be added without a duplicate.", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not create product", "error");
+    }
+  };
+
   const addSelectedProducts = () => {
     const selected = products?.filter((p) => selectedProductIds.has(p.id) && !lineIds.has(p.id)) ?? [];
     if (!selected.length) {
@@ -226,7 +263,15 @@ export default function Purchase() {
         <View style={styles.root}>
           <ScreenHeader title="Add products" subtitle="Select multiple items at once" topInset={insets.top} onBack={() => { setSelectedProductIds(new Set()); setProductSearch(""); setPickerOpen(false); }} />
           <View style={styles.searchWrap}><MaterialDesignIcons name="magnify" size={20} color={colors.muted} /><TextInput testID="purchase-product-search" style={styles.searchInput} placeholder="Search product, category or SKU" placeholderTextColor={colors.muted} value={productSearch} onChangeText={setProductSearch} /><Pressable onPress={() => setProductSearch("")} hitSlop={8}><MaterialDesignIcons name="close-circle" size={18} color={colors.muted} /></Pressable></View>
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 90, gap: 8 }}>
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 90, gap: 8 }}>            <Pressable
+              testID="create-product-from-purchase"
+              style={styles.createPartyBtn}
+              onPress={() => setProductCreateOpen(true)}
+            >
+              <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.createPartyText}>+ Add product not in stock</Text>
+            </Pressable>
+
             {filteredPickerProducts.map((p) => {
               const added = lineIds.has(p.id);
               const selected = selectedProductIds.has(p.id);
@@ -257,6 +302,26 @@ export default function Purchase() {
               <Text style={styles.saveText}>Add selected</Text>
             </Pressable>
           </View>
+        </View>
+      </Modal>
+
+
+      <Modal visible={productCreateOpen} animationType="slide" onRequestClose={() => setProductCreateOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Add product" subtitle="Create it here, then purchase stock" topInset={insets.top} onBack={() => setProductCreateOpen(false)} />
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }}>
+            <Text style={styles.formLabel}>Product name *</Text>
+            <TextInput testID="new-purchase-product-name" style={styles.formInput} placeholder="Product name" placeholderTextColor={colors.muted} value={newProductName} onChangeText={setNewProductName} />
+            <Text style={styles.formLabel}>Barcode / SKU</Text>
+            <TextInput testID="new-purchase-product-barcode" style={styles.formInput} placeholder="Optional barcode" placeholderTextColor={colors.muted} value={newProductBarcode} onChangeText={setNewProductBarcode} />
+            <Text style={styles.formLabel}>Sale price</Text>
+            <TextInput testID="new-purchase-product-sale-price" style={styles.formInput} keyboardType="numeric" placeholder="0" placeholderTextColor={colors.muted} value={newProductSalePrice} onChangeText={setNewProductSalePrice} />
+            <Text style={styles.hint}>The purchase quantity and real purchase cost are entered on the purchase line. The same product record is used, so stock is not duplicated.</Text>
+            <Pressable testID="save-new-purchase-product" style={styles.createPartySaveBtn} onPress={createProductForPurchase}>
+              <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
+              <Text style={styles.saveText}>Create & Add to Purchase</Text>
+            </Pressable>
+          </ScrollView>
         </View>
       </Modal>
 
