@@ -1184,14 +1184,51 @@ async def list_parties(_: AnyUser, type: Optional[PartyType] = None):
     return [party_public(d, balances.get(oid(d["_id"]), 0.0)) for d in docs]
 
 
-@api.post("/parties", response_model=PartyOut, status_code=201)
+def _party_name_key(value: str) -> str:
+    # Stable, human-friendly duplicate key: ignore case, spaces and punctuation.
+    return re.sub(r"[^\\w]+", "", (value or "").strip().casefold(), flags=re.UNICODE)
+
+def _party_phone_key(value: str) -> str:
+    return re.sub(r"\\D+", "", value or "")
+
+@api.post("/parties", status_code=201)
 async def create_party(body: PartyIn, _: Staff):
-    doc = body.model_dump()
-    doc["type"] = body.type.value
-    doc.update({"deleted": False, "created_at": now_iso()})
+    name = body.name.strip()
+    phone = body.phone.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Party name is required")
+
+    name_key = _party_name_key(name)
+    phone_key = _party_phone_key(phone)
+
+    # Server-side dedupe is mandatory because two phones/devices can sync the
+    # same offline-created party. Never match an empty phone.
+    existing_rows = await db.parties.find({
+        "type": body.type.value,
+        "deleted": {"$ne": True},
+    }).to_list(10000)
+    for existing in existing_rows:
+        existing_name_key = _party_name_key(str(existing.get("name", "")))
+        existing_phone_key = _party_phone_key(str(existing.get("phone", "")))
+        if (phone_key and existing_phone_key and phone_key == existing_phone_key) or (
+            name_key and existing_name_key and name_key == existing_name_key
+        ):
+            return {**party_public(existing), "existing": True}
+
+    doc = {
+        "name": name,
+        "type": body.type.value,
+        "phone": phone,
+        "address": body.address.strip(),
+        "dedupe_name_key": name_key,
+        "dedupe_phone_key": phone_key,
+        "deleted": False,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
     res = await db.parties.insert_one(doc)
     doc["_id"] = res.inserted_id
-    return party_public(doc)
+    return {**party_public(doc), "existing": False}
 
 
 @api.put("/parties/{party_id}", response_model=PartyOut)
