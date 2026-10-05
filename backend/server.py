@@ -487,8 +487,13 @@ async def _migrate_legacy_cost_layers() -> dict:
     migrated = 0
     reconciled = 0
     for product in products:
-        if product.get("cost_layers"): continue
         pid = str(product["_id"])
+        existing_layers = product.get("cost_layers") or []
+        target_qty = float(product.get("quantity", 0) or 0)
+        existing_qty = sum(float(x.get("quantity", 0) or 0) for x in existing_layers)
+        # Rebuild only when layers are missing or no longer reconcile to stock.
+        if existing_layers and abs(existing_qty - target_qty) <= 1e-9:
+            continue
         layers = [{"quantity": q, "unit_cost": cost, "purchase_id": purchase_id}
                   for _, q, cost, purchase_id in purchases_by_product.get(pid, []) if q > 0]
         for _, kind, qty, unit_cost in sorted(events.get(pid, []), key=lambda x: x[0]):
