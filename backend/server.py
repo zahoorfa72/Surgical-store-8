@@ -579,7 +579,41 @@ async def stale_edit_guard(request: Request, call_next):
                     status_code=409,
                     content={"detail": "This record changed on another device. Refresh before saving your changes."},
                 )
-    return await call_next(request)
+
+    response = await call_next(request)
+
+    # Persist a lightweight server audit event for business mutations. No request
+    # body is stored here, so passwords/tokens or sale details cannot leak into
+    # the audit collection. Audit failures never break the business request.
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and not request.url.path.startswith("/api/auth/"):
+        try:
+            actor = "unknown"
+            actor_id = None
+            auth = request.headers.get("authorization", "")
+            if auth.lower().startswith("bearer "):
+                try:
+                    payload = jwt.decode(auth.split(" ", 1)[1], JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                    uid = payload.get("sub")
+                    if uid and ObjectId.is_valid(uid):
+                        actor_doc = await db.users.find_one({"_id": ObjectId(uid)})
+                        if actor_doc:
+                            actor = actor_doc.get("name") or actor_doc.get("email") or "unknown"
+                            actor_id = str(actor_doc.get("_id"))
+                except Exception:
+                    pass
+            await db["audit"].insert_one({
+                "action": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "user_id": actor_id,
+                "user_name": actor,
+                "created_at": now_iso(),
+                "deleted": False,
+            })
+        except Exception:
+            pass
+
+    return response
 
 
 
@@ -643,6 +677,25 @@ async def next_seq(name: str) -> int:
     )
     return doc["seq"]
 
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+@api.get("/audit")
+async def list_audit(_: AdminOnly, limit: int = Query(500, ge=1, le=1000)):
+    rows = await db["audit"].find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+    return [
+        {
+            "id": oid(row["_id"]),
+            "action": row.get("action", ""),
+            "method": row.get("action", ""),
+            "path": row.get("path", ""),
+            "status": row.get("status"),
+            "user_name": row.get("user_name", "unknown"),
+            "created_at": row.get("created_at", ""),
+        }
+        for row in rows
+    ]
 
 # ---------------------------------------------------------------------------
 # Auth routes
