@@ -89,7 +89,7 @@ async function parseError(res: Response): Promise<string> {
 const WRITE_OUTBOX = "ssm.writeq.v1";
 const WRITE_SEQ = "ssm.writeseq.v1";
 
-type WriteOp = { id: string; method: string; path: string; body: any };
+type WriteOp = { id: string; method: string; path: string; body: any; expected_updated_at?: string };
 
 const QUEUEABLE = ["/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings"];
 function isQueueable(path: string): boolean {
@@ -666,7 +666,7 @@ async function persistLiveCache() {
   }
 }
 
-async function queueWrite(method: string, path: string, body: any): Promise<any> {
+async function queueWrite(method: string, path: string, body: any, expectedUpdatedAt?: string): Promise<any> {
   const seq = await nextSeq();
   const tempId = `local-${entityOf(path)}-${seq}`;
   applyOptimistic(method, path, body, tempId);
@@ -686,7 +686,7 @@ async function queueWrite(method: string, path: string, body: any): Promise<any>
       return { id: targetId, ...(body ?? {}), pending: true };
     }
   }
-  queue.push({ id: tempId, method, path, body });
+  queue.push({ id: tempId, method, path, body, expected_updated_at: expectedUpdatedAt });
   await setWriteQueue(queue);
   await persistLiveCache();
   return { id: tempId, ...(body ?? {}), pending: true };
@@ -720,7 +720,11 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
       };
       const resolvedPath = resolveRefs(op.path);
       const resolvedBody = resolveRefs(op.body);
-      const result = await rawRequest<any>(resolvedPath, { method: op.method, body: resolvedBody });
+      const result = await rawRequest<any>(resolvedPath, {
+        method: op.method,
+        body: resolvedBody,
+        headers: op.expected_updated_at ? { "If-Unmodified-Since": op.expected_updated_at } : undefined,
+      });
       // Keep a local->server ID map for every generic POST. This is important
       // when an offline record is created and then edited/deleted before sync.
       if (op.method === "POST" && op.id?.startsWith("local-") && result?.id) {
@@ -744,7 +748,7 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
 // A fetch that never queues (used for reads, auth, and queue replay).
 export async function rawRequest<T = any>(
   path: string,
-  options: { method?: string; body?: any } = {},
+  options: { method?: string; body?: any; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
@@ -764,12 +768,13 @@ export async function apiRequest<T = any>(
 ): Promise<T> {
   const method = options.method ?? "GET";
   const mode = await getConnectionMode();
+  const expectedUpdatedAt = (method === "PUT" || method === "DELETE") ? getCachedUpdatedAt(path) : undefined;
 
   // Manual Offline mode: never touch the server. Writes are queued locally;
   // reads are served from the React Query cache populated by local persistence.
   if (mode === "offline") {
     if (method !== "GET" && isQueueable(path)) {
-      const queued = await queueWrite(method, path, options.body);
+      const queued = await queueWrite(method, path, options.body, expectedUpdatedAt);
       await recordLocalAudit(method, path, undefined, options.body);
       return queued as T;
     }
@@ -781,18 +786,40 @@ export async function apiRequest<T = any>(
   }
 
   try {
-    const result = await rawRequest<T>(path, options);
+    const result = await rawRequest<T>(path, { ...options, headers: expectedUpdatedAt ? { "If-Unmodified-Since": expectedUpdatedAt } : undefined });
     await recordLocalAudit(method, path, 200, options.body);
     return result;
   } catch (e) {
     if (e instanceof ApiError) throw e;
     if (method !== "GET" && isQueueable(path)) {
-      const queued = await queueWrite(method, path, options.body);
+      const queued = await queueWrite(method, path, options.body, expectedUpdatedAt);
       await recordLocalAudit(method, path, undefined, options.body);
       return queued as T;
     }
     throw e;
   }
+}
+
+function getCachedUpdatedAt(path: string): string | undefined {
+  const match = path.match(/^\/(products|sales|purchases|parties|payments|expenses|returns|purchase-returns|users)\/([^?]+)/);
+  if (!match) return undefined;
+  const [, entity, id] = match;
+  const candidates: any[] = [];
+  if (entity === "sales") candidates.push(queryClient.getQueryData(["sale", id]), ...(queryClient.getQueryData<any[]>(["sales"]) ?? []));
+  else if (entity === "purchases") candidates.push(queryClient.getQueryData(["purchase", id]), ...(queryClient.getQueryData<any[]>(["purchases"]) ?? []));
+  else if (entity === "products") candidates.push(...(queryClient.getQueryData<any[]>(["products"]) ?? []));
+  else if (entity === "users") candidates.push(...(queryClient.getQueryData<any[]>(["users"]) ?? []));
+  else if (entity === "payments") candidates.push(...(queryClient.getQueryData<any[]>(["payments", "all"]) ?? []));
+  else if (entity === "expenses") candidates.push(...(queryClient.getQueryData<any[]>(["expenses", "all"]) ?? []));
+  else if (entity === "returns") candidates.push(...(queryClient.getQueryData<any[]>(["returns"]) ?? []));
+  else if (entity === "purchase-returns") candidates.push(...(queryClient.getQueryData<any[]>(["purchase-returns"]) ?? []));
+  else if (entity === "parties") {
+    candidates.push(...(queryClient.getQueryData<any[]>(["parties", "all"]) ?? []));
+    candidates.push(...(queryClient.getQueryData<any[]>(["parties", "supplier"]) ?? []));
+    candidates.push(...(queryClient.getQueryData<any[]>(["parties", "customer"]) ?? []));
+  }
+  const found = candidates.find((row) => row?.id === id);
+  return found?.updated_at ? String(found.updated_at) : undefined;
 }
 
 function localCacheForPath(path: string): any {
