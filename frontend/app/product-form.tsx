@@ -51,6 +51,26 @@ export default function ProductForm() {
       toast("Enter a product name", "error");
       return;
     }
+    const normalizedName = name.trim().toLowerCase();
+    const normalizedBarcode = barcode.trim();
+    const duplicate = (products ?? []).find((p) =>
+      p.id !== id &&
+      ((normalizedBarcode && String(p.barcode ?? "").trim() === normalizedBarcode) ||
+       p.name.trim().toLowerCase() === normalizedName)
+    );
+    if (duplicate) {
+      toast(
+        normalizedBarcode && String(duplicate.barcode ?? "").trim() === normalizedBarcode
+          ? "Duplicate barcode: this product already exists"
+          : "Duplicate product name: check the existing item before creating another",
+        "error",
+      );
+      return;
+    }
+    if (expiryDate.trim() && Number.isNaN(new Date(expiryDate.trim()).getTime())) {
+      toast("Use a valid expiry date such as 2027-12-31", "error");
+      return;
+    }
     setBusy(true);
     const body = {
       name: name.trim(),
