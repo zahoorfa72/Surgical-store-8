@@ -11,12 +11,14 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Sale } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeSaleProfit } from "@/src/utils/finance-display";
 
 // Shared sales/receipt list used by the Receipts tab (cashier) and the
 // Sales history modal (staff). Admins get inline edit/delete.
 export function SalesListView({ onBack }: { onBack?: () => void }) {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -140,7 +142,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
             const refunded = refundBySale[item.id] ?? 0;
             const refundedProfit = refundProfitBySale[item.id] ?? 0;
             const net = Math.max(0, Number(item.total ?? 0) - refunded);
-            const saleProfit = Number(item.profit ?? 0) - refundedProfit;
+            const saleProfit = fakeFinanceDisplay ? fakeSaleProfit(item) : Number(item.profit ?? 0) - refundedProfit;
             return (
               <Pressable
                 testID={`receipt-row-${item.id}`}
