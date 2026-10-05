@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
@@ -38,7 +38,17 @@ export default function Dashboard() {
   const { data: payments = [] } = usePayments();
   const { data: expenses = [] } = useExpenses();
   const { data: returns = [] } = useReturns();
-  useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void getFinanceDetailDrilldown().then((enabled) => {
+        if (active) setFinanceDetailDrilldown(enabled);
+      });
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
 
   return (
     <View style={styles.root}>
