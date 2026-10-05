@@ -11,10 +11,12 @@ import { useProducts, qk } from "@/src/data";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
 export default function ProductForm() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -113,7 +115,20 @@ export default function ProductForm() {
             <MaterialDesignIcons name="barcode-scan" size={24} color={colors.onBrandPrimary} />
           </Pressable>
         </View>
-        <Field label="Purchase price (per unit)" testID="product-purchase-input" value={purchase} onChangeText={setPurchase} keyboardType="numeric" />
+        <Field
+          label={fakeFinanceDisplay ? "Purchase price (private)" : "Purchase price (per unit)"}
+          testID="product-purchase-input"
+          value={purchase}
+          onChangeText={setPurchase}
+          keyboardType="numeric"
+          secureTextEntry={fakeFinanceDisplay}
+          editable={!fakeFinanceDisplay || !id}
+        />
+        {fakeFinanceDisplay && (
+          <Text style={styles.privateHint}>
+            Display purchase: {money(fakeUnitCost(Number(sale), id || name || "new-product"))} · 15–20% display margin. Real cost is hidden and unchanged.
+          </Text>
+        )}
         <Field label="Sale price (per unit)" testID="product-sale-input" value={sale} onChangeText={setSale} keyboardType="numeric" />
         <Field label="Expiry date" hint="Optional · use YYYY-MM-DD" testID="product-expiry-input" value={expiryDate} onChangeText={setExpiryDate} placeholder="YYYY-MM-DD" autoCapitalize="none" />
         <Field label="Low-stock alert at" hint="Warn when quantity falls to this level" testID="product-threshold-input" value={threshold} onChangeText={setThreshold} keyboardType="numeric" />
