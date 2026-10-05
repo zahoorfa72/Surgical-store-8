@@ -332,6 +332,7 @@ class SaleIn(BaseModel):
     discount: float = 0
     note: str = ""
     credit: bool = False  # if true (with a customer), adds to customer's owed balance
+    allow_negative_stock: bool = False  # explicit override: permit selling below zero stock
 
 
 # ----- Purchase models -----
