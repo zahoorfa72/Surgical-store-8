@@ -501,7 +501,10 @@ async def _migrate_legacy_cost_layers() -> dict:
             if kind == "sale_return":
                 layers = _append_cost_layer(layers, qty, unit_cost, None)
             else:
-                layers, _ = _consume_cost_layers_matching(layers, qty, unit_cost)
+                available_layers = sum(float(x.get("quantity", 0) or 0) for x in layers)
+                consume_qty = min(qty, max(0.0, available_layers))
+                if consume_qty > 1e-9:
+                    layers, _ = _consume_cost_layers_matching(layers, consume_qty, unit_cost)
         target = float(product.get("quantity", 0) or 0)
         current = sum(float(x.get("quantity", 0) or 0) for x in layers)
         diff = target - current
