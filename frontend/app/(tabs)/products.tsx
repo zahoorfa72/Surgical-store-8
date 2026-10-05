@@ -13,6 +13,7 @@ import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
 export default function Products() {
   const styles = useStyles();
@@ -30,6 +31,7 @@ export default function Products() {
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const [scannerOpen, setScannerOpen] = useState(false);
 
   useFocusEffect(
@@ -53,8 +55,11 @@ export default function Products() {
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
     const costValue = rows.reduce((n, p) => n + (p.cost_layers?.length
-      ? p.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
-      : Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0)), 0);
+      ? p.cost_layers.reduce((sum, layer, index) => {
+          const unit = fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0);
+          return sum + Number(layer.quantity ?? 0) * unit;
+        }, 0)
+      : Number(p.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id)) : Number(p.purchase_price ?? 0))), 0);
     const retailValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.sale_price ?? 0), 0);
     return { costValue, retailValue, potentialProfit: retailValue - costValue };
   }, [products]);
@@ -192,13 +197,13 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Purchase lots" : "Buy " + money(item.purchase_price)}
+                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Purchase lots" : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
                   </Text>
                   {!!item.cost_layers?.length && (
                     <View style={{ gap: 2, marginTop: 3 }}>
                       {item.cost_layers.map((layer, index) => (
                         <Text key={`${item.id}-lot-${index}`} style={styles.lotText}>
-                          Lot {index + 1}: {Number(layer.quantity)} × {money(Number(layer.unit_cost))}
+                          Lot {index + 1}: {Number(layer.quantity)} × {money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost)}
                         </Text>
                       ))}
                     </View>
@@ -206,10 +211,10 @@ export default function Products() {
                   {showInventoryProfitMargin && (
                     <Text style={styles.itemFinance}>
                       Stock value {money(item.cost_layers?.length
-                        ? item.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
-                        : Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0))} · Margin {money(Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - (item.cost_layers?.length
-                          ? item.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
-                          : Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0)))}
+                        ? item.cost_layers.reduce((sum, layer, index) => sum + Number(layer.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0)), 0)
+                        : Number(item.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0)))} · Margin {money(Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - (item.cost_layers?.length
+                          ? item.cost_layers.reduce((sum, layer, index) => sum + Number(layer.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0)), 0)
+                          : Number(item.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0)))}
                     </Text>
                   )}
                 </View>
