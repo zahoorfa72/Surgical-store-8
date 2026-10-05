@@ -10,6 +10,11 @@ import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
 
+const displayFinanceAmount = (value: unknown, fake: boolean) => {
+  const amount = Number(value ?? 0) || 0;
+  return fake ? amount * 0.825 : amount;
+};
+
 const RANGES = [
   { key: "today", label: "Today" },
   { key: "week", label: "This Week" },
@@ -116,10 +121,82 @@ export default function Dashboard() {
             <View style={styles.root}>
               <ScreenHeader title={financeDetailsOpen === "revenue" ? "Revenue details" : financeDetailsOpen === "net" ? "Net profit details" : "Remaining balance details"} subtitle="Complete money in / money out" topInset={insets.top} onBack={() => setFinanceDetailsOpen(null)} />
               <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30, gap: 12 }}>
-                {financeDetailsOpen === "revenue" && <Card><Text style={styles.detailHeader}>Revenue & returns</Text>{sales.map((s:any) => <View key={s.id} style={styles.detailLine}><Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}
-{new Date(s.created_at).toLocaleString()}</Text><Text style={styles.detailValue}>{money(s.total)}</Text></View>)}{returns.map((r:any) => <View key={"r"+r.id} style={styles.detailLine}><Text style={styles.detailLabel}>Return · {r.invoice_no}</Text><Text style={styles.detailOut}>-{money(r.refund_total)}</Text></View>)}</Card>}
-                {financeDetailsOpen === "net" && <Card><Text style={styles.detailHeader}>Profit details</Text>{sales.map((s:any) => <View key={s.id} style={styles.detailLine}><Text style={styles.detailLabel}>{s.invoice_no} · Revenue {money(s.total)} · COGS {money(s.cogs)}</Text><Text style={styles.detailValue}>{money(fakeFinanceDisplay ? fakeReportNetProfit({ revenue: s.total }) : s.profit)}</Text></View>)}{expenses.map((e:any) => <View key={e.id} style={styles.detailLine}><Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text><Text style={styles.detailOut}>-{money(e.amount)}</Text></View>)}</Card>}
-                {financeDetailsOpen === "balance" && <><Card><Text style={styles.detailHeader}>Money in</Text>{sales.filter((s:any)=>!s.credit).map((s:any)=><View key={s.id} style={styles.detailLine}><Text style={styles.detailLabel}>{s.invoice_no} · Customer sale</Text><Text style={styles.detailValue}>+{money(s.total)}</Text></View>)}{payments.filter((p:any)=>p.kind==="receive"||p.kind==="supplier_refund").map((p:any)=><View key={p.id} style={styles.detailLine}><Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text><Text style={styles.detailValue}>+{money(p.amount)}</Text></View>)}</Card><Card><Text style={styles.detailHeader}>Money out</Text>{payments.filter((p:any)=>p.kind==="pay"||p.kind==="customer_refund").map((p:any)=><View key={p.id} style={styles.detailLine}><Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text><Text style={styles.detailOut}>-{money(p.amount)}</Text></View>)}{expenses.filter((e:any)=>e.bucket==="cogs"||e.bucket==="operating").map((e:any)=><View key={e.id} style={styles.detailLine}><Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text><Text style={styles.detailOut}>-{money(e.amount)}</Text></View>)}</Card><Card><Text style={styles.detailHeader}>Remaining balance</Text><Text style={styles.detailBig}>{money(data.remaining_balance)}</Text></Card></>}
+                {financeDetailsOpen === "revenue" && (
+                  <Card>
+                    <Text style={styles.detailHeader}>Revenue & returns</Text>
+                    {sales.map((s: any) => (
+                      <View key={s.id} style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}{"\n"}{new Date(s.created_at).toLocaleString()}</Text>
+                        <Text style={styles.detailValue}>{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
+                      </View>
+                    ))}
+                    {returns.map((r: any) => (
+                      <View key={"r" + r.id} style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Return · {r.invoice_no}</Text>
+                        <Text style={styles.detailOut}>-{money(displayFinanceAmount(r.refund_total, fakeFinanceDisplay))}</Text>
+                      </View>
+                    ))}
+                  </Card>
+                )}
+                {financeDetailsOpen === "net" && (
+                  <Card>
+                    <Text style={styles.detailHeader}>Profit details</Text>
+                    {sales.map((s: any) => {
+                      const fakeProfit = fakeReportProfit({ revenue: s.total });
+                      const fakeCogs = Math.max(0, Number(s.total || 0) - fakeProfit);
+                      return (
+                        <View key={s.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{s.invoice_no} · Revenue {money(displayFinanceAmount(s.total))} · COGS {money(fakeFinanceDisplay ? fakeCogs : s.cogs)}</Text>
+                          <Text style={styles.detailValue}>{money(fakeFinanceDisplay ? fakeProfit : s.profit)}</Text>
+                        </View>
+                      );
+                    })}
+                    {expenses.map((e: any) => (
+                      <View key={e.id} style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text>
+                        <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
+                      </View>
+                    ))}
+                  </Card>
+                )}
+                {financeDetailsOpen === "balance" && (
+                  <>
+                    <Card>
+                      <Text style={styles.detailHeader}>Money in</Text>
+                      {sales.filter((s: any) => !s.credit).map((s: any) => (
+                        <View key={s.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{s.invoice_no} · Customer sale</Text>
+                          <Text style={styles.detailValue}>+{money(displayFinanceAmount(s.total))}</Text>
+                        </View>
+                      ))}
+                      {payments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").map((p: any) => (
+                        <View key={p.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
+                          <Text style={styles.detailValue}>+{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
+                        </View>
+                      ))}
+                    </Card>
+                    <Card>
+                      <Text style={styles.detailHeader}>Money out</Text>
+                      {payments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").map((p: any) => (
+                        <View key={p.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
+                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(p.amount))}</Text>
+                        </View>
+                      ))}
+                      {expenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").map((e: any) => (
+                        <View key={e.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text>
+                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount))}</Text>
+                        </View>
+                      ))}
+                    </Card>
+                    <Card>
+                      <Text style={styles.detailHeader}>Remaining balance</Text>
+                      <Text style={styles.detailBig}>{money(displayFinanceAmount(data.remaining_balance, fakeFinanceDisplay))}</Text>
+                    </Card>
+                  </>
+                )}
               </ScrollView>
             </View>
           </Modal>
