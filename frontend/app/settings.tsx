@@ -19,6 +19,7 @@ import {
 import { storage } from "@/src/utils/storage";
 import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { getFakeFinanceDisplay, setFakeFinanceDisplay, notifyFakeFinanceDisplay } from "@/src/utils/finance-display";
 
 export default function Settings() {
   const styles = useStyles();
@@ -41,6 +42,7 @@ export default function Settings() {
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState("0");
+  const [fakeFinanceDisplay, setFakeFinanceDisplayState] = useState(false);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
@@ -53,12 +55,14 @@ export default function Settings() {
       storage.getItem<boolean>("ssm.showSellProfitDiscount", true),
       storage.getItem<boolean>("ssm.showInventoryProfitMargin", true),
       storage.getItem<number>("ssm.saleEditLockHours", 0),
+      getFakeFinanceDisplay(),
     ]).then(([format, width, sellDetails, inventoryMargin, lockHours]) => {
       setReceiptFormat(format === "a4" ? "a4" : "thermal");
       setReceiptWidth(width === "56" ? 56 : 72);
       setShowSellProfitDiscount(sellDetails !== false);
       setShowInventoryProfitMargin(inventoryMargin !== false);
       setSaleEditLockHours(String(Math.max(0, Number(lockHours ?? 0))));
+      setFakeFinanceDisplayState(fakeFinance === true);
     });
   }, []);
 
@@ -266,6 +270,37 @@ export default function Settings() {
                 style={[styles.visibilityToggle, showInventoryProfitMargin && styles.visibilityToggleOn]}
               >
                 <View style={[styles.visibilityThumb, showInventoryProfitMargin && styles.visibilityThumbOn]} />
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Private financial display</Text>
+            <Text style={styles.cardHint}>
+              When enabled, screens show display-only purchase costs and profit. Real purchase prices, profit, stock costs and finance calculations are never changed.
+              Fake margin is deterministic between 15% and 20% and works offline and online.
+            </Text>
+            <View style={styles.visibilityRow}>
+              <View style={styles.visibilityText}>
+                <Text style={styles.visibilityLabel}>Hide real purchase & profit</Text>
+                <Text style={styles.visibilityHint}>ON = real purchase/profit values are hidden in display screens. OFF = real values are shown.</Text>
+              </View>
+              <Pressable
+                testID="fake-finance-display-toggle"
+                accessibilityRole="switch"
+                accessibilityState={{ checked: fakeFinanceDisplay }}
+                onPress={async () => {
+                  const next = !fakeFinanceDisplay;
+                  await setFakeFinanceDisplay(next);
+                  setFakeFinanceDisplayState(next);
+                  notifyFakeFinanceDisplay(queryClient, next);
+                  toast(next ? "Private financial display ON" : "Real purchase & profit display restored", "success");
+                }}
+                style={[styles.visibilityToggle, fakeFinanceDisplay && styles.visibilityToggleOn]}
+              >
+                <View style={[styles.visibilityThumb, fakeFinanceDisplay && styles.visibilityThumbOn]} />
               </Pressable>
             </View>
           </View>
