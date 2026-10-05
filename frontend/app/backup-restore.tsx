@@ -164,6 +164,7 @@ export default function BackupRestore() {
     try {
       const json = await makeBackup();
       await uploadBackupToGoogleDrive(json, fileName());
+      await storage.setItem("ssm.last-drive-backup-at", new Date().toISOString());
       toast("Backup uploaded to Google Drive", "success");
     } catch (e: any) { toast(e?.message || "Google Drive upload failed", "error"); }
     finally { setBusy(false); }
@@ -180,6 +181,7 @@ export default function BackupRestore() {
         if (dir) {
           const uri = await FileSystem.StorageAccessFramework.createFileAsync(dir, name, "application/json");
           await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
+          await storage.setItem("ssm.last-phone-backup-at", new Date().toISOString());
           toast("Backup saved to the selected folder", "success");
           return;
         }
@@ -188,6 +190,7 @@ export default function BackupRestore() {
         await storage.setItem("ssm.auto-backup-dir", permission.directoryUri);
         const uri = await FileSystem.StorageAccessFramework.createFileAsync(permission.directoryUri, name, "application/json");
         await FileSystem.writeAsStringAsync(uri, json, { encoding: FileSystem.EncodingType.UTF8 });
+        await storage.setItem("ssm.last-phone-backup-at", new Date().toISOString());
         toast("Backup saved to the selected folder", "success");
         return;
       }
