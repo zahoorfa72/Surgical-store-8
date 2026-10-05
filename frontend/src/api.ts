@@ -854,6 +854,13 @@ export async function apiRequest<T = any>(
 
   try {
     const result = await rawRequest<T>(path, { ...options, headers: expectedUpdatedAt ? { "x-expected-updated-at": expectedUpdatedAt } : undefined });
+    // The two new inventory operations must update the local cache in ONLINE mode
+    // as well as OFFLINE mode. This keeps the UI identical before/after sync.
+    if (method === "POST" && (path === "/inventory-adjustments" || path === "/stock-transfers")) {
+      applyOptimistic(method, path, options.body, "server");
+      await persistLiveCache();
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
+    }
     await recordLocalAudit(method, path, 200, options.body);
     return result;
   } catch (e) {
