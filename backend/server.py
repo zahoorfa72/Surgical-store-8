@@ -683,6 +683,80 @@ Staff = Annotated[dict, Depends(require_role(Role.admin, Role.partner))]
 AdminOnly = Annotated[dict, Depends(require_role(Role.admin))]
 AnyUser = Annotated[dict, Depends(require_role(Role.admin, Role.partner, Role.cashier))]
 
+# ---------------------------------------------------------------------------
+# Offline-tools cloud sync: cash shifts + document attachments
+# ---------------------------------------------------------------------------
+class CashShiftIn(BaseModel):
+    opened_at: str
+    opened_by: str = ""
+    opening_cash: float = Field(ge=0)
+    closed_at: Optional[str] = None
+    closing_cash: Optional[float] = Field(default=None, ge=0)
+
+
+class AttachmentIn(BaseModel):
+    name: str = "Store photo"
+    data_url: str = Field(min_length=20)
+    created_at: Optional[str] = None
+    user: str = ""
+
+
+@api.get("/cash-shifts/current")
+async def get_current_cash_shift(user: AnyUser):
+    row = await db["cash_shifts"].find_one(
+        {"user_id": oid(user["_id"]), "closed_at": None, "deleted": {"$ne": True}},
+        sort=[("opened_at", -1)],
+    )
+    if not row:
+        return None
+    return {**row, "id": oid(row["_id"])}
+
+
+@api.post("/cash-shifts")
+async def save_cash_shift(payload: CashShiftIn, user: AnyUser):
+    now = now_iso()
+    doc = payload.model_dump()
+    doc.update({"user_id": oid(user["_id"]), "user_name": user.get("name", ""), "updated_at": now})
+    if payload.closed_at:
+        await db["cash_shifts"].update_many(
+            {"user_id": oid(user["_id"]), "closed_at": None, "deleted": {"$ne": True}},
+            {"$set": {"closed_at": payload.closed_at, "closing_cash": payload.closing_cash, "updated_at": now}},
+        )
+    existing = await db["cash_shifts"].find_one(
+        {"user_id": oid(user["_id"]), "opened_at": payload.opened_at, "deleted": {"$ne": True}}
+    )
+    if existing:
+        await db["cash_shifts"].update_one({"_id": existing["_id"]}, {"$set": doc})
+        return {**doc, "id": oid(existing["_id"])}
+    result = await db["cash_shifts"].insert_one(doc)
+    return {**doc, "id": oid(result.inserted_id)}
+
+
+@api.get("/attachments")
+async def list_attachments(user: AnyUser, limit: int = Query(100, ge=1, le=500)):
+    rows = await db["attachments"].find(
+        {"user_id": oid(user["_id"]), "deleted": {"$ne": True}}
+    ).sort("created_at", -1).to_list(limit)
+    return [{**row, "id": oid(row["_id"])} for row in rows]
+
+
+@api.post("/attachments")
+async def save_attachment(payload: AttachmentIn, user: AnyUser):
+    if len(payload.data_url) > 7_000_000:
+        raise HTTPException(status_code=413, detail="Attachment is too large. Maximum 5 MB image data is allowed.")
+    if not payload.data_url.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="Only image attachments are supported.")
+    doc = payload.model_dump()
+    doc.update({
+        "user_id": oid(user["_id"]),
+        "user": user.get("name", ""),
+        "created_at": payload.created_at or now_iso(),
+        "updated_at": now_iso(),
+    })
+    result = await db["attachments"].insert_one(doc)
+    return {**doc, "id": oid(result.inserted_id)}
+
+
 
 # ---------------------------------------------------------------------------
 # Audit log
