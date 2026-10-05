@@ -104,7 +104,7 @@ export default function Dashboard() {
           contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}
         >
-          <View style={styles.grid}>
+          <View style={styles.financeGrid}>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
@@ -249,7 +249,8 @@ function PLRow({
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  statPressable: { flex: 1, minWidth: "30%" },
+  financeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  statPressable: { width: "48%", flexGrow: 0, flexShrink: 1 },
   detailHeader: { fontSize: 16, fontWeight: "900", color: colors.onSurface, marginBottom: 8 },
   detailLine: { flexDirection: "row", justifyContent: "space-between", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.divider },
   detailLabel: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.onSurfaceSecondary },
