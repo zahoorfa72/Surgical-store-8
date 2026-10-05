@@ -11,6 +11,7 @@ import { useProducts, useSales } from "@/src/data";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, PrimaryButton, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay } from "@/src/utils/finance-display";
 
 type Tool = "adjust" | "expiry" | "analytics" | "search" | "transfer" | "quick" | "reorder" | "duplicate" | "shift" | "attachments" | "security";
 const ATTACH_KEY = "ssm.document-attachments.v1";
@@ -19,6 +20,7 @@ const SHIFT_KEY = "ssm.cash-shift.v1";
 export default function OfflineTools() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -188,6 +190,14 @@ export default function OfflineTools() {
 
   return <View style={styles.root}>
     <ScreenHeader title="Offline Tools" subtitle="All tools work without internet" topInset={insets.top} onBack={() => router.back()} />
+    <View style={styles.statusCard}>
+      <View style={styles.statusIcon}><MaterialDesignIcons name="cloud-off-outline" size={20} color={colors.brandPrimary} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.statusTitle}>Offline-first tools</Text>
+        <Text style={styles.statusHint}>Changes save on this phone immediately and sync when online.</Text>
+      </View>
+      <Badge text={fakeFinanceDisplay ? "Private finance ON" : "Real finance"} tone={fakeFinanceDisplay ? "warning" : "success"} />
+    </View>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
       {items.map(([k, label, icon]) => <Pressable key={k} onPress={() => setTool(k)} style={[styles.tab, tool === k && { backgroundColor: colors.brandPrimary }]}><MaterialDesignIcons name={icon as any} size={17} color={tool === k ? colors.onBrandPrimary : colors.brandPrimary} /><Text style={[styles.tabText, tool === k && { color: colors.onBrandPrimary }]}>{label}</Text></Pressable>)}
     </ScrollView>
@@ -219,6 +229,10 @@ export default function OfflineTools() {
 
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
+  statusCard: { marginHorizontal: 12, marginTop: 10, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, flexDirection: "row", alignItems: "center", gap: 10 },
+  statusIcon: { width: 38, height: 38, borderRadius: 11, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
+  statusTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  statusHint: { fontSize: 10.5, color: colors.muted, marginTop: 2, lineHeight: 15 },
   tabs: { gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
   tab: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20, backgroundColor: colors.surfaceTertiary },
   tabText: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
