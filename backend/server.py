@@ -2399,13 +2399,37 @@ async def report_inventory_usage(
 async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840), date: Optional[str] = None):
     start = range_start(range, tz_offset_minutes)
     end = None
-    if date:
-        try:
+    try:
+        if date:
             local_day = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
             start = local_day - timedelta(minutes=tz_offset_minutes)
             end = start + timedelta(days=1)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD.")
+        elif range.startswith("month:"):
+            value = range.split(":", 1)[1]
+            local_month = datetime.strptime(value, "%Y-%m").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            start = local_month - timedelta(minutes=tz_offset_minutes)
+            if local_month.month == 12:
+                next_month = datetime(local_month.year + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                next_month = datetime(local_month.year, local_month.month + 1, 1, tzinfo=timezone.utc)
+            end = next_month - timedelta(minutes=tz_offset_minutes)
+        elif range.startswith("year:"):
+            value = range.split(":", 1)[1]
+            local_year = datetime.strptime(value, "%Y").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            start = local_year - timedelta(minutes=tz_offset_minutes)
+            end = datetime(local_year.year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(minutes=tz_offset_minutes)
+        elif range.startswith("date-range:"):
+            parts = range.split(":")
+            if len(parts) != 3:
+                raise ValueError
+            local_from = datetime.fromisoformat(parts[1]).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            local_to = datetime.fromisoformat(parts[2]).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            if local_to < local_from:
+                raise ValueError
+            start = local_from - timedelta(minutes=tz_offset_minutes)
+            end = local_to + timedelta(days=1) - timedelta(minutes=tz_offset_minutes)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid date range. Use YYYY-MM-DD or YYYY-MM.")
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
     if end:
         time_q["created_at"]["$lt"] = end.isoformat()
