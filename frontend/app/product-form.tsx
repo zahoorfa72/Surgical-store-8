@@ -149,6 +149,7 @@ export default function ProductForm() {
 }
 
 const useStyles = makeStyles((colors) => ({
+  privateHint: { fontSize: 11, color: colors.muted, marginTop: -6, marginBottom: 4 },
   root: { flex: 1, backgroundColor: colors.surface },
   barcodeRow: { flexDirection: "row", alignItems: "flex-end", gap: 10 },
   scanBtn: {
