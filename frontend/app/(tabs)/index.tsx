@@ -148,10 +148,10 @@ export default function Dashboard() {
             <PLRow label="Net sales" value={money(data.revenue)} />
             <PLRow label="Inventory purchase (goods sold)" value={"- " + money(data.cogs_goods)} muted />
             <View style={styles.plDivider} />
-            <PLRow label="Gross profit" value={money(data.gross_profit)} bold tone="info" />
+            <PLRow label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
             <PLRow label="Personal expenses" value={"- " + money(data.personal_expenses)} muted />
             <View style={styles.plDivider} />
-            <PLRow label="Net profit" value={money(data.net_profit)} bold tone={data.net_profit >= 0 ? "success" : "error"} />
+            <PLRow label="Net profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>
 
           {/* Remaining balance (cash) */}
