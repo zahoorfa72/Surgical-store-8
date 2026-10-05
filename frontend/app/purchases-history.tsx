@@ -11,10 +11,13 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Purchase } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakePurchaseTotal } from "@/src/utils/finance-display";
 
 export default function PurchasesHistory() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const productsById = new Map(products.map((p: any) => [String(p.id), p]));
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -155,7 +158,7 @@ export default function PurchasesHistory() {
           renderItem={({ item }) => {
             const canEdit = admin;
             const refunded = refundByPurchase[item.id] ?? 0;
-            const net = Math.max(0, Number(item.total ?? 0) - refunded);
+            const realNet = Math.max(0, Number(item.total ?? 0) - refunded);\n            const net = fakeFinanceDisplay ? fakePurchaseTotal(item.items ?? [], productsById, String(item.id)) : realNet;
             return (
               <View style={styles.row} testID={`purchase-row-${item.id}`}>
                 <View style={styles.rowIcon}>
@@ -186,7 +189,7 @@ export default function PurchasesHistory() {
                   <Text style={styles.total} testID={`purchase-net-${item.id}`}>{money(net)}</Text>
                   {refunded > 0 && (
                     <View style={styles.refundLine} testID={`purchase-refund-info-${item.id}`}>
-                      <Text style={styles.origStruck}>{money(item.total)}</Text>
+                      <Text style={styles.origStruck}>{money(fakeFinanceDisplay ? fakePurchaseTotal(item.items ?? [], productsById, String(item.id)) : item.total)}</Text>
                       <Text style={styles.refundAmt}>-{money(refunded)}</Text>
                     </View>
                   )}
