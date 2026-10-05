@@ -985,7 +985,8 @@ def product_public(d: dict) -> ProductOut:
             {"quantity": round(float(x.get("quantity", 0) or 0), 8), "unit_cost": round(float(x.get("unit_cost", 0) or 0), 8), "purchase_id": x.get("purchase_id")}
             for x in (d.get("cost_layers") or []) if float(x.get("quantity", 0) or 0) > 1e-9
         ],
-        quantity=max(0.0, float(d.get("quantity", 0) or 0)),
+        # Negative quantity is valid only for an explicit forced sale; keep it visible so inventory shows the real deficit.
+        quantity=float(d.get("quantity", 0) or 0),
         created_at=d.get("created_at", ""), updated_at=d.get("updated_at", ""),
     )
 
