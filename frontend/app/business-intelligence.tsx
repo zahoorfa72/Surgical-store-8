@@ -16,7 +16,8 @@ import {
   useReturns,
   useSales,
 } from "@/src/data";
-import { getWriteQueueCount } from "@/src/api";
+import { apiRequest, getWriteQueueCount } from "@/src/api";
+import { isAdmin, useAuth } from "@/src/auth";
 import { money, ScreenHeader, Card, Badge, useToast, formatDateTime } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
@@ -48,6 +49,8 @@ export default function BusinessIntelligence() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
+  const admin = isAdmin(user?.role);
 
   const [tab, setTab] = useState<Tab>("overview");
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
@@ -70,7 +73,19 @@ export default function BusinessIntelligence() {
   const selectedParty = parties.find((p) => p.id === selectedPartyId) ?? null;
 
   const loadAudit = async () => {
-    const rows = (await storage.getItem<AuditRow[]>("ssm.auditlog.v1", [])) ?? [];
+    try {
+      if (admin) {
+        const remote = await apiRequest<AuditRow[]>("/audit");
+        await storage.setItem("ssm.auditlog.server.v1", remote as any);
+        setAuditRows(remote);
+        return;
+      }
+    } catch {}
+    const [local, remoteCache] = await Promise.all([
+      storage.getItem<AuditRow[]>("ssm.auditlog.v1", []),
+      storage.getItem<AuditRow[]>("ssm.auditlog.server.v1", []),
+    ]);
+    const rows = (remoteCache?.length ? remoteCache : local) ?? [];
     setAuditRows(rows);
     toast(rows.length ? "Audit history refreshed" : "No local audit events yet", rows.length ? "success" : "error");
   };
@@ -212,7 +227,7 @@ export default function BusinessIntelligence() {
             ["overview", "Overview", "view-dashboard-outline"],
             ["stock", "Stock", "warehouse"],
             ["statements", "Statements", "file-document-outline"],
-            ["audit", "Audit", "shield-check-outline"],
+            ...(admin ? [["audit", "Audit", "shield-check-outline"] as const] : []),
           ] as const).map(([key, label, icon]) => (
             <Pressable key={key} style={[styles.tab, tab === key && { backgroundColor: colors.brandPrimary }]} onPress={() => { setTab(key); if (key === "audit") void loadAudit(); }}>
               <MaterialDesignIcons name={icon as any} size={17} color={tab === key ? colors.onBrandPrimary : colors.brandPrimary} />
@@ -326,7 +341,7 @@ export default function BusinessIntelligence() {
           </>
         )}
 
-        {tab === "audit" && (
+        {admin && tab === "audit" && (
           <Card>
             <View style={styles.headRow}><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Local audit trail</Text><Text style={styles.cardHint}>Tracks business mutations made through the app, including offline queued changes.</Text></View><Pressable style={styles.refresh} onPress={loadAudit}><MaterialDesignIcons name="refresh" size={18} color={colors.brandPrimary} /></Pressable></View>
             {auditRows.map((r) => <View key={r.id} style={styles.auditRow}><View style={styles.auditIcon}><MaterialDesignIcons name="shield-check-outline" size={18} color={colors.brandPrimary} /></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.method} {r.path}</Text><Text style={styles.rowSub}>{formatDateTime(r.created_at)}{r.status ? ` · HTTP ${r.status}` : " · queued/offline"}</Text></View></View>)}
