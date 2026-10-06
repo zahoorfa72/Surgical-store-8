@@ -222,13 +222,14 @@ export default function Purchase() {
                   />
                 </View>
                 <View style={styles.miniField}>
-                  <Text style={styles.miniLabel}>Unit cost</Text>
+                  <Text style={styles.miniLabel}>{fakeFinanceDisplay ? "Real unit cost (private)" : "Unit cost"}</Text>
                   <TextInput
                     testID={`purchase-cost-${l.id}`}
                     style={styles.miniInput}
                     keyboardType="numeric"
-                    value={String(fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), String(l.id)) : l.unit_cost)}
-                    editable={!fakeFinanceDisplay}
+                    value={String(l.unit_cost)}
+                    secureTextEntry={fakeFinanceDisplay}
+                    editable={true}
                     onChangeText={(t) => setCost(l.id, parseFloat(t || "0"))}
                   />
                 </View>
