@@ -8,12 +8,9 @@ import { useAuth } from "@/src/auth";
 import { useDayClose, useReport, useSales, usePayments, useExpenses, useReturns } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
 
-const displayFinanceAmount = (value: unknown, fake: boolean) => {
-  const amount = Number(value ?? 0) || 0;
-  return fake ? amount * 0.825 : amount;
-};
+const displayFinanceAmount = (value: unknown, fake: boolean) => fake ? fakeDisplayAmount(value) : Number(value ?? 0) || 0;
 
 
 function isoToDisplay(iso: string): string {
@@ -179,7 +176,7 @@ export default function Dashboard() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}
         >
           <View style={styles.financeGrid}>
-            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("balance")} style={styles.statPressable}><StatTile label="Remaining Balance" value={money(data.remaining_balance)} icon="wallet" tone={data.remaining_balance >= 0 ? "success" : "error"} testID="stat-remaining-balance" /></Pressable>
@@ -211,8 +208,9 @@ export default function Dashboard() {
                   <Card>
                     <Text style={styles.detailHeader}>Profit details</Text>
                     {sales.map((s: any) => {
+                      const fakeRevenue = fakeDisplayAmount(s.total);
                       const fakeProfit = fakeReportProfit({ revenue: s.total });
-                      const fakeCogs = Math.max(0, Number(s.total || 0) - fakeProfit);
+                      const fakeCogs = Math.max(0, fakeRevenue - fakeProfit);
                       return (
                         <View key={s.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{s.invoice_no} · Revenue {money(displayFinanceAmount(s.total, fakeFinanceDisplay))} · COGS {money(fakeFinanceDisplay ? fakeCogs : s.cogs)}</Text>
