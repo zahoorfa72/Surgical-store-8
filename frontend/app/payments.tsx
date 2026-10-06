@@ -38,7 +38,6 @@ export default function Payments() {
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
-  const fakeFinanceDisplay = useFakeFinanceDisplay();
 
   // Refund total per purchase so the payable ledger shows the net amount owed
   // to a supplier after any goods were returned (offline + online).
