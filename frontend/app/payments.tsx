@@ -14,7 +14,7 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Party, Payment } from "@/src/models";
 import { ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { getHiddenSupplierIds } from "@/src/utils/finance-display";
+import { getHiddenSupplierIds, useFakeFinanceDisplay, fakePurchaseNetTotal, fakePaymentAmount, fakeDisplayAmount } from "@/src/utils/finance-display";
 
 const TABS = [
   { key: "supplier", label: "Suppliers" },
@@ -37,6 +37,7 @@ export default function Payments() {
   const { data: purchaseReturns } = usePurchaseReturns();
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
 
   // Refund total per purchase so the payable ledger shows the net amount owed
   // to a supplier after any goods were returned (offline + online).
@@ -67,14 +68,44 @@ export default function Payments() {
 
   const visibleParties = useMemo(() => isSupplier ? (parties ?? []).filter((p) => !hiddenSupplierIds.includes(p.id)) : (parties ?? []), [parties, isSupplier, hiddenSupplierIds]);
   const visiblePartyIds = useMemo(() => new Set(visibleParties.map((p) => p.id)), [visibleParties]);
+  const fakeSupplierBalanceById = useMemo(() => {
+    const result: Record<string, number> = {};
+    if (!fakeFinanceDisplay || !isSupplier) return result;
+
+    for (const party of visibleParties) {
+      const purchaseTotal = (purchases ?? [])
+        .filter((p) => p.supplier_id === party.id)
+        .reduce((sum, p) => sum + fakePurchaseNetTotal(
+          p.items ?? [],
+          {},
+          String(p.id),
+          refundByPurchase[p.id] ?? 0,
+        ), 0);
+
+      const cashAndRefunds = (payments ?? [])
+        .filter((p) => p.party_id === party.id && (p.kind === "pay" || p.kind === "supplier_refund"))
+        .reduce((sum, p) => sum + fakePaymentAmount(p.amount, String(p.id)), 0);
+
+      const adjustments = (payments ?? [])
+        .filter((p) => p.party_id === party.id && Number(p.adjustment ?? 0) !== 0)
+        .reduce((sum, p) => sum + fakeDisplayAmount(p.adjustment), 0);
+
+      result[party.id] = Math.max(0, purchaseTotal - cashAndRefunds - adjustments);
+    }
+    return result;
+  }, [fakeFinanceDisplay, isSupplier, visibleParties, purchases, payments, refundByPurchase]);
+
   const totalOutstanding = useMemo(
-    () => visibleParties.reduce((s, p) => s + Math.max(0, p.balance), 0),
-    [visibleParties],
+    () => visibleParties.reduce(
+      (s, p) => s + Math.max(0, fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[p.id] ?? 0) : p.balance),
+      0,
+    ),
+    [visibleParties, fakeFinanceDisplay, isSupplier, fakeSupplierBalanceById],
   );
 
   const openFor = (p: Party) => {
     setActive(p);
-    setAmount(p.balance > 0 ? String(p.balance) : "");
+    setAmount(p.balance > 0 ? String(fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[p.id] ?? 0) : p.balance) : "");
     setAdjustment("");
     setNote("");
     setReceiptPhoto(receiptPhotos[p.id] ?? null);
@@ -194,7 +225,8 @@ export default function Payments() {
             />
           }
           renderItem={({ item }) => {
-            const owes = item.balance > 0;
+            const displayBalance = fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[item.id] ?? 0) : item.balance;
+            const owes = displayBalance > 0;
             return (
               <View style={styles.row} testID={`party-balance-${item.id}`}>
                 <View style={{ flex: 1 }}>
@@ -202,11 +234,11 @@ export default function Payments() {
                   <Text style={styles.balanceLabel}>
                     {owes
                       ? isSupplier ? "You owe" : "Owes you"
-                      : item.balance < 0 ? "Advance / credit" : "Settled"}
+                      : displayBalance < 0 ? "Advance / credit" : "Settled"}
                   </Text>
                 </View>
                 <Text style={[styles.balance, { color: owes ? (isSupplier ? colors.error : colors.success) : colors.muted }]}>
-                  {money(Math.abs(item.balance))}
+                  {money(Math.abs(displayBalance))}
                 </Text>
                 <Pressable
                   testID={`record-payment-${item.id}`}
@@ -226,7 +258,9 @@ export default function Payments() {
                   <Text style={styles.sectionTitle}>Purchase payable ledger</Text>
                   {supplierPurchases.map((p) => {
                     const refunded = refundByPurchase[p.id] ?? 0;
-                    const net = Math.max(0, Number(p.total ?? 0) - refunded);
+                    const net = fakeFinanceDisplay
+                      ? fakePurchaseNetTotal(p.items ?? [], {}, String(p.id), refunded)
+                      : Math.max(0, Number(p.total ?? 0) - refunded);
                     return (
                       <View key={`purchase-payable-${p.id}`} style={styles.ledgerRow}>
                         <View style={{ flex: 1 }}>
@@ -272,7 +306,7 @@ export default function Payments() {
                             </View>
                           </View>
                           <Text style={[styles.ledgerAmt, refund && { color: colors.error }]}>
-                            {refund ? "-" : ""}{money(p.amount)}
+                            {refund ? "-" : ""}{money(fakeFinanceDisplay ? fakePaymentAmount(p.amount, String(p.id)) : p.amount)}
                           </Text>
                           {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
                             setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(p.amount)); setAdjustment(String(p.adjustment||"")); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
