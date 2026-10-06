@@ -461,11 +461,11 @@ export default function Sell() {
           <View style={styles.reviewActionRow}>
             <Pressable testID="create-product-from-sell" onPress={() => setSellProductCreateOpen(true)} style={styles.scanOrderBtn}>
               <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
-              <Text style={styles.scanOrderText}>Add product not in inventory</Text>
+              <Text style={styles.scanOrderText}>Add product</Text>
             </Pressable>
             <Pressable testID="scan-order-image-button" onPress={() => setOrderImageScanOpen(true)} style={styles.scanOrderBtn}>
               <MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} />
-              <Text style={styles.scanOrderText}>Scan order image</Text>
+              <Text style={styles.scanOrderText}>Scan order</Text>
             </Pressable>
           </View>
           <View style={styles.reviewSearchRow}>
@@ -913,11 +913,11 @@ const useStyles = makeStyles((colors) => ({
   heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
   heldBtnText: { fontSize:13, fontWeight:"800", color:colors.brandPrimary },
   holdCheckoutRow: { paddingHorizontal:16, paddingTop:8, backgroundColor:colors.surface },
-  reviewActionRow: { flexDirection: "row", gap: 8, marginHorizontal: 16, marginTop: 8, flexWrap: "wrap" },
+  reviewActionRow: { flexDirection: "row", gap: 8, marginHorizontal: 16, marginTop: 8 },
   reviewSearchRow: { marginHorizontal:16, marginBottom:4, minHeight:46, borderWidth:1, borderColor:colors.border, borderRadius:12, flexDirection:"row", alignItems:"center", paddingLeft:12, paddingRight:6, gap:7, backgroundColor:colors.surfaceSecondary },
   reviewAddBtn: { minHeight:36, paddingHorizontal:10, borderRadius:9, backgroundColor:colors.brandPrimary, flexDirection:"row", alignItems:"center", gap:4 },
   reviewAddText: { color:colors.onBrandPrimary, fontWeight:"800", fontSize:12 },
-  scanOrderBtn: { marginHorizontal: 16, minHeight: 46, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  scanOrderBtn: { flex: 1, minHeight: 46, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 10 },
   scanOrderText: { color: colors.onBrandPrimary, fontSize: 13, fontWeight: "900" },
   reviewInventoryBox: { borderWidth:1, borderColor:colors.border, borderRadius:12, backgroundColor:colors.surfaceSecondary, overflow:"hidden" },
   reviewInventoryTitle: { fontSize:12, fontWeight:"800", color:colors.onSurface, padding:10, borderBottomWidth:1, borderBottomColor:colors.border },
