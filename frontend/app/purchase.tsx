@@ -35,6 +35,9 @@ export default function Purchase() {
   const { data: suppliers } = useParties("supplier");
 
   const [lines, setLines] = useState<Line[]>([]);
+  // Keep the purchase-cost text separate from the numeric value so Android
+  // does not immediately turn "12." back into "12" while the user is typing.
+  const [costText, setCostText] = useState<Record<string, string>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [productSearch, setProductSearch] = useState("");
@@ -61,6 +64,8 @@ export default function Purchase() {
           quantity: it.quantity,
           unit_cost: it.unit_cost,
         })),
+      );
+      setCostText(Object.fromEntries(editing.items.map((it) => [String(it.product_id), String(it.unit_cost ?? 0)])));
       );
       setSupplierId(editing.supplier_id ?? null);
       setPrefilled(true);
@@ -118,6 +123,7 @@ export default function Purchase() {
     );
     if (existing) {
       setLines((prev) => prev.some((l) => l.id === existing.id) ? prev : [...prev, { id: existing.id, name: existing.name, quantity: 1, unit_cost: Number(existing.purchase_price ?? 0) }]);
+      setCostText((prev) => ({ ...prev, [existing.id]: String(existing.purchase_price ?? 0) }));
       setProductCreateOpen(false);
       setNewProductName(""); setNewProductBarcode(""); setNewProductSalePrice("");
       toast("Existing product found — added to this purchase", "info");
@@ -130,6 +136,7 @@ export default function Purchase() {
       });
       const id = String(created.id);
       setLines((prev) => [...prev, { id, name: created.name ?? name, quantity: 1, unit_cost: Number(created.purchase_price ?? 0) }]);
+      setCostText((prev) => ({ ...prev, [id]: String(created.purchase_price ?? 0) }));
       await queryClient.invalidateQueries({ queryKey: qk.products });
       setProductCreateOpen(false);
       setPickerOpen(false);
@@ -147,14 +154,33 @@ export default function Purchase() {
       return;
     }
     setLines((prev) => [...prev, ...selected.map((p) => ({ id: p.id, name: p.name, quantity: 1, unit_cost: p.purchase_price }))]);
+    setCostText((prev) => ({ ...prev, ...Object.fromEntries(selected.map((p) => [p.id, String(p.purchase_price ?? 0)])) }));
     setSelectedProductIds(new Set());
     setPickerOpen(false);
   };
   const setQty = (id: string, q: number) =>
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(0, q) } : l)));
-  const setCost = (id: string, c: number) =>
-    setLines((prev) => prev.map((l) => (l.id === id ? { ...l, unit_cost: Math.max(0, c) } : l)));
-  const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.id !== id));
+  const setCostTextValue = (id: string, text: string) => {
+    const normalized = text.replace(/,/g, ".");
+    if (!/^\d*(\.\d*)?$/.test(normalized)) return;
+    setCostText((prev) => ({ ...prev, [id]: normalized }));
+    if (normalized === "" || normalized === ".") {
+      setLines((prev) => prev.map((l) => (l.id === id ? { ...l, unit_cost: 0 } : l)));
+      return;
+    }
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      setLines((prev) => prev.map((l) => (l.id === id ? { ...l, unit_cost: parsed } : l)));
+    }
+  };
+  const removeLine = (id: string) => {
+    setLines((prev) => prev.filter((l) => l.id !== id));
+    setCostText((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
 
   const save = async () => {
     const valid = lines.filter((l) => l.quantity > 0);
@@ -226,11 +252,12 @@ export default function Purchase() {
                   <TextInput
                     testID={`purchase-cost-${l.id}`}
                     style={styles.miniInput}
-                    keyboardType="numeric"
-                    value={String(l.unit_cost)}
+                    keyboardType="decimal-pad"
+                    inputMode="decimal"
+                    value={costText[l.id] ?? String(l.unit_cost)}
                     secureTextEntry={fakeFinanceDisplay}
                     editable={true}
-                    onChangeText={(t) => setCost(l.id, parseFloat(t || "0"))}
+                    onChangeText={(t) => setCostTextValue(l.id, t)}
                   />
                 </View>
                 <View style={styles.miniField}>
