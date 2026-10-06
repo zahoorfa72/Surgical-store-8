@@ -7,7 +7,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { useReport } from "@/src/data";
 import { Card, ChipRow, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
 
 // Daily / Weekly / Monthly / Yearly. The keys map to the ranges the offline
 // report engine (src/data.ts -> localReport) already understands.
@@ -55,7 +55,7 @@ export default function Reports() {
   const { data, isLoading, refetch, isRefetching } = useReport(selectedRange);
 
   const label = useMemo(() => exactDate ? new Date(`${exactDate}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "2-digit", month: "short", year: "numeric" }) : periodLabel(range), [range, exactDate]);
-  const netPurchases = data ? (fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : Number(data.purchase_total ?? 0)) : 0;
+  const netPurchases = data ? (fakeFinanceDisplay ? fakeDisplayAmount(data.purchase_total) : Number(data.purchase_total ?? 0)) : 0;
   const displayGrossProfit = data ? (fakeFinanceDisplay ? fakeReportProfit(data) : Number(data.gross_profit ?? 0)) : 0;
   const displayNetProfit = data ? (fakeFinanceDisplay ? fakeReportNetProfit(data) : Number(data.net_profit ?? 0)) : 0;
 
@@ -124,7 +124,7 @@ export default function Reports() {
             <Row label="Gross sales" value={money(data.gross_revenue)} />
             <Row label="Less: returns / refunds" value={"- " + money(data.returns_total)} muted />
             <Divider />
-            <Row label="Net sales" value={money(data.revenue)} bold tone="brand" />
+            <Row label="Net sales" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} bold tone="brand" />
             <Row label="Transactions" value={String(data.transactions)} muted />
             <Row label="Units sold" value={String(data.units_sold)} muted />
           </Card>
@@ -141,17 +141,17 @@ export default function Reports() {
           {/* Returns & refunds */}
           <Card>
             <SectionHead icon="cash-refund" title="Returns & refunds" tone={colors.error} />
-            <Row label="Refund amount" value={money(data.returns_total)} bold tone="error" />
+            <Row label="Refund amount" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.returns_total) : data.returns_total)} bold tone="error" />
             <Row label="Return transactions" value={String(data.returns_count)} muted />
-            <Row label="Purchase returns" value={money(data.purchase_returns_total ?? 0)} muted />
+            <Row label="Purchase returns" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.purchase_returns_total) : data.purchase_returns_total ?? 0)} muted />
           </Card>
 
           {/* Expenses */}
           <Card>
             <SectionHead icon="cash-multiple" title="Expenses" tone={colors.info} />
-            <Row label="Direct / purchase expenses" value={money(data.cogs_expenses)} />
-            <Row label="Operating expenses" value={money(data.operating_expenses)} />
-            <Row label="Personal expenses" value={money(data.personal_expenses)} />
+            <Row label="Direct / purchase expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.cogs_expenses) : data.cogs_expenses)} />
+            <Row label="Operating expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.operating_expenses) : data.operating_expenses)} />
+            <Row label="Personal expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.personal_expenses) : data.personal_expenses)} />
             <Divider />
             <Row label="Total expenses" value={money(data.total_expenses)} bold tone="info" />
           </Card>
