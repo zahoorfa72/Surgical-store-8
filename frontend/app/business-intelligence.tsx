@@ -142,7 +142,7 @@ export default function BusinessIntelligence() {
     if (!selectedProduct) return [];
     const rows: { date: string; type: string; quantity: number; detail: string }[] = [];
     for (const p of purchases) for (const it of p.items ?? []) if (it.product_id === selectedProduct.id)
-      rows.push({ date: p.created_at, type: "Purchase", quantity: Number(it.quantity ?? 0), detail: `${p.ref_no} · ${money(fakeFinanceDisplay ? fakeUnitCost(Number(selectedProduct?.sale_price ?? 0), String(selectedProduct.id)+":"+p.created_at+":"+it.product_id) : Number(it.unit_cost ?? 0))}/unit · ${p.supplier_name}` });
+      rows.push({ date: p.created_at, type: "Purchase", quantity: Number(it.quantity ?? 0), detail: `${p.ref_no} · ${money(fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(it.unit_cost ?? 0)), String(selectedProduct.id)+":"+p.created_at+":"+it.product_id) : Number(it.unit_cost ?? 0))}/unit · ${p.supplier_name}` });
     for (const s of sales) for (const it of s.items ?? []) if (it.product_id === selectedProduct.id)
       rows.push({ date: s.created_at, type: "Sale", quantity: -Number(it.quantity ?? 0), detail: `${s.invoice_no} · ${money(Number(it.unit_price ?? 0))}/unit · ${s.customer_name}` });
     for (const r of returns) for (const it of r.items ?? []) if (it.product_id === selectedProduct.id)
@@ -160,7 +160,7 @@ export default function BusinessIntelligence() {
         ref: p.ref_no,
         supplier: p.supplier_name,
         qty: Number(it.quantity ?? 0),
-        cost: fakeFinanceDisplay ? fakeUnitCost(Number(selectedProduct?.sale_price ?? 0), String(selectedProduct.id)+":"+p.created_at+":"+it.product_id) : Number(it.unit_cost ?? 0),
+        cost: fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(it.unit_cost ?? 0)), String(selectedProduct.id)+":"+p.created_at+":"+it.product_id) : Number(it.unit_cost ?? 0),
       })))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [purchases, selectedProduct]);
