@@ -51,6 +51,13 @@ jobs:
           rm -rf android
           CI=1 npx expo prebuild --platform android --no-install
 
+      - name: Install required Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27b
+          link-to-sdk: true
+          local-cache: true
+
       - name: Validate Google OAuth configuration
         env:
           GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '853810600390-91etcjfra1ht42f8ndcaie34qlabii32.apps.googleusercontent.com' }}
