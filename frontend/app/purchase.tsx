@@ -227,14 +227,14 @@ export default function Purchase() {
                     testID={`purchase-cost-${l.id}`}
                     style={styles.miniInput}
                     keyboardType="numeric"
-                    value={String(fakeFinanceDisplay ? fakeUnitCost(Number(products?.find((p: any) => p.id === l.id)?.sale_price ?? 0), String(l.id)) : l.unit_cost)}
+                    value={String(fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), String(l.id)) : l.unit_cost)}
                     editable={!fakeFinanceDisplay}
                     onChangeText={(t) => setCost(l.id, parseFloat(t || "0"))}
                   />
                 </View>
                 <View style={styles.miniField}>
                   <Text style={styles.miniLabel}>Total</Text>
-                  <Text style={styles.lineTotal}>{money(l.quantity * (fakeFinanceDisplay ? fakeUnitCost(Number(products?.find((p: any) => p.id === l.id)?.sale_price ?? 0), String(l.id)) : l.unit_cost))}</Text>
+                  <Text style={styles.lineTotal}>{money(l.quantity * (fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), String(l.id)) : l.unit_cost))}</Text>
                 </View>
               </View>
             </View>
@@ -288,7 +288,7 @@ export default function Purchase() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pickName}>{p.name}</Text>
-                    <Text style={styles.pickMeta}>Cost {money(fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id)) : Number(p.purchase_price ?? 0))} · {p.quantity} in stock</Text>
+                    <Text style={styles.pickMeta}>Cost {money(fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(p.purchase_price ?? 0)), String(p.id)) : Number(p.purchase_price ?? 0))} · {p.quantity} in stock</Text>
                   </View>
                 </Pressable>
               );
