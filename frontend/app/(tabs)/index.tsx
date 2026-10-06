@@ -15,6 +15,48 @@ const displayFinanceAmount = (value: unknown, fake: boolean) => {
   return fake ? amount * 0.825 : amount;
 };
 
+
+function isoToDisplay(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
+}
+
+function displayToIso(value: string): string {
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value.trim());
+  if (!m) return "";
+  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  if (d.getFullYear() !== Number(m[3]) || d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[1])) return "";
+  return m[3] + "-" + m[2] + "-" + m[1];
+}
+
+function DateCalendarModal({ visible, initialIso, mode, onSelect, onClose }: { visible: boolean; initialIso: string; mode: "day" | "month" | "year"; onSelect: (iso: string) => void; onClose: () => void }) {
+  const { colors } = useTheme();
+  const initial = /^\d{4}-\d{2}-\d{2}$/.test(initialIso) ? new Date(initialIso + "T12:00:00") : new Date();
+  const [cursor, setCursor] = useState(new Date(initial.getFullYear(), initial.getMonth(), 1));
+  useEffect(() => { if (visible) { const d = /^\d{4}-\d{2}-\d{2}$/.test(initialIso) ? new Date(initialIso + "T12:00:00") : new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); } }, [visible, initialIso]);
+  if (!visible) return null;
+  const y = cursor.getFullYear(); const m = cursor.getMonth(); const days = new Date(y, m + 1, 0).getDate(); const first = new Date(y, m, 1).getDay();
+  const cells = Array.from({ length: first + days }, (_, i) => i < first ? null : i - first + 1);
+  const choose = (day: number) => { const iso = y + "-" + String(m + 1).padStart(2, "0") + "-" + String(day).padStart(2, "0"); onSelect(iso); onClose(); };
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: 20 }}>
+        <Pressable onPress={(e) => e.stopPropagation()} style={{ backgroundColor: colors.surface, borderRadius: 20, padding: 18 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <Pressable onPress={() => setCursor(new Date(y, m - 1, 1))} style={{ padding: 8 }}><MaterialDesignIcons name="chevron-left" size={26} color={colors.brandPrimary} /></Pressable>
+            <Text style={{ fontSize: 18, fontWeight: "900", color: colors.onSurface }}>{cursor.toLocaleString(undefined, { month: "long", year: "numeric" })}</Text>
+            <Pressable onPress={() => setCursor(new Date(y, m + 1, 1))} style={{ padding: 8 }}><MaterialDesignIcons name="chevron-right" size={26} color={colors.brandPrimary} /></Pressable>
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+            {["Su","Mo","Tu","We","Th","Fr","Sa"].map((d) => <Text key={d} style={{ width: "14.2857%", textAlign: "center", fontSize: 11, fontWeight: "800", color: colors.muted, paddingVertical: 6 }}>{d}</Text>)}
+            {cells.map((day, i) => day == null ? <View key={"b" + i} style={{ width: "14.2857%", aspectRatio: 1 }} /> : <Pressable key={day} onPress={() => choose(day)} style={{ width: "14.2857%", aspectRatio: 1, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 14, fontWeight: "800", color: colors.onSurface }}>{day}</Text></Pressable>)}
+          </View>
+          {mode !== "day" && <Text style={{ textAlign: "center", marginTop: 10, color: colors.muted, fontSize: 11 }}>Tap any date to select the {mode}.</Text>}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
 const RANGES = [
   { key: "day", label: "Day" },
   { key: "week", label: "This Week" },
@@ -38,18 +80,20 @@ export default function Dashboard() {
   const localMonth = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
   const localYear = String(now.getFullYear());
   const [range, setRange] = useState<string>("day");
-  const [date, setDate] = useState(localDay);
-  const [month, setMonth] = useState(localMonth);
+  const [date, setDate] = useState(isoToDisplay(localDay));
+  const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getFullYear()));
   const [year, setYear] = useState(localYear);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [calendarTarget, setCalendarTarget] = useState<"day" | "month" | "year" | "from" | "to" | null>(null);
   const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
-  const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
-  const validMonth = /^\d{4}-\d{2}$/.test(month.trim()) ? month.trim() : "";
+  const exactDate = displayToIso(date);
+  const monthMatch = /^(\d{2})-(\d{4})$/.exec(month.trim());
+  const validMonth = monthMatch && Number(monthMatch[1]) >= 1 && Number(monthMatch[1]) <= 12 ? monthMatch[2] + "-" + monthMatch[1] : "";
   const validYear = /^\d{4}$/.test(year.trim()) ? year.trim() : "";
-  const validFrom = /^\d{4}-\d{2}-\d{2}$/.test(fromDate.trim()) ? fromDate.trim() : "";
-  const validTo = /^\d{4}-\d{2}-\d{2}$/.test(toDate.trim()) ? toDate.trim() : "";
+  const validFrom = displayToIso(fromDate);
+  const validTo = displayToIso(toDate);
   const reportRange = range === "day" && exactDate ? "date:" + exactDate : range === "month" && validMonth ? "month:" + validMonth : range === "year" && validYear ? "year:" + validYear : range === "custom" && validFrom && validTo ? "date-range:" + validFrom + ":" + validTo : range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
@@ -69,37 +113,34 @@ export default function Dashboard() {
       />
       <ChipRow options={RANGES as any} value={range} onChange={(value) => setRange(value)} testIDPrefix="range" />
       {range === "day" && (
-        <View style={styles.dateFilter}>
-          <MaterialDesignIcons name="calendar" size={20} color={colors.muted} />
-          <TextInput testID="finance-day-input" style={styles.dateInput} placeholder="Day: YYYY-MM-DD" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
-        </View>
+        <Pressable testID="finance-day-input" style={styles.dateFilter} onPress={() => setCalendarTarget("day")}>
+          <MaterialDesignIcons name="calendar" size={20} color={colors.brandPrimary} /><Text style={styles.dateValue}>{date || "DD-MM-YYYY"}</Text><MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
+        </Pressable>
       )}
       {range === "month" && (
-        <View style={styles.dateFilter}>
-          <MaterialDesignIcons name="calendar-month" size={20} color={colors.muted} />
-          <TextInput testID="finance-month-input" style={styles.dateInput} placeholder="Month: YYYY-MM" placeholderTextColor={colors.muted} value={month} onChangeText={setMonth} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
-        </View>
+        <Pressable testID="finance-month-input" style={styles.dateFilter} onPress={() => setCalendarTarget("month")}>
+          <MaterialDesignIcons name="calendar-month" size={20} color={colors.brandPrimary} /><Text style={styles.dateValue}>{month || "MM-YYYY"}</Text><MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
+        </Pressable>
       )}
       {range === "year" && (
-        <View style={styles.dateFilter}>
-          <MaterialDesignIcons name="calendar-range" size={20} color={colors.muted} />
-          <TextInput testID="finance-year-input" style={styles.dateInput} placeholder="Year: YYYY" placeholderTextColor={colors.muted} value={year} onChangeText={setYear} autoCapitalize="none" keyboardType="number-pad" />
-        </View>
+        <Pressable testID="finance-year-input" style={styles.dateFilter} onPress={() => setCalendarTarget("year")}>
+          <MaterialDesignIcons name="calendar-range" size={20} color={colors.brandPrimary} /><Text style={styles.dateValue}>{year || "YYYY"}</Text><MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
+        </Pressable>
       )}
       {range === "custom" && (
         <View style={styles.customDateRow}>
           <View style={[styles.dateFilter, styles.customDateBox]}>
-            <TextInput testID="finance-from-date" style={styles.dateInput} placeholder="From: YYYY-MM-DD" placeholderTextColor={colors.muted} value={fromDate} onChangeText={setFromDate} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
+            <Pressable testID="finance-from-date" style={styles.dateFilter} onPress={() => setCalendarTarget("from")}><MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} /><Text style={styles.dateValue}>{fromDate || "DD-MM-YYYY"}</Text></Pressable>
           </View>
           <View style={[styles.dateFilter, styles.customDateBox]}>
-            <TextInput testID="finance-to-date" style={styles.dateInput} placeholder="To: YYYY-MM-DD" placeholderTextColor={colors.muted} value={toDate} onChangeText={setToDate} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
+            <Pressable testID="finance-to-date" style={styles.dateFilter} onPress={() => setCalendarTarget("to")}><MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} /><Text style={styles.dateValue}>{toDate || "DD-MM-YYYY"}</Text></Pressable>
           </View>
         </View>
       )}
       {range === "day" && !!date && !exactDate && <Text style={styles.dateHint}>Enter a valid day as YYYY-MM-DD.</Text>}
       {range === "month" && !!month && !validMonth && <Text style={styles.dateHint}>Enter a valid month as YYYY-MM.</Text>}
       {range === "year" && !!year && !validYear && <Text style={styles.dateHint}>Enter a valid year as YYYY.</Text>}
-      {range === "custom" && (!!fromDate || !!toDate) && (!validFrom || !validTo) && <Text style={styles.dateHint}>Enter both dates as YYYY-MM-DD.</Text>}
+      {range === "custom" && (!!fromDate || !!toDate) && (!validFrom || !validTo) && <Text style={styles.dateHint}>Enter both dates as YYYY-MM-DD.</Text>}\n      <DateCalendarModal visible={!!calendarTarget} mode={calendarTarget === "month" ? "month" : calendarTarget === "year" ? "year" : "day"} initialIso={calendarTarget === "from" ? (validFrom || exactDate || localDay) : calendarTarget === "to" ? (validTo || validFrom || exactDate || localDay) : exactDate || localDay} onClose={() => setCalendarTarget(null)} onSelect={(iso) => { if (calendarTarget === "day") setDate(isoToDisplay(iso)); else if (calendarTarget === "month") setMonth(iso.slice(5, 7) + "-" + iso.slice(0, 4)); else if (calendarTarget === "year") setYear(iso.slice(0, 4)); else if (calendarTarget === "from") setFromDate(isoToDisplay(iso)); else if (calendarTarget === "to") setToDate(isoToDisplay(iso)); }} />
 
       {cashier ? (
         dayCloseLoading || !dayClose ? <Loader /> : (
@@ -365,6 +406,7 @@ const useStyles = makeStyles((colors) => ({
   dateInput: { flex: 1, fontSize: 14, color: colors.onSurface },
   clearDate: { color: colors.brandPrimary, fontWeight: "800", fontSize: 12 },
   dateHint: { marginHorizontal: 18, marginTop: 5, fontSize: 11, color: colors.warning },
+  dateValue: { flex: 1, fontSize: 15, fontWeight: "800", color: colors.onSurface },
   customDateRow: { flexDirection: "row", gap: 8, marginHorizontal: 16 },
   customDateBox: { flex: 1, marginHorizontal: 0 },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
