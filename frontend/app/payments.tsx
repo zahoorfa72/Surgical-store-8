@@ -38,6 +38,7 @@ export default function Payments() {
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
 
   // Refund total per purchase so the payable ledger shows the net amount owed
   // to a supplier after any goods were returned (offline + online).
@@ -105,7 +106,7 @@ export default function Payments() {
 
   const openFor = (p: Party) => {
     setActive(p);
-    setAmount(p.balance > 0 ? String(p.balance) : "");
+    setAmount(p.balance > 0 ? String(fakeFinanceDisplay ? fakeDisplayAmount(p.balance) : p.balance) : "");
     setAdjustment("");
     setNote("");
     setReceiptPhoto(receiptPhotos[p.id] ?? null);
@@ -271,7 +272,7 @@ export default function Payments() {
                           </Text>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
-                          <Text style={styles.ledgerAmt}>{money(net)}</Text>
+                          <Text style={styles.ledgerAmt}>{money(displayNet)}</Text>
                           {refunded > 0 && (
                             <Text style={styles.ledgerStruck}>{money(p.total)}</Text>
                           )}
