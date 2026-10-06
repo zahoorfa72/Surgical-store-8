@@ -12,7 +12,7 @@ import { Purchase } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { getHiddenSupplierIds } from "@/src/utils/finance-display";
-import { useFakeFinanceDisplay, fakePurchaseTotal } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakePurchaseTotal, fakePurchaseNetTotal } from "@/src/utils/finance-display";
 
 export default function PurchasesHistory() {
   const styles = useStyles();
@@ -65,11 +65,11 @@ export default function PurchasesHistory() {
   const allSupplierTotal = useMemo(() => {
     return filtered.reduce((sum, p) => {
       if (fakeFinanceDisplay) {
-        return sum + fakePurchaseTotal(p.items ?? [], Object.fromEntries(products.map((x: any) => [String(x.id), x])), String(p.id));
+        return sum + fakePurchaseNetTotal(p.items ?? [], Object.fromEntries(products.map((x: any) => [String(x.id), x])), String(p.id), refundByPurchase[p.id] ?? 0);
       }
       return sum + Number(p.total ?? 0);
     }, 0);
-  }, [filtered, fakeFinanceDisplay, products]);
+  }, [filtered, fakeFinanceDisplay, products, refundByPurchase]);
 
   const sections = useMemo(() => {
     const bySupplier: Record<string, Purchase[]> = {};
@@ -186,7 +186,7 @@ export default function PurchasesHistory() {
             const refunded = refundByPurchase[item.id] ?? 0;
             const realNet = Math.max(0, Number(item.total ?? 0) - refunded);
             const net = fakeFinanceDisplay
-              ? fakePurchaseTotal(item.items ?? [], productsById, String(item.id))
+              ? fakePurchaseNetTotal(item.items ?? [], productsById, String(item.id), refunded)
               : realNet;
             return (
               <View style={styles.row} testID={`purchase-row-${item.id}`}>
