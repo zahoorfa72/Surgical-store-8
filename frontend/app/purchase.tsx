@@ -68,7 +68,7 @@ export default function Purchase() {
   }, [isEdit, editing, prefilled]);
 
   const lineIds = useMemo(() => new Set(lines.map((l) => l.id)), [lines]);
-  const total = lines.reduce((s, l) => { const p = products?.find((x: any) => x.id === l.id); const cost = fakeFinanceDisplay ? fakeUnitCost(Number(p?.sale_price ?? 0), String(l.id)) : l.unit_cost; return s + l.quantity * cost; }, 0);
+  const total = lines.reduce((s, l, index) => { const cost = fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), `${l.id}:${index}`) : l.unit_cost; return s + l.quantity * cost; }, 0);
   const supplierName = suppliers?.find((s) => s.id === supplierId)?.name ?? "No supplier";
 
   const createSupplier = async () => {
