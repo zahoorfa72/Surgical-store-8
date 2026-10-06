@@ -1750,6 +1750,8 @@ async def get_purchase(purchase_id: str, _: Staff):
 
 @api.post("/purchases", status_code=201)
 async def create_purchase(body: PurchaseIn, user: Staff):
+    if not body.supplier_id or not ObjectId.is_valid(body.supplier_id):
+        raise HTTPException(status_code=400, detail="Supplier is required for every purchase")
     if not body.items:
         raise HTTPException(status_code=400, detail="No products to purchase")
     items = []
@@ -1852,6 +1854,8 @@ async def delete_purchase(purchase_id: str, _: AdminOnly):
 
 @api.put("/purchases/{purchase_id}")
 async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
+    if not body.supplier_id or not ObjectId.is_valid(body.supplier_id):
+        raise HTTPException(status_code=400, detail="Supplier is required for every purchase")
     if not ObjectId.is_valid(purchase_id):
         raise HTTPException(status_code=404, detail="Purchase not found")
     purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
