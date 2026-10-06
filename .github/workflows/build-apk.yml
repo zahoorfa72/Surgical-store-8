@@ -52,11 +52,40 @@ jobs:
           CI=1 npx expo prebuild --platform android --no-install
 
       - name: Install required Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r27b
-          link-to-sdk: true
-          local-cache: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK_VERSION="27.1.12297006"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
+          fi
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: Android sdkmanager was not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          # Do not reuse a possibly-corrupted NDK archive/cache. Install the
+          # exact version required by the generated Expo/React Native project.
+          rm -rf "$ANDROID_HOME/ndk/$NDK_VERSION"
+
+          for attempt in 1 2 3; do
+            echo "Installing Android NDK $NDK_VERSION (attempt $attempt/3)"
+            rm -rf "$ANDROID_HOME/ndk/$NDK_VERSION"
+            if "$SDKMANAGER" --install "ndk;$NDK_VERSION"; then
+              if [ -f "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties" ]; then
+                echo "NDK $NDK_VERSION installed successfully."
+                break
+              fi
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "ERROR: Could not install Android NDK $NDK_VERSION after 3 attempts."
+              exit 1
+            fi
+            sleep 5
+          done
 
       - name: Validate Google OAuth configuration
         env:
