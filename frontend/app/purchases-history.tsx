@@ -80,7 +80,12 @@ export default function PurchasesHistory() {
     return Object.entries(bySupplier)
       .map(([title, data]) => {
         const gross = fakeFinanceDisplay
-          ? data.reduce((s, p) => s + fakePurchaseTotal(p.items ?? [], Object.fromEntries(products.map((x: any) => [String(x.id), x])), String(p.id)), 0)
+          ? data.reduce((s, p) => s + fakePurchaseNetTotal(
+              p.items ?? [],
+              Object.fromEntries(products.map((x: any) => [String(x.id), x])),
+              String(p.id),
+              refundByPurchase[p.id] ?? 0,
+            ), 0)
           : data.reduce((s, p) => s + Number(p.total ?? 0), 0);
         const refunded = fakeFinanceDisplay ? 0 : data.reduce((s, p) => s + (refundByPurchase[p.id] ?? 0), 0);
         return { title, data, gross, refunded, net: Math.max(0, gross - refunded) };
