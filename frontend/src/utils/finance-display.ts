@@ -80,9 +80,18 @@ export function fakeSaleProfit(sale: {
   }, 0);
 }
 
-export function fakeReportProfit(report: { revenue?: number }): number {
-  return Math.max(0, Number(report.revenue) || 0) * 0.175;
+export function fakeDisplayAmount(value: unknown): number {
+  return Math.max(0, Number(value ?? 0) || 0) * 0.825;
 }
+
+export function fakeReportRevenue(report: { revenue?: number }): number {
+  return fakeDisplayAmount(report.revenue);
+}
+
+export function fakeReportProfit(report: { revenue?: number }): number {
+  return fakeReportRevenue(report) * 0.175;
+}
+
 
 export function fakeReportNetProfit(report: {
   revenue?: number;
@@ -90,8 +99,7 @@ export function fakeReportNetProfit(report: {
   personal_expenses?: number;
 }): number {
   const gross = fakeReportProfit(report);
-  const expenses = Math.max(0, Number(report.operating_expenses) || 0)
-    + Math.max(0, Number(report.personal_expenses) || 0);
+  const expenses = fakeDisplayAmount(report.operating_expenses) + fakeDisplayAmount(report.personal_expenses);
   return gross - expenses;
 }
 
