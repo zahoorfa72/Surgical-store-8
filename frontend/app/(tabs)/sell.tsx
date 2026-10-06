@@ -413,7 +413,7 @@ export default function Sell() {
                   >
                     <MaterialDesignIcons name="minus" size={18} color={colors.brandPrimary} />
                   </Pressable>
-                  <Text style={styles.stepQty}>{line.quantity}</Text>
+                  <TextInput testID={`qty-step-input-${item.id}`} style={styles.stepQtyInput} keyboardType="number-pad" value={String(line.quantity)} onChangeText={(t) => setQtyText(item.id, t)} selectTextOnFocus />
                   <Pressable
                     testID={`inc-${item.id}`}
                     style={styles.stepBtn}
@@ -897,6 +897,7 @@ const useStyles = makeStyles((colors) => ({
     justifyContent: "center",
   },
   stepQty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  stepQtyInput: { minWidth: 48, height: 38, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, textAlign: "center", paddingHorizontal: 6, fontSize: 15, fontWeight: "900", color: colors.onSurface },
   forceStockRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 4, minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.surfaceSecondary },
   forceStockText: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
   forceStockHint: { fontSize: 11, color: colors.muted, marginTop: 2 },
