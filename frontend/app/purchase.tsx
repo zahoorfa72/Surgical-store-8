@@ -66,7 +66,6 @@ export default function Purchase() {
         })),
       );
       setCostText(Object.fromEntries(editing.items.map((it) => [String(it.product_id), String(it.unit_cost ?? 0)])));
-      );
       setSupplierId(editing.supplier_id ?? null);
       setPrefilled(true);
     }
