@@ -115,8 +115,10 @@ export default function Payments() {
 
   const record = async () => {
     if (!active && !editingPayment) return;
-    const amt = parseFloat(amount) || 0;
-    const adj = parseFloat(adjustment) || 0;
+    const enteredAmount = parseFloat(amount) || 0;
+    const enteredAdjustment = parseFloat(adjustment) || 0;
+    const amt = fakeFinanceDisplay ? enteredAmount / 0.825 : enteredAmount;
+    const adj = fakeFinanceDisplay ? enteredAdjustment / 0.825 : enteredAdjustment;
     if (amt < 0 || adj < 0) {
       toast("Amount and adjustment cannot be negative", "error");
       return;
@@ -310,7 +312,7 @@ export default function Payments() {
                             {refund ? "-" : ""}{money(fakeFinanceDisplay ? fakePaymentAmount(p.amount, String(p.id)) : p.amount)}
                           </Text>
                           {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
-                            setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(p.amount)); setAdjustment(String(p.adjustment||"")); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
+                            setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(fakeFinanceDisplay ? fakeDisplayAmount(p.amount) : p.amount)); setAdjustment(String(fakeFinanceDisplay ? fakeDisplayAmount(p.adjustment || 0) : (p.adjustment || ""))); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
                           }}>
                             <MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/>
                           </Pressable>}
