@@ -59,15 +59,14 @@ export function fakePurchaseTotal(
   _productsById: Record<string, { sale_price?: number }>,
   recordKey: string,
 ): number {
-  // Fake finance is display-only. Use the REAL recorded purchase lot cost as
-  // the source value, then apply one deterministic display factor. This makes
-  // every receipt line, purchase receipt total, supplier subtotal and supplier
-  // grand total use exactly the same calculation.
-  return items.reduce((total, item, index) => {
-    const realUnitCost = Math.max(0, Number(item.unit_cost ?? 0) || 0);
+  // Supplier finance must use one identical display factor everywhere.
+  // The real purchase lot costs remain untouched; only the displayed total is masked.
+  const realTotal = items.reduce((total, item) => {
+    const unitCost = Math.max(0, Number(item.unit_cost ?? 0) || 0);
     const quantity = Math.max(0, Number(item.quantity) || 0);
-    return total + quantity * fakeUnitCost(realUnitCost, recordKey + ":" + index);
+    return total + quantity * unitCost;
   }, 0);
+  return fakeDisplayAmount(realTotal);
 }
 export function fakePurchaseNetTotal(
   items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
@@ -78,9 +77,9 @@ export function fakePurchaseNetTotal(
   return Math.max(0, fakePurchaseTotal(items, productsById, recordKey) - fakeDisplayAmount(refundTotal));
 }
 
-export function fakePaymentAmount(amount: unknown, key: string): number {
-  const value = Math.max(0, Number(amount ?? 0) || 0);
-  return value * (0.80 + (stableHash(key) % 6) / 100);
+export function fakePaymentAmount(amount: unknown, _key?: string): number {
+  // Supplier payment history uses the same display factor as supplier purchases.
+  return fakeDisplayAmount(amount);
 }
 
 export function fakeSaleProfit(sale: {
