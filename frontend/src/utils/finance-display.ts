@@ -69,6 +69,20 @@ export function fakePurchaseTotal(
     return total + quantity * fakeUnitCost(realUnitCost, recordKey + ":" + index);
   }, 0);
 }
+export function fakePurchaseNetTotal(
+  items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
+  productsById: Record<string, { sale_price?: number }>,
+  recordKey: string,
+  refundTotal = 0,
+): number {
+  return Math.max(0, fakePurchaseTotal(items, productsById, recordKey) - fakeDisplayAmount(refundTotal));
+}
+
+export function fakePaymentAmount(amount: unknown, key: string): number {
+  const value = Math.max(0, Number(amount ?? 0) || 0);
+  return value * (0.80 + (stableHash(key) % 6) / 100);
+}
+
 export function fakeSaleProfit(sale: {
   id?: string;
   items?: Array<{ product_id?: string; quantity?: number; unit_price?: number; sale_price?: number }>;
