@@ -66,7 +66,7 @@ export function fakePurchaseTotal(
   return items.reduce((total, item, index) => {
     const realUnitCost = Math.max(0, Number(item.unit_cost ?? 0) || 0);
     const quantity = Math.max(0, Number(item.quantity) || 0);
-    return total + quantity * fakeUnitCost(realUnitCost, String(item.product_id ?? recordKey));
+    return total + quantity * fakeUnitCost(realUnitCost, recordKey + ":" + index);
   }, 0);
 }
 export function fakeSaleProfit(sale: {
