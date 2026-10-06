@@ -251,10 +251,13 @@ export default function Purchase() {
                   <TextInput
                     testID={`purchase-cost-${l.id}`}
                     style={styles.miniInput}
-                    keyboardType="decimal-pad"
+                    keyboardType="default"
                     inputMode="decimal"
                     value={costText[l.id] ?? String(l.unit_cost)}
-                    secureTextEntry={fakeFinanceDisplay}
+                    // Do not use secureTextEntry here: on some Android keyboards it removes
+                    // the decimal separator, which prevents values such as .12 or 0.12.
+                    // The private-cost field is protected by the existing private-controls flow.
+                    secureTextEntry={false}
                     editable={true}
                     onChangeText={(t) => setCostTextValue(l.id, t)}
                   />
