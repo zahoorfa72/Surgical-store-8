@@ -182,6 +182,11 @@ export default function Purchase() {
   };
 
   const save = async () => {
+    if (!supplierId) {
+      toast("Select or create a supplier before making a purchase", "error");
+      setSupplierPickerOpen(true);
+      return;
+    }
     const valid = lines.filter((l) => l.quantity > 0);
     if (!valid.length) {
       toast("Add at least one product", "error");
