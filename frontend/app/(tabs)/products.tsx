@@ -257,7 +257,7 @@ export default function Products() {
           style={[styles.fab, { bottom: 16 }]}
           onPress={() => router.push("/product-form")}
         >
-          <MaterialDesignIcons name="plus" size={28} color={colors.onBrandPrimary} />
+          <MaterialDesignIcons name="plus" size={22} color={colors.onBrandPrimary} /><Text style={styles.fabText}>Add product</Text>
         </Pressable>
       )}
 
@@ -422,13 +422,9 @@ const useStyles = makeStyles((colors) => ({
   detailEditText: { color: colors.onBrandPrimary, fontWeight: "800" },
   delBtn: { padding: 4 },
   fab: {
-    position: "absolute",
-    right: 16,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.brandPrimary,
-    alignItems: "center",
-    justifyContent: "center",
+    position: "absolute", right: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    minHeight: 52, paddingHorizontal: 18, borderRadius: 18, backgroundColor: colors.brandPrimary,
+    elevation: 4,
   },
+  fabText: { color: colors.onBrandPrimary, fontSize: 14, fontWeight: "900" },
 }));
