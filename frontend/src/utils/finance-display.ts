@@ -56,21 +56,19 @@ export function fakeProfit(salePrice: number, key: string): number {
 
 export function fakePurchaseTotal(
   items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
-  productsById: Record<string, { sale_price?: number }>,
+  _productsById: Record<string, { sale_price?: number }>,
   recordKey: string,
 ): number {
+  // Fake finance is display-only. Use the REAL recorded purchase lot cost as
+  // the source value, then apply one deterministic display factor. This makes
+  // every receipt line, purchase receipt total, supplier subtotal and supplier
+  // grand total use exactly the same calculation.
   return items.reduce((total, item, index) => {
-    const product = item.product_id ? productsById[item.product_id] : undefined;
-    // Some purchase records do not carry a product_id (or the product's sale
-    // price may be zero). Never let fake finance turn a real purchase receipt
-    // into a displayed zero amount; fall back to the recorded purchase cost.
-    const salePrice = Number(product?.sale_price ?? 0);
-    const basePrice = salePrice > 0 ? salePrice : Number(item.unit_cost ?? 0);
+    const realUnitCost = Math.max(0, Number(item.unit_cost ?? 0) || 0);
     const quantity = Math.max(0, Number(item.quantity) || 0);
-    return total + quantity * fakeUnitCost(basePrice, recordKey + ":" + index);
+    return total + quantity * fakeUnitCost(realUnitCost, recordKey + ":" + index);
   }, 0);
 }
-
 export function fakeSaleProfit(sale: {
   id?: string;
   items?: Array<{ product_id?: string; quantity?: number; unit_price?: number; sale_price?: number }>;
