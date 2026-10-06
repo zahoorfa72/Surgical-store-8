@@ -105,7 +105,7 @@ export default function Payments() {
 
   const openFor = (p: Party) => {
     setActive(p);
-    setAmount(p.balance > 0 ? String(fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[p.id] ?? 0) : p.balance) : "");
+    setAmount(p.balance > 0 ? String(p.balance) : "");
     setAdjustment("");
     setNote("");
     setReceiptPhoto(receiptPhotos[p.id] ?? null);
@@ -300,7 +300,7 @@ export default function Payments() {
                               </View>
                               <Text style={styles.ledgerMeta}>
                                 {formatDate(p.created_at)}
-                                {p.adjustment ? ` · adj ${money(p.adjustment)}` : ""}
+                                {p.adjustment ? ` · adj ${money(fakeFinanceDisplay ? fakePaymentAmount(p.adjustment, String(p.id) + ":adjustment") : p.adjustment)}` : ""}
                                 {p.note ? ` · ${p.note}` : ""}
                               </Text>
                             </View>
