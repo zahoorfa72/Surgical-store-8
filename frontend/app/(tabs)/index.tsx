@@ -141,6 +141,9 @@ export default function Dashboard() {
   const [calendarTarget, setCalendarTarget] = useState<"day" | "month" | "year" | "from" | "to" | null>(null);
   const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | "units" | "purchases" | "inventory" | "products" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
+  const [detailFromDate, setDetailFromDate] = useState("");
+  const [detailToDate, setDetailToDate] = useState("");
+  const [detailCalendarTarget, setDetailCalendarTarget] = useState<"from" | "to" | null>(null);
   const [balanceDetailDate, setBalanceDetailDate] = useState(localDay);
   const [balanceFromDate, setBalanceFromDate] = useState(localDay);
   const [balanceToDate, setBalanceToDate] = useState(localDay);
@@ -207,8 +210,13 @@ export default function Dashboard() {
       return d >= start && d < end;
     }
     if (reportRange.startsWith("date-range:")) {
-      const [from,to] = reportRange.slice(11).split(":"); const start = new Date(from+"T00:00:00"); const end = new Date(to+"T00:00:00"); end.setDate(end.getDate()+1);
-      return d >= start && d < end;
+      const [from,to] = reportRange.slice(11).split(":");
+      const start = from ? new Date(from+"T00:00:00") : null;
+      const end = to ? new Date(to+"T00:00:00") : null;
+      if (start && end) { end.setDate(end.getDate()+1); return d >= start && d < end; }
+      if (start) return d >= start;
+      if (end) { end.setDate(end.getDate()+1); return d < end; }
+      return true;
     }
     if (reportRange.startsWith("month:")) {
       const start = new Date(reportRange.slice(6)+"-01T00:00:00"); const end = new Date(start.getFullYear(), start.getMonth()+1,1); return d >= start && d < end;
@@ -219,6 +227,20 @@ export default function Dashboard() {
     if (reportRange === "all") return true;
     return true;
   };
+  const detailFromIso = displayToIso(detailFromDate);
+  const detailToIso = displayToIso(detailToDate);
+  const inDetailRange = (iso?: string) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    const start = detailFromIso ? new Date(detailFromIso + "T00:00:00") : null;
+    const end = detailToIso ? new Date(detailToIso + "T00:00:00") : null;
+    if (start && end) { end.setDate(end.getDate()+1); return d >= start && d < end; }
+    if (start) return d >= start;
+    if (end) { end.setDate(end.getDate()+1); return d < end; }
+    return inSelectedReport(iso);
+  };
+  const detailSales = sales.filter((x:any) => inDetailRange(x.created_at));
+  const detailPurchases = purchases.filter((x:any) => inDetailRange(x.created_at));
 
   return (
     <View style={styles.root}>
@@ -346,11 +368,45 @@ export default function Dashboard() {
                     ))}
                   </Card>
                 )}
+                {financeDetailsOpen !== "balance" && financeDetailsOpen !== null && (
+                  <>
+                    <View style={styles.customDateRow}>
+                      <View style={[styles.dateFilter, styles.customDateBox]}>
+                        <Pressable testID="detail-from-date" style={styles.dateFilter} onPress={() => setDetailCalendarTarget("from")}>
+                          <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
+                          <Text style={styles.dateValue}>{detailFromDate || "From date"}</Text>
+                        </Pressable>
+                        {!!detailFromDate && <Pressable hitSlop={8} onPress={() => setDetailFromDate("")}><MaterialDesignIcons name="close-circle" size={17} color={colors.muted} /></Pressable>}
+                      </View>
+                      <View style={[styles.dateFilter, styles.customDateBox]}>
+                        <Pressable testID="detail-to-date" style={styles.dateFilter} onPress={() => setDetailCalendarTarget("to")}>
+                          <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
+                          <Text style={styles.dateValue}>{detailToDate || "To date"}</Text>
+                        </Pressable>
+                        {!!detailToDate && <Pressable hitSlop={8} onPress={() => setDetailToDate("")}><MaterialDesignIcons name="close-circle" size={17} color={colors.muted} /></Pressable>}
+                      </View>
+                    </View>
+                    <DateCalendarModal
+                      visible={detailCalendarTarget !== null}
+                      mode="day"
+                      initialIso={detailCalendarTarget === "to" ? (detailToIso || detailFromIso || localDay) : (detailFromIso || detailToIso || localDay)}
+                      onClose={() => setDetailCalendarTarget(null)}
+                      onSelect={(iso) => {
+                        if (detailCalendarTarget === "from") setDetailFromDate(isoToDisplay(iso));
+                        else if (detailCalendarTarget === "to") setDetailToDate(isoToDisplay(iso));
+                        setDetailCalendarTarget(null);
+                      }}
+                    />
+                    {!!(detailFromDate || detailToDate) && detailFromIso && detailToIso && detailFromIso > detailToIso && (
+                      <Text style={styles.dateHint}>From date cannot be after To date.</Text>
+                    )}
+                  </>
+                )}
                 {financeDetailsOpen === "units" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Units sold — selected period</Text>
+                    <Text style={styles.detailHeader}>Total units sold — selected period</Text>
                     <Text style={styles.detailBig}>{String(data.units_sold)} units</Text>
-                    {sales.filter((x:any) => inSelectedReport(x.created_at)).map((x:any) => (
+                    {detailSales.map((x:any) => (
                       <View key={x.id} style={styles.detailLine}>
                         <View style={{flex:1}}>
                           <Text style={styles.detailLabel}>{x.invoice_no} · {x.customer_name || "Walk-in"} · {new Date(x.created_at).toLocaleString()}</Text>
@@ -367,7 +423,7 @@ export default function Dashboard() {
                   <Card>
                     <Text style={styles.detailHeader}>Purchases — selected period</Text>
                     <Text style={styles.detailBig}>{money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)}</Text>
-                    {purchases.filter((x:any) => inSelectedReport(x.created_at)).map((x:any) => (
+                    {detailPurchases.map((x:any) => (
                       <View key={x.id} style={styles.detailLine}>
                         <View style={{flex:1}}>
                           <Text style={styles.detailLabel}>{x.ref_no} · {x.supplier_name || "No supplier"} · {new Date(x.created_at).toLocaleString()}</Text>
