@@ -173,15 +173,17 @@ export default function Dashboard() {
   const { data: products = [] } = useProducts();
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
-  const selectedBalanceFrom = balanceFromDate || localDay;
-  const selectedBalanceTo = balanceToDate || selectedBalanceFrom;
-  const balanceStart = new Date(selectedBalanceFrom + "T00:00:00");
-  const balanceEnd = new Date(selectedBalanceTo + "T00:00:00");
-  balanceEnd.setDate(balanceEnd.getDate() + 1);
+  const selectedBalanceFrom = balanceFromDate || "";
+  const selectedBalanceTo = balanceToDate || "";
+  const balanceStart = selectedBalanceFrom ? new Date(selectedBalanceFrom + "T00:00:00") : null;
+  const balanceEnd = selectedBalanceTo ? new Date(selectedBalanceTo + "T00:00:00") : null;
+  if (balanceEnd) balanceEnd.setDate(balanceEnd.getDate() + 1);
   const inBalanceRange = (iso?: string) => {
     if (!iso) return false;
     const d = new Date(iso);
-    return d >= balanceStart && d < balanceEnd;
+    if (balanceStart && d < balanceStart) return false;
+    if (balanceEnd && d >= balanceEnd) return false;
+    return true;
   };
   const balanceDaySales = sales.filter((s: any) => inBalanceRange(s.created_at));
   const balanceDayPayments = payments.filter((p: any) => inBalanceRange(p.created_at));
@@ -321,7 +323,7 @@ export default function Dashboard() {
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
-            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(exactDate || localDay); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="Remaining Balance" value={money(data.remaining_balance)} icon="wallet" tone={data.remaining_balance >= 0 ? "success" : "error"} testID="stat-remaining-balance" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(exactDate || localDay); setBalanceFromDate(exactDate || localDay); setBalanceToDate(exactDate || localDay); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="Remaining Balance" value={money(data.remaining_balance)} icon="wallet" tone={data.remaining_balance >= 0 ? "success" : "error"} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
 
@@ -470,14 +472,20 @@ export default function Dashboard() {
                 {financeDetailsOpen === "balance" && (
                   <>
                     <View style={styles.customDateRow}>
-                      <Pressable testID="remaining-balance-from-picker" style={[styles.dateFilter, styles.customDateBox]} onPress={() => setBalanceCalendarTarget("from")}>
-                        <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
-                        <Text style={styles.dateValue}>{isoToDisplay(selectedBalanceFrom)}</Text>
-                      </Pressable>
-                      <Pressable testID="remaining-balance-to-picker" style={[styles.dateFilter, styles.customDateBox]} onPress={() => setBalanceCalendarTarget("to")}>
-                        <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
-                        <Text style={styles.dateValue}>{isoToDisplay(selectedBalanceTo)}</Text>
-                      </Pressable>
+                      <View style={[styles.dateFilter, styles.customDateBox]}>
+                        <Pressable testID="remaining-balance-from-picker" style={styles.dateFilter} onPress={() => setBalanceCalendarTarget("from")}>
+                          <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
+                          <Text style={styles.dateValue}>{selectedBalanceFrom ? isoToDisplay(selectedBalanceFrom) : "From date"}</Text>
+                        </Pressable>
+                        {!!selectedBalanceFrom && <Pressable hitSlop={8} onPress={() => setBalanceFromDate("")}><MaterialDesignIcons name="close-circle" size={17} color={colors.muted} /></Pressable>}
+                      </View>
+                      <View style={[styles.dateFilter, styles.customDateBox]}>
+                        <Pressable testID="remaining-balance-to-picker" style={styles.dateFilter} onPress={() => setBalanceCalendarTarget("to")}>
+                          <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
+                          <Text style={styles.dateValue}>{selectedBalanceTo ? isoToDisplay(selectedBalanceTo) : "To date"}</Text>
+                        </Pressable>
+                        {!!selectedBalanceTo && <Pressable hitSlop={8} onPress={() => setBalanceToDate("")}><MaterialDesignIcons name="close-circle" size={17} color={colors.muted} /></Pressable>}
+                      </View>
                     </View>
                     <DateCalendarModal
                       visible={balanceCalendarTarget !== null}
@@ -495,7 +503,7 @@ export default function Dashboard() {
                       }}
                     />
                     <Card>
-                      <Text style={styles.detailHeader}>Remaining balance — {isoToDisplay(selectedBalanceFrom)} to {isoToDisplay(selectedBalanceTo)}</Text>
+                      <Text style={styles.detailHeader}>Remaining balance — {selectedBalanceFrom ? isoToDisplay(selectedBalanceFrom) : "All dates"}{selectedBalanceTo ? " to " + isoToDisplay(selectedBalanceTo) : " onward"}</Text>
                       <PLRow label="Sale / Net sales" value={money(displayFinanceAmount(balanceDayRevenue, fakeFinanceDisplay))} />
                       <PLRow label="Gross profit" value={"- " + money(displayFinanceAmount(balanceDayGrossProfit, fakeFinanceDisplay))} muted />
                       <PLRow label="Operational expenses" value={"- " + money(displayFinanceAmount(balanceDayOperating, fakeFinanceDisplay))} muted />
@@ -591,6 +599,7 @@ export default function Dashboard() {
             <PLRow label="Supplier payments (paid out)" value={"- " + money(displayFinanceAmount(data.supplier_payments, fakeFinanceDisplay))} muted />
             <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
             <PLRow label="Direct / purchase expenses" value={"- " + money(displayFinanceAmount(data.cogs_expenses, fakeFinanceDisplay))} muted />
+            <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(data.supplier_refunds ?? 0, fakeFinanceDisplay))} muted />
             <View style={styles.plDivider} />
             <PLRow
               label="Remaining balance"
@@ -598,7 +607,6 @@ export default function Dashboard() {
               bold
               tone={data.remaining_balance >= 0 ? "success" : "error"}
             />
-            <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(data.supplier_refunds ?? 0, fakeFinanceDisplay))} muted />
             <Text style={styles.balanceHint}>Supplier payments reduce remaining balance; supplier refunds increase it. Personal expenses are not deducted.</Text>
           </Card>
 
