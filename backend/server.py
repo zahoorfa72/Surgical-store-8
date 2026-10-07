@@ -2428,12 +2428,13 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             parts = range.split(":")
             if len(parts) != 3:
                 raise ValueError
-            local_from = datetime.fromisoformat(parts[1]).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-            local_to = datetime.fromisoformat(parts[2]).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-            if local_to < local_from:
+            from_value, to_value = parts[1].strip(), parts[2].strip()
+            local_from = datetime.fromisoformat(from_value).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) if from_value else None
+            local_to = datetime.fromisoformat(to_value).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) if to_value else None
+            if local_from and local_to and local_to < local_from:
                 raise ValueError
-            start = local_from - timedelta(minutes=tz_offset_minutes)
-            end = local_to + timedelta(days=1) - timedelta(minutes=tz_offset_minutes)
+            start = local_from - timedelta(minutes=tz_offset_minutes) if local_from else None
+            end = local_to + timedelta(days=1) - timedelta(minutes=tz_offset_minutes) if local_to else None
     except (ValueError, IndexError):
         raise HTTPException(status_code=400, detail="Invalid date range. Use YYYY-MM-DD or YYYY-MM.")
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
