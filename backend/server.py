@@ -2470,73 +2470,15 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     supplier_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "supplier_refund"), 2)
     customer_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "customer_refund"), 2)
 
-    # Remaining Balance is a store-wide running cash figure, not a period
-    # statistic. A new calendar day must carry forward yesterday's balance
-    # instead of resetting to the opening budget. Reports still use the
-    # selected range for their sales/profit/expense figures below.
-    all_returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
-    all_expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(20000)
-    all_payments = await db.payments.find({"deleted": {"$ne": True}}).to_list(20000)
-
-    # Profit model:
-    #   Gross profit = net sales − cost of goods sold
-    #   Net profit   = gross profit − personal expenses (ONLY personal hits profit)
-    # Supplier payments, operating expenses and direct/COGS expenses no longer
-    # reduce profit — they reduce the Remaining Balance (cash) instead.
-    cogs_total = cogs_goods
-    gross_profit = round(revenue - cogs_goods, 2)
-    net_profit = round(gross_profit - personal_expenses, 2)
-    total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
-
-    # Remaining balance follows the store rule:
-    #   base remaining = net sales − gross profit
-    #   supplier payments are then deducted when actually paid in Payments.
-    # Purchases themselves never reduce this balance; personal expenses only
-    # affect Net Profit.
-    cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
-    cash_sale_returns = 0.0
-    for r in returns:
-        sale = next((s for s in all_sales if oid(s["_id"]) == r.get("sale_id")), None)
-        if sale and not sale.get("credit", False):
-            cash_sale_returns += float(r.get("refund_total", 0))
-    # A purchase return changes inventory and the supplier payable. It is NOT
-    # automatically a cash receipt; the supplier may credit the account
-    # instead of handing back cash. Cash changes only through an explicit
-    # supplier payment/receipt transaction.
-    budget_doc = await db.budget.find_one({"_id": "singleton"})
-    opening_cash = float((budget_doc or {}).get("opening_amount", 0) or 0)
-    purchase_return_refunds = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
-
-    # IMPORTANT: Remaining Balance is cumulative across the lifetime of the
-    # store. It must not reset to the opening budget at midnight or change
-    # merely because the user switches Daily/Weekly/Monthly/Yearly reports.
-    # Keep period-specific KPIs above, but calculate this figure from ALL
-    # historical cash/profit movements.
-    all_cash_sales = round(sum(s.get("total", 0) for s in all_sales if not s.get("credit", False)), 2)
-    all_cash_sale_returns = 0.0
-    for r in all_returns:
-        sale = next((s for s in all_sales if oid(s["_id"]) == r.get("sale_id")), None)
-        if sale and not sale.get("credit", False):
-            all_cash_sale_returns += float(r.get("refund_total", 0))
-    all_customer_receipts = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "receive"), 2)
-    all_supplier_refunds = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "supplier_refund"), 2)
-    all_customer_refunds = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "customer_refund"), 2)
-    all_supplier_payments = round(sum(p.get("amount", 0) for p in all_payments if p.get("kind") == "pay"), 2)
-    all_cogs_expenses = round(sum(e.get("amount", 0) for e in all_expenses if e.get("bucket") == "cogs"), 2)
-    all_operating_expenses = round(sum(e.get("amount", 0) for e in all_expenses if e.get("bucket") == "operating"), 2)
-    all_gross_revenue = round(sum(s.get("total", 0) for s in all_sales), 2)
-    all_returns_total = round(sum(r.get("refund_total", 0) for r in all_returns), 2)
-    all_returns_cogs = round(sum(r.get("refund_cogs", 0) for r in all_returns), 2)
-    all_net_sales = round(all_gross_revenue - all_returns_total, 2)
-    all_cogs_goods = round(sum(s.get("cogs", 0) for s in all_sales) - all_returns_cogs, 2)
-    all_gross_profit = round(all_net_sales - all_cogs_goods, 2)
-    all_expenses_except_personal = round(all_cogs_expenses + all_operating_expenses, 2)
-
+    # Remaining Balance is a period/day profit-derived figure.
+    # Required store formula:
+    #   Remaining Balance = Sale/Net Sales - Gross Profit
+    #                    - Operational Expenses - COGS Expenses
+    # It is deliberately NOT total revenue, cash-in/out, supplier payments,
+    # purchase total, or opening cash. When the user selects a day/range,
+    # every component is calculated for that same selected period.
     remaining_balance = round(
-        opening_cash + all_cash_sales - all_cash_sale_returns
-        + all_customer_receipts + all_supplier_refunds
-        - all_supplier_payments - all_customer_refunds
-        - all_expenses_except_personal - all_gross_profit,
+        revenue - gross_profit - operating_expenses - cogs_expenses,
         2,
     )
 
