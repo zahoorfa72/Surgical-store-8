@@ -198,6 +198,26 @@ export default function Dashboard() {
   const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const balanceDayRemaining = balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense - balanceSupplierPayments + balanceSupplierRefunds;
   const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
+  const inSelectedReport = (iso?: string) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    if (reportRange.startsWith("date:")) {
+      const x = reportRange.slice(5); const start = new Date(x + "T00:00:00"); const end = new Date(start); end.setDate(end.getDate()+1);
+      return d >= start && d < end;
+    }
+    if (reportRange.startsWith("date-range:")) {
+      const [from,to] = reportRange.slice(11).split(":"); const start = new Date(from+"T00:00:00"); const end = new Date(to+"T00:00:00"); end.setDate(end.getDate()+1);
+      return d >= start && d < end;
+    }
+    if (reportRange.startsWith("month:")) {
+      const start = new Date(reportRange.slice(6)+"-01T00:00:00"); const end = new Date(start.getFullYear(), start.getMonth()+1,1); return d >= start && d < end;
+    }
+    if (reportRange.startsWith("year:")) {
+      const start = new Date(reportRange.slice(5)+"-01-01T00:00:00"); const end = new Date(start.getFullYear()+1,0,1); return d >= start && d < end;
+    }
+    if (reportRange === "all") return true;
+    return true;
+  };
 
   return (
     <View style={styles.root}>
@@ -361,64 +381,74 @@ export default function Dashboard() {
                 )}
                 {financeDetailsOpen === "balance" && (
                   <>
-                    <Pressable testID="remaining-balance-date-picker" style={styles.dateFilter} onPress={() => setBalanceCalendarOpen(true)}>
-                      <MaterialDesignIcons name="calendar" size={20} color={colors.brandPrimary} />
-                      <Text style={styles.dateValue}>{isoToDisplay(selectedBalanceDate)}</Text>
-                      <MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
-                    </Pressable>
+                    <View style={styles.customDateRow}>
+                      <Pressable testID="remaining-balance-from-picker" style={[styles.dateFilter, styles.customDateBox]} onPress={() => setBalanceCalendarTarget("from")}>
+                        <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
+                        <Text style={styles.dateValue}>{isoToDisplay(selectedBalanceFrom)}</Text>
+                      </Pressable>
+                      <Pressable testID="remaining-balance-to-picker" style={[styles.dateFilter, styles.customDateBox]} onPress={() => setBalanceCalendarTarget("to")}>
+                        <MaterialDesignIcons name="calendar" size={18} color={colors.brandPrimary} />
+                        <Text style={styles.dateValue}>{isoToDisplay(selectedBalanceTo)}</Text>
+                      </Pressable>
+                    </View>
                     <DateCalendarModal
-                      visible={balanceCalendarOpen}
+                      visible={balanceCalendarTarget !== null}
                       mode="day"
-                      initialIso={selectedBalanceDate}
-                      onClose={() => setBalanceCalendarOpen(false)}
-                      onSelect={(iso) => { setBalanceDetailDate(iso); setBalanceCalendarOpen(false); }}
+                      initialIso={balanceCalendarTarget === "to" ? selectedBalanceTo : selectedBalanceFrom}
+                      onClose={() => setBalanceCalendarTarget(null)}
+                      onSelect={(iso) => {
+                        if (balanceCalendarTarget === "from") {
+                          setBalanceFromDate(iso);
+                          if (iso > selectedBalanceTo) setBalanceToDate(iso);
+                        } else {
+                          setBalanceToDate(iso < selectedBalanceFrom ? selectedBalanceFrom : iso);
+                        }
+                        setBalanceCalendarTarget(null);
+                      }}
                     />
                     <Card>
-                      <Text style={styles.detailHeader}>Remaining balance — {isoToDisplay(selectedBalanceDate)}</Text>
-                      <PLRow label="Sale / Net sales" value={money(balanceDayRevenue)} />
-                      <PLRow label="Gross profit" value={"- " + money(balanceDayGrossProfit)} muted />
-                      <PLRow label="Operational expenses" value={"- " + money(balanceDayOperating)} muted />
-                      <PLRow label="COGS expenses" value={"- " + money(balanceDayCogsExpense)} muted />
+                      <Text style={styles.detailHeader}>Remaining balance — {isoToDisplay(selectedBalanceFrom)} to {isoToDisplay(selectedBalanceTo)}</Text>
+                      <PLRow label="Sale / Net sales" value={money(displayFinanceAmount(balanceDayRevenue, fakeFinanceDisplay))} />
+                      <PLRow label="Gross profit" value={"- " + money(displayFinanceAmount(balanceDayGrossProfit, fakeFinanceDisplay))} muted />
+                      <PLRow label="Operational expenses" value={"- " + money(displayFinanceAmount(balanceDayOperating, fakeFinanceDisplay))} muted />
+                      <PLRow label="COGS expenses" value={"- " + money(displayFinanceAmount(balanceDayCogsExpense, fakeFinanceDisplay))} muted />
+                      <PLRow label="Supplier payments" value={"- " + money(displayFinanceAmount(balanceSupplierPayments, fakeFinanceDisplay))} muted />
+                      <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(balanceSupplierRefunds, fakeFinanceDisplay))} muted />
                       <View style={styles.plDivider} />
-                      <PLRow label="Real remaining balance" value={money(balanceDayRemaining)} bold tone={balanceDayRemaining >= 0 ? "success" : "error"} />
-                      <Text style={styles.balanceHint}>Formula: Sale − Gross Profit − Operational Expenses − COGS Expenses.</Text>
+                      <PLRow label="Remaining balance" value={money(displayFinanceAmount(balanceDayRemaining, fakeFinanceDisplay))} bold tone={balanceDayRemaining >= 0 ? "success" : "error"} />
+                      <Text style={styles.balanceHint}>Net sales − Gross profit − operational expenses − COGS expenses − supplier payments + supplier refunds.</Text>
                     </Card>
                     <Card>
-                      <Text style={styles.detailHeader}>Money in</Text>
-                      {balanceDaySales.filter((s: any) => !s.credit).map((s: any) => (
-                        <View key={s.id} style={styles.detailLine}>
-                          <Text style={styles.detailLabel}>{s.invoice_no} · Customer sale</Text>
-                          <Text style={styles.detailValue}>+{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
-                        </View>
-                      ))}
-                      {balanceDayPayments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").map((p: any) => (
-                        <View key={p.id} style={styles.detailLine}>
-                          <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
-                          <Text style={styles.detailValue}>+{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
-                        </View>
-                      ))}
+                      <Text style={styles.detailHeader}>All-time total remaining balance</Text>
+                      <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceAllTime, fakeFinanceDisplay))}</Text>
+                      <Text style={styles.balanceHint}>This is the total remaining balance across all recorded time.</Text>
                     </Card>
                     <Card>
-                      <Text style={styles.detailHeader}>Money out</Text>
-                      {balanceDayPayments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").map((p: any) => (
-                        <View key={p.id} style={styles.detailLine}>
-                          <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
-                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
+                      <Text style={styles.detailHeader}>Sales and supplier cash movements</Text>
+                      {balanceDaySales.map((s: any) => (
+                        <View key={"sale-"+s.id} style={styles.detailLine}>
+                          <View style={{flex:1}}>
+                            <Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}</Text>
+                            {(s.items || []).map((it:any, idx:number) => (
+                              <Text key={idx} style={styles.itemFinance}>{it.name} · Qty {it.quantity} × {money(it.unit_price)} = {money(it.line_total)}</Text>
+                            ))}
+                          </View>
+                          <Text style={styles.detailValue}>{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
-                      {balanceDayExpenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").map((e: any) => (
-                        <View key={e.id} style={styles.detailLine}>
-                          <Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text>
-                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
+                      {balanceDayPayments.map((p: any) => (
+                        <View key={"pay-"+p.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{p.party_name || "Party"} · {p.kind}</Text>
+                          <Text style={p.kind === "pay" ? styles.detailOut : styles.detailValue}>{p.kind === "pay" ? "-" : "+"}{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
                     </Card>
                     <Card>
-                      <Text style={styles.detailHeader}>Selected date total</Text>
-                      <Text style={styles.detailBig}>{money(balanceDayRemaining)}</Text>
+                      <Text style={styles.detailHeader}>Selected period total</Text>
+                      <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceDayRemaining, fakeFinanceDisplay))}</Text>
                     </Card>
                   </>
-                )}
+                )}}
               </ScrollView>
             </View>
           </Modal>
