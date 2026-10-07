@@ -1298,7 +1298,7 @@ def payment_public(d: dict) -> dict:
 
 
 @api.get("/payments")
-async def list_payments(_: Staff, party_id: Optional[str] = None, limit: int = Query(300, le=1000)):
+async def list_payments(_: Staff, party_id: Optional[str] = None, limit: int = Query(10000, le=10000)):
     q: dict = {"deleted": {"$ne": True}}
     if party_id:
         q["party_id"] = party_id
@@ -1412,7 +1412,7 @@ def sale_public(d: dict) -> dict:
 
 
 @api.get("/sales")
-async def list_sales(_: AnyUser, limit: int = Query(200, le=1000)):
+async def list_sales(_: AnyUser, limit: int = Query(10000, le=10000)):
     docs = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
     return [sale_public(d) for d in docs]
 
