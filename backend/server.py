@@ -2464,6 +2464,10 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cogs_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "cogs"), 2)
     operating_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "operating"), 2)
     personal_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "personal"), 2)
+    # Keep every profit component explicit before calculating Remaining Balance.
+    gross_profit = round(revenue - cogs_goods, 2)
+    cogs_total = round(cogs_goods + cogs_expenses, 2)
+    total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
 
     payments = await db.payments.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     supplier_payments = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "pay"), 2)
