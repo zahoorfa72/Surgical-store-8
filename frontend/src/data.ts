@@ -105,6 +105,7 @@ function localReport(range: string): ReportSummary {
   const expenses = filterRows(queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? []);
   const payments = filterRows(queryClient.getQueryData<Payment[]>(qk.payments()) ?? []);
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
+  const budget = queryClient.getQueryData<Budget>(qk.budget) ?? { monthly_amount: 0, opening_amount: 0, spent_this_month: 0 };
 
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
@@ -142,8 +143,11 @@ function localReport(range: string): ReportSummary {
     personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating,
     total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
-    // Remaining Balance = Net Sales - Gross Profit - Supplier Payments - Operational Expenses - COGS Expenses + Supplier Refunds.
-    remaining_balance: revenue - grossProfit - supplierPayments - operating - cogsExpenses + supplierRefunds,
+    // Remaining Balance = Net Sales - Gross Profit - Supplier Payments - Operational Expenses
+    // - COGS Expenses + Supplier Refunds + Opening Purchase Budget + Monthly Expenses Budget.
+    remaining_balance:
+      revenue - grossProfit - supplierPayments - operating - cogsExpenses + supplierRefunds
+      + Number(budget.opening_amount ?? 0) + Number(budget.monthly_amount ?? 0),
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
