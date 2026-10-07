@@ -109,12 +109,16 @@ function localReport(range: string): ReportSummary {
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
+  // Match Sell exactly: use the stored profit on each sale and reverse
+  // returned profit. This keeps offline Remaining Balance identical to Sell.
+  const storedSaleProfit = sales.reduce((n, s) => n + Number(s.profit ?? 0), 0);
+  const storedReturnProfit = returns.reduce((n, r) => n + Number(r.refund_profit ?? 0), 0);
+  const grossProfit = storedSaleProfit - storedReturnProfit;
   const cogsGoods = sales.reduce((n, s) => n + Number(s.cogs ?? 0), 0) - returns.reduce((n, r) => n + Number(r.refund_cogs ?? 0), 0);
   const cogsExpenses = expenses.filter(e => e.bucket === "cogs").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const personal = expenses.filter(e => e.bucket === "personal").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const revenue = salesRevenue - returnsTotal;
-  const grossProfit = revenue - cogsGoods;
   // Cash movement is the actual amount field only. Adjustment is a
   // non-cash settlement/discount and must not be counted as money in hand.
   const supplierPayments = payments.filter(p => p.kind === "pay").reduce((n, p) => n + Number(p.amount ?? 0), 0);
