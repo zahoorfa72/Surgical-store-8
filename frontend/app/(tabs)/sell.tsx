@@ -26,6 +26,7 @@ import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { OrderImageScannerModal } from "@/src/components/order-image-scanner";
 import { EmptyState, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number };
 type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean };
@@ -91,10 +92,11 @@ export default function Sell() {
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (products ?? []).filter((p) => !q || p.name.toLowerCase().includes(q));
-  }, [products, search]);
+  const filtered = useMemo(() => fuzzyFilter(
+    products ?? [],
+    search,
+    [(p) => p.name, (p) => p.sku, (p) => p.barcode],
+  ), [products, search]);
 
   const cartMap = useMemo(() => new Map(cart.map((c) => [c.id, c])), [cart]);
   const subtotal = cart.reduce((s, c) => s + c.quantity * c.unit_price, 0);
@@ -102,28 +104,32 @@ export default function Sell() {
   const total = Math.max(0, subtotal - discountNum);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
-  const reviewedCart = useMemo(() => {
-    const q = reviewSearch.trim().toLowerCase();
-    return cart.filter((c) => !q || c.name.toLowerCase().includes(q));
-  }, [cart, reviewSearch]);
+  const reviewedCart = useMemo(() => fuzzyFilter(
+    cart,
+    reviewSearch,
+    [(c) => c.name],
+  ), [cart, reviewSearch]);
 
   const reviewInventoryMatches = useMemo(() => {
-    const q = reviewSearch.trim().toLowerCase();
-    if (!q) return [];
-    return (products ?? [])
-      .filter((p) => !cartMap.has(p.id))
-      .filter((p) => p.name.toLowerCase().includes(q) || String(p.sku ?? "").toLowerCase().includes(q) || String(p.barcode ?? "").toLowerCase().includes(q))
-      .slice(0, 30);
+    if (!reviewSearch.trim()) return [];
+    return fuzzyFilter(
+      (products ?? []).filter((p) => !cartMap.has(p.id)),
+      reviewSearch,
+      [(p) => p.name, (p) => p.sku, (p) => p.barcode],
+      { limit: 30 },
+    );
   }, [products, cartMap, reviewSearch]);
   const filteredHeldSales = useMemo(() => {
-    const q = heldSearch.trim().toLowerCase();
-    if (!q) return heldSales;
-    return heldSales.filter((h) => {
-      const customerName = customers?.find((c) => c.id === h.customerId)?.name ?? "";
-      return h.id.toLowerCase().includes(q)
-        || customerName.toLowerCase().includes(q)
-        || h.cart.some((line) => line.name.toLowerCase().includes(q));
-    });
+    if (!heldSearch.trim()) return heldSales;
+    return fuzzyFilter(
+      heldSales,
+      heldSearch,
+      [
+        (h) => h.id,
+        (h) => customers?.find((c) => c.id === h.customerId)?.name,
+        (h) => h.cart.map((line) => line.name).join(" "),
+      ],
+    );
   }, [heldSales, heldSearch, customers]);
 
   useEffect(() => { AsyncStorage.getItem("ssm.heldSales").then((raw) => { if (!raw) return; try { setHeldSales(JSON.parse(raw)); } catch { setHeldSales([]); } }); }, []);
