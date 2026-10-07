@@ -4,7 +4,7 @@ function normalize(value: unknown): string {
   return String(value ?? "")
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
 
