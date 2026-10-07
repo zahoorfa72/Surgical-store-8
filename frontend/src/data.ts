@@ -143,34 +143,9 @@ function localReport(range: string): ReportSummary {
     personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating,
     total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
-    // Profit is affected only by personal expenses. Supplier payments and
-    // operating/COGS cash outflows affect cash remaining, not profit.
-    net_profit: grossProfit - personal,
-    // Same cash rule as the server: include opening cash, cash sales,
-    // supplier-return refunds, customer receipts, supplier payments and cash
-    // expenses. Purchases themselves are inventory, not a cash-outflow in this
-    // simplified ledger unless a supplier payment is recorded.
-    remaining_balance: (
-      Number((queryClient.getQueryData<any>(qk.budget)?.opening_amount ?? 0))
-      + allSales.filter(s => !s.credit).reduce((n, s) => n + Number(s.total ?? 0), 0)
-      - allReturns.filter(r => {
-          const sale = allSales.find(s => s.id === r.sale_id);
-          return !!sale && !sale.credit;
-        }).reduce((n, r) => n + Number(r.refund_total ?? 0), 0)
-      + allPayments.filter(p => p.kind === "receive").reduce((n, p) => n + Number(p.amount ?? 0), 0)
-      + allPayments.filter(p => p.kind === "supplier_refund").reduce((n, p) => n + Number(p.amount ?? 0), 0)
-      - allPayments.filter(p => p.kind === "customer_refund").reduce((n, p) => n + Number(p.amount ?? 0), 0)
-      - allPayments.filter(p => p.kind === "pay").reduce((n, p) => n + Number(p.amount ?? 0), 0)
-      - allExpenses.filter(e => e.bucket === "cogs" || e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0)
-      - (
-          allSales.reduce((n, s) => n + Number(s.total ?? 0), 0)
-          - allReturns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0)
-          - (
-              allSales.reduce((n, s) => n + Number(s.cogs ?? 0), 0)
-              - allReturns.reduce((n, r) => n + Number(r.refund_cogs ?? 0), 0)
-            )
-        )
-    ),
+    // Remaining Balance = Net Sales - Gross Profit - Operational Expenses - COGS Expenses.
+    remaining_balance: revenue - grossProfit - operating - cogsExpenses,
+
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
     product_count: products.length,
