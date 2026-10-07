@@ -2483,6 +2483,13 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     returns_total = round(sum(r.get("refund_total", 0) for r in returns), 2)
     returns_cogs = round(sum(r.get("refund_cogs", 0) for r in returns), 2)
     revenue = round(gross_revenue - returns_total, 2)  # net sales
+    # Gross Profit must match the profit recorded by Sell for every invoice.
+    # This preserves sale-level discounts and the exact purchase-cost layer used
+    # when the sale was created/edited. Returns reverse the original sale profit.
+    stored_sale_profit = round(sum(float(s.get("profit", 0) or 0) for s in sales), 2)
+    stored_return_profit = round(sum(float(r.get("refund_profit", 0) or 0) for r in returns), 2)
+    gross_profit = round(stored_sale_profit - stored_return_profit, 2)
+
     cogs_goods = round(sum(s.get("cogs", 0) for s in sales) - returns_cogs, 2)
     units_sold = sum(sum(i.get("quantity", 0) for i in s.get("items", [])) for s in sales)
     transactions = len(sales)
@@ -2491,7 +2498,6 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     operating_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "operating"), 2)
     personal_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "personal"), 2)
     # Keep every profit component explicit before calculating Remaining Balance.
-    gross_profit = round(revenue - cogs_goods, 2)
     cogs_total = round(cogs_goods + cogs_expenses, 2)
     total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
 
