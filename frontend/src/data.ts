@@ -104,13 +104,6 @@ function localReport(range: string): ReportSummary {
   const payments = filterRows(queryClient.getQueryData<Payment[]>(qk.payments()) ?? []);
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
 
-  // Remaining Balance is a lifetime running balance. Do not rebuild it from
-  // today's filtered rows, otherwise it resets to the opening budget at
-  // midnight while the Daily/Weekly/Monthly report changes.
-  const allSales = queryClient.getQueryData<Sale[]>(qk.sales) ?? [];
-  const allReturns = queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? [];
-  const allExpenses = queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? [];
-  const allPayments = queryClient.getQueryData<Payment[]>(qk.payments()) ?? [];
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
