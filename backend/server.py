@@ -2352,7 +2352,31 @@ async def report_inventory_usage(
     does not load the entire sales history just to render usage analytics.
     """
     start = range_start(range, tz_offset_minutes)
-    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    end = None
+    try:
+        if range.startswith("date:"):
+            value = range.split(":", 1)[1]
+            local_day = datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+            start = local_day + timedelta(minutes=tz_offset_minutes)
+            end = start + timedelta(days=1)
+        elif range.startswith("date-range:"):
+            parts = range.split(":")
+            if len(parts) != 3:
+                raise ValueError
+            from_value, to_value = parts[1].strip(), parts[2].strip()
+            local_from = datetime.fromisoformat(from_value).replace(tzinfo=timezone.utc) if from_value else None
+            local_to = datetime.fromisoformat(to_value).replace(tzinfo=timezone.utc) if to_value else None
+            if local_from and local_to and local_to < local_from:
+                raise ValueError
+            start = local_from + timedelta(minutes=tz_offset_minutes) if local_from else None
+            end = (local_to + timedelta(days=1) + timedelta(minutes=tz_offset_minutes)) if local_to else None
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid date range. Use YYYY-MM-DD.")
+    time_q = {"created_at": {}}
+    if start:
+        time_q["created_at"]["$gte"] = start.isoformat()
+    if end:
+        time_q["created_at"]["$lt"] = end.isoformat()
     sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
