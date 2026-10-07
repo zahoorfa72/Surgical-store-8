@@ -156,8 +156,8 @@ export default function Dashboard() {
     range === "month" && validMonth ? "month:" + validMonth :
     range === "year" && validYear ? "year:" + validYear :
     range === "custom" && validFrom && validTo ? "date-range:" + validFrom + ":" + validTo :
-    range === "custom" && validFrom ? "date:" + validFrom :
-    range === "custom" && validTo ? "date:" + validTo :
+    range === "custom" && validFrom ? "date-range:" + validFrom + ":" :
+    range === "custom" && validTo ? "date-range::" + validTo :
     range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: allTimeReport } = useReport("all", !cashier);
