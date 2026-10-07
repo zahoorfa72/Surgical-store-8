@@ -72,7 +72,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
   </style></head><body>
     ${logo ? `<img class="logo" src="${logo}" />` : ""}
     <h1>${storeName}</h1>
-    <div class="muted">Sales Receipt</div>
+    <div class="muted">Sales Receipt · Serial No. ${sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, "")}</div>
     <div class="meta">
       <div><b>Serial No:</b> ${sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, "")}</div>
        <div><b>Invoice:</b> ${sale.invoice_no}</div>
@@ -167,7 +167,7 @@ export default function Receipt() {
         <View style={styles.paper}>
           {settings?.has_logo && <Image source={{ uri: logoUrl(settings.logo_version) }} style={styles.receiptLogo} contentFit="contain" />}
           <Text style={styles.storeName}>{settings?.store_name ?? STORE_NAME}</Text>
-          <Text style={styles.receiptLabel}>Sales Receipt</Text>
+          <Text style={styles.receiptLabel}>Sales Receipt · Serial No. {String(sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, ""))}</Text>
 
           <View style={styles.metaBox}>
             <Meta label="Serial No." value={String(sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, ""))} />
