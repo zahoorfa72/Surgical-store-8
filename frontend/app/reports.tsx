@@ -7,6 +7,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { useReport } from "@/src/data";
 import { Card, ChipRow, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { DateCalendar } from "@/src/components/date-calendar";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
 
 // Daily / Weekly / Monthly / Yearly. The keys map to the ranges the offline
@@ -50,6 +51,7 @@ export default function Reports() {
 
   const [range, setRange] = useState<string>("today");
   const [date, setDate] = useState("");
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : "";
   const selectedRange = exactDate ? `date:${exactDate}` : range;
   const { data, isLoading, refetch, isRefetching } = useReport(selectedRange);
@@ -68,23 +70,12 @@ export default function Reports() {
         onBack={() => router.back()}
       />
       <ChipRow options={RANGES as any} value={range} onChange={setRange} testIDPrefix="report-range" />
-      <View style={styles.dateFilter}>
-        <MaterialDesignIcons name="calendar-search" size={20} color={colors.muted} />
-        <TextInput
-          style={styles.dateInput}
-          value={date}
-          onChangeText={setDate}
-          placeholder="Exact date: YYYY-MM-DD"
-          placeholderTextColor={colors.muted}
-          keyboardType="numbers-and-punctuation"
-          maxLength={10}
-        />
-        {date.length > 0 && (
-          <Pressable onPress={() => setDate("")} hitSlop={8}>
-            <MaterialDesignIcons name="close-circle" size={19} color={colors.muted} />
-          </Pressable>
-        )}
-      </View>
+      <Pressable style={styles.dateFilter} onPress={() => setCalendarOpen(true)}>
+        <MaterialDesignIcons name="calendar-search" size={20} color={colors.brandPrimary} />
+        <Text style={styles.dateInput}>{date ? new Date(date+"T12:00:00").toLocaleDateString() : "Select exact date"}</Text>
+        {!!date && <Pressable onPress={(e) => { e.stopPropagation(); setDate(""); }} hitSlop={8}><MaterialDesignIcons name="close-circle" size={19} color={colors.muted} /></Pressable>}
+      </Pressable>
+      <DateCalendar visible={calendarOpen} initialIso={date} onSelect={setDate} onClose={() => setCalendarOpen(false)} />
       <Text style={styles.dateHint}>{exactDate ? "Showing the finance statement for this exact date." : "Leave the date empty to use Daily / Weekly / Monthly / Yearly."}</Text>
 
       {isLoading || !data ? (
