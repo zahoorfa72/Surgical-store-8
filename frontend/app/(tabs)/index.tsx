@@ -149,7 +149,14 @@ export default function Dashboard() {
   const validYear = /^\d{4}$/.test(year.trim()) ? year.trim() : "";
   const validFrom = displayToIso(fromDate);
   const validTo = displayToIso(toDate);
-  const reportRange = range === "day" && exactDate ? "date:" + exactDate : range === "month" && validMonth ? "month:" + validMonth : range === "year" && validYear ? "year:" + validYear : range === "custom" && validFrom && validTo ? "date-range:" + validFrom + ":" + validTo : range === "day" ? "today" : range;
+  const reportRange =
+    range === "day" && exactDate ? "date:" + exactDate :
+    range === "month" && validMonth ? "month:" + validMonth :
+    range === "year" && validYear ? "year:" + validYear :
+    range === "custom" && validFrom && validTo ? "date-range:" + validFrom + ":" + validTo :
+    range === "custom" && validFrom ? "date:" + validFrom :
+    range === "custom" && validTo ? "date:" + validTo :
+    range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
   const { data: sales = [] } = useSales();
@@ -167,13 +174,19 @@ export default function Dashboard() {
   const balanceDaySales = sales.filter((s: any) => sameLocalDay(s.created_at));
   const balanceDayPayments = payments.filter((p: any) => sameLocalDay(p.created_at));
   const balanceDayExpenses = expenses.filter((e: any) => sameLocalDay(e.created_at));
-  const balanceDayCashIn =
-    balanceDaySales.filter((s: any) => !s.credit).reduce((n: number, s: any) => n + Number(s.total ?? 0), 0) +
-    balanceDayPayments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
-  const balanceDayCashOut =
-    balanceDayPayments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0) +
-    balanceDayExpenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
-  const balanceDayChange = balanceDayCashIn - balanceDayCashOut;
+  const balanceDayReturns = returns.filter((r: any) => sameLocalDay(r.created_at));
+  const balanceDayRevenue = Math.max(0,
+    balanceDaySales.reduce((n: number, s: any) => n + Number(s.total ?? 0), 0) -
+    balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_total ?? 0), 0)
+  );
+  const balanceDayCogsGoods = Math.max(0,
+    balanceDaySales.reduce((n: number, s: any) => n + Number(s.cogs ?? 0), 0) -
+    balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_cogs ?? 0), 0)
+  );
+  const balanceDayGrossProfit = balanceDayRevenue - balanceDayCogsGoods;
+  const balanceDayOperating = balanceDayExpenses.filter((e: any) => e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
+  const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
+  const balanceDayRemaining = balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense;
 
   return (
     <View style={styles.root}>
@@ -316,21 +329,14 @@ export default function Dashboard() {
                       onSelect={(iso) => { setBalanceDetailDate(iso); setBalanceCalendarOpen(false); }}
                     />
                     <Card>
-                      <Text style={styles.detailHeader}>Selected day — {isoToDisplay(selectedBalanceDate)}</Text>
-                      <View style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>Cash in</Text>
-                        <Text style={styles.detailValue}>+{money(displayFinanceAmount(balanceDayCashIn, fakeFinanceDisplay))}</Text>
-                      </View>
-                      <View style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>Cash out</Text>
-                        <Text style={styles.detailOut}>-{money(displayFinanceAmount(balanceDayCashOut, fakeFinanceDisplay))}</Text>
-                      </View>
-                      <View style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>Day cash change</Text>
-                        <Text style={[styles.detailValue, balanceDayChange < 0 && { color: colors.error }]}>
-                          {balanceDayChange >= 0 ? "+" : "-"}{money(displayFinanceAmount(Math.abs(balanceDayChange), fakeFinanceDisplay))}
-                        </Text>
-                      </View>
+                      <Text style={styles.detailHeader}>Remaining balance — {isoToDisplay(selectedBalanceDate)}</Text>
+                      <PLRow label="Sale / Net sales" value={money(balanceDayRevenue)} />
+                      <PLRow label="Gross profit" value={"- " + money(balanceDayGrossProfit)} muted />
+                      <PLRow label="Operational expenses" value={"- " + money(balanceDayOperating)} muted />
+                      <PLRow label="COGS expenses" value={"- " + money(balanceDayCogsExpense)} muted />
+                      <View style={styles.plDivider} />
+                      <PLRow label="Real remaining balance" value={money(balanceDayRemaining)} bold tone={balanceDayRemaining >= 0 ? "success" : "error"} />
+                      <Text style={styles.balanceHint}>Formula: Sale − Gross Profit − Operational Expenses − COGS Expenses.</Text>
                     </Card>
                     <Card>
                       <Text style={styles.detailHeader}>Money in</Text>
@@ -363,8 +369,8 @@ export default function Dashboard() {
                       ))}
                     </Card>
                     <Card>
-                      <Text style={styles.detailHeader}>Remaining balance</Text>
-                      <Text style={styles.detailBig}>{money(displayFinanceAmount(data.remaining_balance, fakeFinanceDisplay))}</Text>
+                      <Text style={styles.detailHeader}>Selected date total</Text>
+                      <Text style={styles.detailBig}>{money(balanceDayRemaining)}</Text>
                     </Card>
                   </>
                 )}
