@@ -165,12 +165,12 @@ export default function Dashboard() {
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: allTimeReport } = useReport("all", !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
-  const { data: sales = [] } = useSales();
-  const { data: purchases = [] } = usePurchases();
-  const { data: payments = [] } = usePayments();
-  const { data: expenses = [] } = useExpenses();
-  const { data: returns = [] } = useReturns();
-  const { data: products = [] } = useProducts();
+  const { data: sales = [], refetch: refetchSales } = useSales();
+  const { data: purchases = [], refetch: refetchPurchases } = usePurchases();
+  const { data: payments = [], refetch: refetchPayments } = usePayments();
+  const { data: expenses = [], refetch: refetchExpenses } = useExpenses();
+  const { data: returns = [], refetch: refetchReturns } = useReturns();
+  const { data: products = [], refetch: refetchProducts } = useProducts();
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
   const selectedBalanceFrom = balanceFromDate || "";
@@ -317,7 +317,7 @@ export default function Dashboard() {
       ) : (
         <ScrollView
           contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { void Promise.all([refetch(), refetchSales(), refetchPurchases(), refetchPayments(), refetchExpenses(), refetchReturns(), refetchProducts()]); }} tintColor={colors.brandPrimary} />}
         >
           <View style={styles.financeGrid}>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
