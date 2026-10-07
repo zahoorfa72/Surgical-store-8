@@ -95,7 +95,7 @@ export default function Payments() {
       const purchaseTotal = safePurchases
         .filter((p) => p.supplier_id === party.id)
         .reduce((sum, p) => sum + fakePurchaseNetTotal(
-          p.items ?? [],
+          Array.isArray(p.items) ? p.items : [],
           {},
           String(p.id),
           refundByPurchase[p.id] ?? 0,
