@@ -11,6 +11,7 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Purchase } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { DateCalendar } from "@/src/components/date-calendar";
 import { getHiddenSupplierIds } from "@/src/utils/finance-display";
 import { useFakeFinanceDisplay, fakePurchaseTotal, fakePurchaseNetTotal } from "@/src/utils/finance-display";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
@@ -32,6 +33,7 @@ export default function PurchasesHistory() {
   const { data: purchaseReturns } = usePurchaseReturns();
   const [search, setSearch] = useState("");
   const [date, setDate] = useState("");
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Purchase | null>(null);
   const [busy, setBusy] = useState(false);
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
@@ -136,19 +138,12 @@ export default function PurchasesHistory() {
           onChangeText={setSearch}
         />
       </View>
-      <View style={styles.dateWrap}>
-        <MaterialDesignIcons name="calendar" size={20} color={colors.muted} />
-        <TextInput
-          testID="purchase-date-input"
-          style={styles.searchInput}
-          placeholder="Exact date: YYYY-MM-DD"
-          placeholderTextColor={colors.muted}
-          value={date}
-          onChangeText={setDate}
-          autoCapitalize="none"
-        />
-        {!!date && <Pressable onPress={() => setDate("")}><Text style={styles.clearDate}>Clear</Text></Pressable>}
-      </View>
+      <Pressable style={styles.dateWrap} onPress={() => setCalendarOpen(true)}>
+        <MaterialDesignIcons name="calendar" size={20} color={colors.brandPrimary} />
+        <Text style={styles.searchInput}>{date ? new Date(date+"T12:00:00").toLocaleDateString() : "Select exact date"}</Text>
+        {!!date && <Pressable onPress={(e) => { e.stopPropagation(); setDate(""); }}><Text style={styles.clearDate}>Clear</Text></Pressable>}
+      </Pressable>
+      <DateCalendar visible={calendarOpen} initialIso={date} onSelect={setDate} onClose={() => setCalendarOpen(false)} />
 
       {isLoading ? (
         <Loader />
