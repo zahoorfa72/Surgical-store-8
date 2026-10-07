@@ -389,7 +389,13 @@ async def _ensure_cost_layers(product: dict) -> list:
     return result
 
 
-def _consume_cost_layers(layers: list, quantity: float) -> tuple[list, float]:
+def _consume_cost_layers(layers: list, quantity: float, fallback_unit_cost: float = 0.0) -> tuple[list, float]:
+    """Consume FIFO layers while tolerating/reconciling legacy layer drift.
+    
+    Stock quantity is authoritative. If an old/corrupted dataset has fewer
+    cost-layer units than stock, value the missing units at the product's
+    current purchase price instead of blocking sale/edit/update.
+    """
     remaining = float(quantity)
     total_cost = 0.0
     next_layers = []
@@ -407,7 +413,9 @@ def _consume_cost_layers(layers: list, quantity: float) -> tuple[list, float]:
             next_layers.extend(layers[index + 1:])
             break
     if remaining > 1e-9:
-        raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock. Please refresh/sync inventory before selling.")
+        repair_cost = max(0.0, float(fallback_unit_cost or 0.0))
+        total_cost += remaining * repair_cost
+        remaining = 0.0
     return next_layers, total_cost
 
 
@@ -458,7 +466,11 @@ async def _consume_cost_layers_matching(layers: list, quantity: float, unit_cost
             remaining -= take
             if remaining <= 1e-9: break
     if remaining > 1e-9:
-        raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock.")
+        # Legacy/synced data can have stock without a matching historical lot.
+        # Consume the remaining quantity as an unassigned historical lot at the
+        # requested cost instead of making purchase/sale edits fail.
+        total += remaining * max(0.0, float(unit_cost or 0.0))
+        remaining = 0.0
     return [x for i, x in enumerate(layers) if not used[i] and float(x.get("quantity", 0) or 0) > 1e-9], total
 
 
@@ -512,7 +524,7 @@ async def _migrate_legacy_cost_layers() -> dict:
             layers = _append_cost_layer(layers, diff, float(product.get("purchase_price", 0) or 0), None)
             reconciled += 1
         elif diff < -1e-9:
-            layers, _ = _consume_cost_layers(layers, -diff)
+            layers, _ = _consume_cost_layers(layers, -diff, float(product.get("purchase_price", 0) or 0))
             reconciled += 1
         await _save_cost_layers(pid, layers)
         migrated += 1
@@ -1082,7 +1094,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     layers = await _ensure_cost_layers(product)
     current = float(product.get("quantity", 0) or 0)
     if delta < 0:
-        layers, _ = _consume_cost_layers(layers, -delta)
+        layers, _ = _consume_cost_layers(layers, -delta, float(product.get("purchase_price", 0) or 0))
     else:
         layers = _append_cost_layer(layers, delta, float(product.get("purchase_price", 0) or 0), None)
     next_qty = current + delta
@@ -1479,7 +1491,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
             layers = await _ensure_cost_layers(p)
         in_stock_qty = min(float(it.quantity), max(0.0, available))
         if in_stock_qty > 0:
-            next_layers, line_cogs = _consume_cost_layers(layers, in_stock_qty)
+            next_layers, line_cogs = _consume_cost_layers(layers, in_stock_qty, float(p.get("purchase_price", 0) or 0))
         else:
             next_layers, line_cogs = layers, 0.0
         working_cost_layers[it.product_id] = next_layers
