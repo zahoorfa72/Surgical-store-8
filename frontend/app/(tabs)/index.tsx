@@ -226,7 +226,7 @@ export default function Dashboard() {
       {range === "day" && !!date && !exactDate && <Text style={styles.dateHint}>Enter a valid day as YYYY-MM-DD.</Text>}
       {range === "month" && !!month && !validMonth && <Text style={styles.dateHint}>Select a valid month.</Text>}
       {range === "year" && !!year && !validYear && <Text style={styles.dateHint}>Select a valid year.</Text>}
-      {range === "custom" && (!!fromDate || !!toDate) && (!validFrom || !validTo) && <Text style={styles.dateHint}>Select both dates from the calendar.</Text>}
+      {range === "custom" && (!!fromDate || !!toDate) && !validFrom && !validTo && <Text style={styles.dateHint}>Select a valid date from the calendar.</Text>}
       <DateCalendarModal visible={!!calendarTarget} mode={calendarTarget === "month" ? "month" : calendarTarget === "year" ? "year" : "day"} initialIso={calendarTarget === "from" ? (validFrom || exactDate || localDay) : calendarTarget === "to" ? (validTo || validFrom || exactDate || localDay) : exactDate || localDay} onClose={() => setCalendarTarget(null)} onSelect={(iso) => { if (calendarTarget === "day") setDate(isoToDisplay(iso)); else if (calendarTarget === "month") setMonth(iso.slice(5, 7) + "-" + iso.slice(0, 4)); else if (calendarTarget === "year") setYear(iso.slice(0, 4)); else if (calendarTarget === "from") setFromDate(isoToDisplay(iso)); else if (calendarTarget === "to") setToDate(isoToDisplay(iso)); }} />
 
       {cashier ? (
