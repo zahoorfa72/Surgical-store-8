@@ -74,7 +74,8 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
     <h1>${storeName}</h1>
     <div class="muted">Sales Receipt</div>
     <div class="meta">
-      <div><b>Invoice:</b> ${sale.invoice_no}</div>
+      <div><b>Serial No:</b> ${sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, "")}</div>
+       <div><b>Invoice:</b> ${sale.invoice_no}</div>
       <div><b>Date:</b> ${new Date(sale.created_at).toLocaleString()}</div>
       <div><b>Customer:</b> ${sale.customer_name}</div>
       <div><b>Served by:</b> ${sale.cashier_name}</div>
@@ -169,6 +170,7 @@ export default function Receipt() {
           <Text style={styles.receiptLabel}>Sales Receipt</Text>
 
           <View style={styles.metaBox}>
+            <Meta label="Serial No." value={String(sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, ""))} />
             <Meta label="Invoice" value={sale.invoice_no} />
             <Meta label="Date" value={formatDateTime(sale.created_at)} />
             <Meta label="Customer" value={sale.customer_name} />
