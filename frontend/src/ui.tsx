@@ -321,12 +321,16 @@ export function StatTile({
   icon,
   tone = "brand",
   testID,
+  secondaryValue,
+  secondaryLabel,
 }: {
   label: string;
   value: string;
   icon: string;
   tone?: "brand" | "success" | "warning" | "error" | "info" | "muted";
   testID?: string;
+  secondaryValue?: string;
+  secondaryLabel?: string;
 }) {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -346,6 +350,12 @@ export function StatTile({
       <Text style={styles.statValue} numberOfLines={1}>
         {value}
       </Text>
+      {secondaryValue !== undefined && (
+        <View style={{ alignItems: "center", marginTop: 5 }}>
+          {secondaryLabel ? <Text style={[styles.statLabel, { fontSize: 11 }]}>{secondaryLabel}</Text> : null}
+          <Text style={[styles.statValue, { fontSize: 16, marginTop: 1 }]} numberOfLines={1}>{secondaryValue}</Text>
+        </View>
+      )}
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
