@@ -327,7 +327,7 @@ export default function Dashboard() {
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0)))} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
-            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(exactDate || localDay); setBalanceFromDate(exactDate || localDay); setBalanceToDate(exactDate || localDay); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel="Selected Day Remaining Balance" secondaryValue={money(displayFinanceAmount(data.remaining_balance, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(localDay); setBalanceFromDate(""); setBalanceToDate(""); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel="Selected Day Remaining Balance" secondaryValue={money(displayFinanceAmount(data.remaining_balance, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
 
@@ -534,6 +534,18 @@ export default function Dashboard() {
                             ))}
                           </View>
                           <Text style={styles.detailValue}>{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
+                        </View>
+                      ))}
+                      {balanceDayReturns.map((r: any) => (
+                        <View key={"return-"+r.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>Sale return · {r.invoice_no || "Return"}</Text>
+                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(r.refund_total, fakeFinanceDisplay))}</Text>
+                        </View>
+                      ))}
+                      {balanceDayExpenses.map((e: any) => (
+                        <View key={"expense-"+e.id} style={styles.detailLine}>
+                          <Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text>
+                          <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
                       {balanceDayPayments.map((p: any) => (
