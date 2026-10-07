@@ -30,25 +30,81 @@ function DateCalendarModal({ visible, initialIso, mode, onSelect, onClose }: { v
   const { colors } = useTheme();
   const initial = /^\d{4}-\d{2}-\d{2}$/.test(initialIso) ? new Date(initialIso + "T12:00:00") : new Date();
   const [cursor, setCursor] = useState(new Date(initial.getFullYear(), initial.getMonth(), 1));
-  useEffect(() => { if (visible) { const d = /^\d{4}-\d{2}-\d{2}$/.test(initialIso) ? new Date(initialIso + "T12:00:00") : new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); } }, [visible, initialIso]);
+  const [view, setView] = useState<"days" | "months" | "years">(mode === "month" ? "months" : mode === "year" ? "years" : "days");
+
+  useEffect(() => {
+    if (visible) {
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(initialIso) ? new Date(initialIso + "T12:00:00") : new Date();
+      setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+      setView(mode === "month" ? "months" : mode === "year" ? "years" : "days");
+    }
+  }, [visible, initialIso, mode]);
+
   if (!visible) return null;
-  const y = cursor.getFullYear(); const m = cursor.getMonth(); const days = new Date(y, m + 1, 0).getDate(); const first = new Date(y, m, 1).getDay();
+  const y = cursor.getFullYear();
+  const m = cursor.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  const first = new Date(y, m, 1).getDay();
   const cells = Array.from({ length: first + days }, (_, i) => i < first ? null : i - first + 1);
-  const choose = (day: number) => { const iso = y + "-" + String(m + 1).padStart(2, "0") + "-" + String(day).padStart(2, "0"); onSelect(iso); onClose(); };
+  const chooseDay = (day: number) => {
+    const iso = y + "-" + String(m + 1).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    onSelect(iso); onClose();
+  };
+  const chooseMonth = (monthIndex: number) => {
+    const iso = y + "-" + String(monthIndex + 1).padStart(2, "0") + "-01";
+    if (mode === "month") { onSelect(iso); onClose(); }
+    else { setCursor(new Date(y, monthIndex, 1)); setView("days"); }
+  };
+  const chooseYear = (year: number) => {
+    const iso = year + "-" + String(m + 1).padStart(2, "0") + "-01";
+    if (mode === "year") { onSelect(iso); onClose(); }
+    else { setCursor(new Date(year, m, 1)); setView(mode === "month" ? "months" : "days"); }
+  };
+  const monthNames = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleString(undefined, { month: "short" }));
+  const yearStart = Math.floor(y / 12) * 12 - 6;
+  const years = Array.from({ length: 18 }, (_, i) => yearStart + i);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: 20 }}>
         <Pressable onPress={(e) => e.stopPropagation()} style={{ backgroundColor: colors.surface, borderRadius: 20, padding: 18 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <Pressable onPress={() => setCursor(new Date(y, m - 1, 1))} style={{ padding: 8 }}><MaterialDesignIcons name="chevron-left" size={26} color={colors.brandPrimary} /></Pressable>
-            <Text style={{ fontSize: 18, fontWeight: "900", color: colors.onSurface }}>{cursor.toLocaleString(undefined, { month: "long", year: "numeric" })}</Text>
-            <Pressable onPress={() => setCursor(new Date(y, m + 1, 1))} style={{ padding: 8 }}><MaterialDesignIcons name="chevron-right" size={26} color={colors.brandPrimary} /></Pressable>
+            <Pressable onPress={() => view === "years" ? setCursor(new Date(y - 12, m, 1)) : view === "months" ? setCursor(new Date(y - 1, m, 1)) : setCursor(new Date(y, m - 1, 1))} style={{ padding: 8 }}>
+              <MaterialDesignIcons name="chevron-left" size={26} color={colors.brandPrimary} />
+            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Pressable onPress={() => setView("months")} style={{ paddingVertical: 6, paddingHorizontal: 8 }}>
+                <Text style={{ fontSize: 17, fontWeight: "900", color: colors.brandPrimary }}>{cursor.toLocaleString(undefined, { month: "long" })}</Text>
+              </Pressable>
+              <Pressable onPress={() => setView("years")} style={{ paddingVertical: 6, paddingHorizontal: 8 }}>
+                <Text style={{ fontSize: 17, fontWeight: "900", color: colors.brandPrimary }}>{y}</Text>
+              </Pressable>
+            </View>
+            <Pressable onPress={() => view === "years" ? setCursor(new Date(y + 12, m, 1)) : view === "months" ? setCursor(new Date(y + 1, m, 1)) : setCursor(new Date(y, m + 1, 1))} style={{ padding: 8 }}>
+              <MaterialDesignIcons name="chevron-right" size={26} color={colors.brandPrimary} />
+            </Pressable>
           </View>
-          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            {["Su","Mo","Tu","We","Th","Fr","Sa"].map((d) => <Text key={d} style={{ width: "14.2857%", textAlign: "center", fontSize: 11, fontWeight: "800", color: colors.muted, paddingVertical: 6 }}>{d}</Text>)}
-            {cells.map((day, i) => day == null ? <View key={"b" + i} style={{ width: "14.2857%", aspectRatio: 1 }} /> : <Pressable key={day} onPress={() => choose(day)} style={{ width: "14.2857%", aspectRatio: 1, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 14, fontWeight: "800", color: colors.onSurface }}>{day}</Text></Pressable>)}
-          </View>
-          {mode !== "day" && <Text style={{ textAlign: "center", marginTop: 10, color: colors.muted, fontSize: 11 }}>Tap any date to select the {mode}.</Text>}
+          {view === "days" && (
+            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+              {["Su","Mo","Tu","We","Th","Fr","Sa"].map((d) => <Text key={d} style={{ width: "14.2857%", textAlign: "center", fontSize: 11, fontWeight: "800", color: colors.muted, paddingVertical: 6 }}>{d}</Text>)}
+              {cells.map((day, i) => day == null ? <View key={"b" + i} style={{ width: "14.2857%", aspectRatio: 1 }} /> : <Pressable key={day} onPress={() => chooseDay(day)} style={{ width: "14.2857%", aspectRatio: 1, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 14, fontWeight: "800", color: colors.onSurface }}>{day}</Text></Pressable>)}
+            </View>
+          )}
+          {view === "months" && (
+            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+              {monthNames.map((name, i) => <Pressable key={name} onPress={() => chooseMonth(i)} style={{ width: "25%", paddingVertical: 16, alignItems: "center" }}><Text style={{ fontSize: 14, fontWeight: "800", color: colors.onSurface }}>{name}</Text></Pressable>)}
+            </View>
+          )}
+          {view === "years" && (
+            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+              {years.map((year) => <Pressable key={year} onPress={() => chooseYear(year)} style={{ width: "25%", paddingVertical: 14, alignItems: "center" }}><Text style={{ fontSize: 14, fontWeight: year === y ? "900" : "700", color: year === y ? colors.brandPrimary : colors.onSurface }}>{year}</Text></Pressable>)}
+            </View>
+          )}
+          {mode === "day" && view === "days" && (
+            <Pressable onPress={() => { const d = new Date(); onSelect(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")); onClose(); }} style={{ alignSelf: "center", marginTop: 10, padding: 8 }}>
+              <Text style={{ color: colors.brandPrimary, fontWeight: "900" }}>Today</Text>
+            </Pressable>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
