@@ -139,7 +139,7 @@ export default function Dashboard() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [calendarTarget, setCalendarTarget] = useState<"day" | "month" | "year" | "from" | "to" | null>(null);
-  const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | null>(null);
+  const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | "units" | "purchases" | "inventory" | "products" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
   const [balanceDetailDate, setBalanceDetailDate] = useState(localDay);
   const [balanceCalendarOpen, setBalanceCalendarOpen] = useState(false);
@@ -273,7 +273,7 @@ export default function Dashboard() {
 
           <Modal visible={!!financeDetailsOpen} animationType="slide" onRequestClose={() => setFinanceDetailsOpen(null)}>
             <View style={styles.root}>
-              <ScreenHeader title={financeDetailsOpen === "revenue" ? "Revenue details" : financeDetailsOpen === "net" ? "Net profit details" : "Remaining balance details"} subtitle="Complete money in / money out" topInset={insets.top} onBack={() => setFinanceDetailsOpen(null)} />
+              <ScreenHeader title={financeDetailsOpen === "revenue" ? "Revenue details" : financeDetailsOpen === "net" ? "Net profit details" : financeDetailsOpen === "balance" ? "Remaining balance details" : financeDetailsOpen === "units" ? "Units sold details" : financeDetailsOpen === "purchases" ? "Purchase details" : financeDetailsOpen === "inventory" ? "Inventory value details" : "Product details"} subtitle={range === "custom" ? (validFrom && validTo ? isoToDisplay(validFrom) + " to " + isoToDisplay(validTo) : validFrom ? isoToDisplay(validFrom) : validTo ? isoToDisplay(validTo) : "Select a date") : range === "day" ? isoToDisplay(exactDate || localDay) : "Selected report period"} topInset={insets.top} onBack={() => setFinanceDetailsOpen(null)} />
               <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30, gap: 12 }}>
                 {financeDetailsOpen === "revenue" && (
                   <Card>
@@ -312,6 +312,40 @@ export default function Dashboard() {
                         <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
                       </View>
                     ))}
+                  </Card>
+                )}
+                {financeDetailsOpen === "units" && (
+                  <Card>
+                    <Text style={styles.detailHeader}>Units sold — {range === "day" ? isoToDisplay(exactDate || localDay) : range}</Text>
+                    <Text style={styles.detailBig}>{String(data.units_sold)} units</Text>
+                    {sales.filter((x:any) => {
+                      const d = new Date(x.created_at); const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+                      return !exactDate || key === exactDate;
+                    }).map((x:any) => <View key={x.id} style={styles.detailLine}><Text style={styles.detailLabel}>{x.invoice_no} · {new Date(x.created_at).toLocaleString()}</Text><Text style={styles.detailValue}>{x.items.reduce((n:number,i:any)=>n+Number(i.quantity||0),0)} units</Text></View>)}
+                  </Card>
+                )}
+                {financeDetailsOpen === "purchases" && (
+                  <Card>
+                    <Text style={styles.detailHeader}>Purchases — selected period</Text>
+                    <Text style={styles.detailBig}>{money(data.purchase_total)}</Text>
+                    {purchases.filter((x:any) => {
+                      const d = new Date(x.created_at); const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+                      return !exactDate || key === exactDate;
+                    }).map((x:any) => <View key={x.id} style={styles.detailLine}><Text style={styles.detailLabel}>{x.ref_no} · {x.supplier_name}{"\n"}{new Date(x.created_at).toLocaleString()}</Text><Text style={styles.detailValue}>{money(x.total)}</Text></View>)}
+                  </Card>
+                )}
+                {financeDetailsOpen === "inventory" && (
+                  <Card>
+                    <Text style={styles.detailHeader}>Inventory value — selected report</Text>
+                    <Text style={styles.detailBig}>{money(data.inventory_value)}</Text>
+                    <Text style={styles.balanceHint}>Inventory value uses the current cost layers; the selected date controls the report period for the overview.</Text>
+                  </Card>
+                )}
+                {financeDetailsOpen === "products" && (
+                  <Card>
+                    <Text style={styles.detailHeader}>Products — selected report</Text>
+                    <Text style={styles.detailBig}>{String(data.product_count)}</Text>
+                    <Text style={styles.balanceHint}>Product count is shown for the selected overview period; use Stock for individual product history.</Text>
                   </Card>
                 )}
                 {financeDetailsOpen === "balance" && (
@@ -446,10 +480,10 @@ export default function Dashboard() {
           </Card>
 
           <View style={styles.grid}>
-            <StatTile label="Units sold" value={String(data.units_sold)} icon="cube-outline" tone="brand" />
-            <StatTile label="Purchases" value={money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)} icon="truck" tone="warning" />
-            <StatTile label="Inventory value" value={money(fakeFinanceDisplay ? Number(data.inventory_value ?? 0) * 0.825 : data.inventory_value)} icon="warehouse" tone="info" />
-            <StatTile label="Products" value={String(data.product_count)} icon="package-variant-closed" tone="muted" />
+            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("units")}><StatTile label="Units sold" value={String(data.units_sold)} icon="cube-outline" tone="brand" /></Pressable>
+            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("purchases")}><StatTile label="Purchases" value={money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)} icon="truck" tone="warning" /></Pressable>
+            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("inventory")}><StatTile label="Inventory value" value={money(fakeFinanceDisplay ? Number(data.inventory_value ?? 0) * 0.825 : data.inventory_value)} icon="warehouse" tone="info" /></Pressable>
+            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("products")}><StatTile label="Products" value={String(data.product_count)} icon="package-variant-closed" tone="muted" /></Pressable>
           </View>
 
           {/* Low stock */}
