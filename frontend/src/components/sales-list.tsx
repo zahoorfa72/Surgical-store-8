@@ -12,6 +12,7 @@ import { Sale } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeSaleProfit } from "@/src/utils/finance-display";
+import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 // Shared sales/receipt list used by the Receipts tab (cashier) and the
 // Sales history modal (staff). Admins get inline edit/delete.
@@ -59,10 +60,14 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
     const d = date.trim();
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
     const localDate = (iso: string) => { const x = new Date(iso); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
-    return (sales ?? []).filter((s) => {
-      const matchesSearch = !q || s.invoice_no.toLowerCase().includes(q) || s.customer_name.toLowerCase().includes(q);
+    const searchFiltered = fuzzyFilter(
+      sales ?? [],
+      q,
+      [(s) => s.invoice_no, (s) => s.customer_name],
+    );
+    return searchFiltered.filter((s) => {
       const matchesDate = !validDate || localDate(String(s.created_at ?? "")) === d;
-      return matchesSearch && matchesDate;
+      return matchesDate;
     });
   }, [sales, search, date]);
 
