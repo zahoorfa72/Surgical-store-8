@@ -2407,12 +2407,12 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     end = None
     try:
         if date:
-            local_day = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            local_day = datetime.fromisoformat(date).replace(tzinfo=timezone.utc)
             start = local_day + timedelta(minutes=tz_offset_minutes)
             end = start + timedelta(days=1)
         elif range.startswith("month:"):
             value = range.split(":", 1)[1]
-            local_month = datetime.strptime(value, "%Y-%m").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            local_month = datetime.strptime(value, "%Y-%m").replace(tzinfo=timezone.utc)
             start = local_month + timedelta(minutes=tz_offset_minutes)
             if local_month.month == 12:
                 next_month = datetime(local_month.year + 1, 1, 1, tzinfo=timezone.utc)
@@ -2421,7 +2421,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             end = next_month + timedelta(minutes=tz_offset_minutes)
         elif range.startswith("year:"):
             value = range.split(":", 1)[1]
-            local_year = datetime.strptime(value, "%Y").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
+            local_year = datetime.strptime(value, "%Y").replace(tzinfo=timezone.utc)
             start = local_year + timedelta(minutes=tz_offset_minutes)
             end = datetime(local_year.year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
         elif range.startswith("date-range:"):
