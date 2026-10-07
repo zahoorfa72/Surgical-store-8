@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
-import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts } from "@/src/data";
+import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
@@ -171,6 +171,7 @@ export default function Dashboard() {
   const { data: expenses = [], refetch: refetchExpenses } = useExpenses();
   const { data: returns = [], refetch: refetchReturns } = useReturns();
   const { data: products = [], refetch: refetchProducts } = useProducts();
+  const { data: budget } = useBudget();
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
   const selectedBalanceFrom = balanceFromDate || "";
@@ -200,7 +201,12 @@ export default function Dashboard() {
   const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceSupplierPayments = balanceDayPayments.filter((p: any) => p.kind === "pay").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
-  const balanceDayRemaining = balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense - balanceSupplierPayments + balanceSupplierRefunds;
+  const openingPurchaseBudget = Number(budget?.opening_amount ?? 0);
+  const monthlyExpensesBudget = Number(budget?.monthly_amount ?? 0);
+  const balanceDayRemaining =
+    balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense
+    - balanceSupplierPayments + balanceSupplierRefunds
+    + openingPurchaseBudget + monthlyExpensesBudget;
   const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
   const inSelectedReport = (iso?: string) => {
     if (!iso) return false;
