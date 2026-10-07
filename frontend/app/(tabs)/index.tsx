@@ -347,36 +347,67 @@ export default function Dashboard() {
                 )}
                 {financeDetailsOpen === "units" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Units sold — {range === "day" ? isoToDisplay(exactDate || localDay) : range}</Text>
+                    <Text style={styles.detailHeader}>Units sold — selected period</Text>
                     <Text style={styles.detailBig}>{String(data.units_sold)} units</Text>
-                    {sales.filter((x:any) => {
-                      const d = new Date(x.created_at); const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-                      return !exactDate || key === exactDate;
-                    }).map((x:any) => <View key={x.id} style={styles.detailLine}><Text style={styles.detailLabel}>{x.invoice_no} · {new Date(x.created_at).toLocaleString()}</Text><Text style={styles.detailValue}>{x.items.reduce((n:number,i:any)=>n+Number(i.quantity||0),0)} units</Text></View>)}
+                    {sales.filter((x:any) => inSelectedReport(x.created_at)).map((x:any) => (
+                      <View key={x.id} style={styles.detailLine}>
+                        <View style={{flex:1}}>
+                          <Text style={styles.detailLabel}>{x.invoice_no} · {x.customer_name || "Walk-in"} · {new Date(x.created_at).toLocaleString()}</Text>
+                          {(x.items || []).map((it:any, idx:number) => (
+                            <Text key={idx} style={styles.itemFinance}>{it.name} · Qty {it.quantity} × {money(it.unit_price)} = {money(it.line_total)}</Text>
+                          ))}
+                        </View>
+                        <Text style={styles.detailValue}>{(x.items || []).reduce((n:number,i:any)=>n+Number(i.quantity||0),0)} units</Text>
+                      </View>
+                    ))}
                   </Card>
                 )}
                 {financeDetailsOpen === "purchases" && (
                   <Card>
                     <Text style={styles.detailHeader}>Purchases — selected period</Text>
-                    <Text style={styles.detailBig}>{money(data.purchase_total)}</Text>
-                    {purchases.filter((x:any) => {
-                      const d = new Date(x.created_at); const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-                      return !exactDate || key === exactDate;
-                    }).map((x:any) => <View key={x.id} style={styles.detailLine}><Text style={styles.detailLabel}>{x.ref_no} · {x.supplier_name}{"\n"}{new Date(x.created_at).toLocaleString()}</Text><Text style={styles.detailValue}>{money(x.total)}</Text></View>)}
+                    <Text style={styles.detailBig}>{money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)}</Text>
+                    {purchases.filter((x:any) => inSelectedReport(x.created_at)).map((x:any) => (
+                      <View key={x.id} style={styles.detailLine}>
+                        <View style={{flex:1}}>
+                          <Text style={styles.detailLabel}>{x.ref_no} · {x.supplier_name || "No supplier"} · {new Date(x.created_at).toLocaleString()}</Text>
+                          {(x.items || []).map((it:any, idx:number) => (
+                            <Text key={idx} style={styles.itemFinance}>{it.name || it.product_name} · Qty {it.quantity} × {money(it.unit_cost)} = {money(Number(it.quantity||0)*Number(it.unit_cost||0))}</Text>
+                          ))}
+                        </View>
+                        <Text style={styles.detailValue}>{money(displayFinanceAmount(x.total, fakeFinanceDisplay))}</Text>
+                      </View>
+                    ))}
                   </Card>
                 )}
                 {financeDetailsOpen === "inventory" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Inventory value — selected report</Text>
-                    <Text style={styles.detailBig}>{money(data.inventory_value)}</Text>
-                    <Text style={styles.balanceHint}>Inventory value uses the current cost layers; the selected date controls the report period for the overview.</Text>
+                    <Text style={styles.detailHeader}>Inventory value — selected period</Text>
+                    <Text style={styles.detailBig}>{money(displayFinanceAmount(data.inventory_value, fakeFinanceDisplay))}</Text>
+                    {(data.low_stock || []).map((p:any) => (
+                      <View key={p.id} style={styles.detailLine}>
+                        <View style={{flex:1}}>
+                          <Text style={styles.detailLabel}>{p.name}</Text>
+                          <Text style={styles.itemFinance}>Current qty: {p.quantity} · Purchase value: {money(Number(p.quantity||0)*Number(p.purchase_price||0))}</Text>
+                        </View>
+                        <Text style={styles.detailValue}>{p.quantity}</Text>
+                      </View>
+                    ))}
+                    <Text style={styles.balanceHint}>Inventory detail shows the product stock/cost layers currently stored; sales and purchases above are filtered by the selected date.</Text>
                   </Card>
                 )}
                 {financeDetailsOpen === "products" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Products — selected report</Text>
-                    <Text style={styles.detailBig}>{String(data.product_count)}</Text>
-                    <Text style={styles.balanceHint}>Product count is shown for the selected overview period; use Stock for individual product history.</Text>
+                    <Text style={styles.detailHeader}>Products — selected period</Text>
+                    <Text style={styles.detailBig}>{String(data.product_count)} products</Text>
+                    {products.map((p:any) => (
+                      <View key={p.id} style={styles.detailLine}>
+                        <View style={{flex:1}}>
+                          <Text style={styles.detailLabel}>{p.name}</Text>
+                          <Text style={styles.itemFinance}>Qty {p.quantity} · Sale {money(p.sale_price)} · Cost {money(p.purchase_price)}</Text>
+                        </View>
+                        <Text style={styles.detailValue}>{p.quantity}</Text>
+                      </View>
+                    ))}
                   </Card>
                 )}
                 {financeDetailsOpen === "balance" && (
@@ -500,13 +531,13 @@ export default function Dashboard() {
           <Card>
             <Text style={styles.cardTitle}>Remaining balance</Text>
             <PLRow label="Net sales" value={money(data.revenue)} />
-            <PLRow label="Supplier payments (paid out)" value={"- " + money(data.supplier_payments)} muted />
-            <PLRow label="Operating expenses" value={"- " + money(data.operating_expenses)} muted />
-            <PLRow label="Direct / purchase expenses" value={"- " + money(data.cogs_expenses)} muted />
+            <PLRow label="Supplier payments (paid out)" value={"- " + money(displayFinanceAmount(data.supplier_payments, fakeFinanceDisplay))} muted />
+            <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
+            <PLRow label="Direct / purchase expenses" value={"- " + money(displayFinanceAmount(data.cogs_expenses, fakeFinanceDisplay))} muted />
             <View style={styles.plDivider} />
             <PLRow
               label="Remaining balance"
-              value={money(data.remaining_balance)}
+              value={money(displayFinanceAmount(data.remaining_balance, fakeFinanceDisplay))}
               bold
               tone={data.remaining_balance >= 0 ? "success" : "error"}
             />
