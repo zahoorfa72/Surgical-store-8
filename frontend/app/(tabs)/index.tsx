@@ -512,12 +512,11 @@ export default function Dashboard() {
                       <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(balanceSupplierRefunds, fakeFinanceDisplay))} muted />
                       <View style={styles.plDivider} />
                       <PLRow label="Remaining balance" value={money(displayFinanceAmount(balanceDayRemaining, fakeFinanceDisplay))} bold tone={balanceDayRemaining >= 0 ? "success" : "error"} />
+                      <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.divider }}>
+                        <Text style={styles.detailHeader}>All-time remaining balance</Text>
+                        <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceAllTime, fakeFinanceDisplay))}</Text>
+                      </View>
                       <Text style={styles.balanceHint}>Net sales − Gross profit − operational expenses − COGS expenses − supplier payments + supplier refunds.</Text>
-                    </Card>
-                    <Card>
-                      <Text style={styles.detailHeader}>All-time total remaining balance</Text>
-                      <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceAllTime, fakeFinanceDisplay))}</Text>
-                      <Text style={styles.balanceHint}>This is the total remaining balance across all recorded time.</Text>
                     </Card>
                     <Card>
                       <Text style={styles.detailHeader}>Sales and supplier cash movements</Text>
