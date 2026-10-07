@@ -137,7 +137,7 @@ function localReport(range: string): ReportSummary {
     total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
     // Remaining Balance = Net Sales - Gross Profit - Operational Expenses - COGS Expenses.
-    remaining_balance: revenue - grossProfit - operating - cogsExpenses,
+    remaining_balance: revenue - grossProfit - operating - cogsExpenses - supplierPayments + supplierRefunds,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
