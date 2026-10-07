@@ -273,7 +273,7 @@ export default function Payments() {
                           </Text>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
-                          <Text style={styles.ledgerAmt}>{money(displayNet)}</Text>
+                          <Text style={styles.ledgerAmt}>{money(net)}</Text>
                           {refunded > 0 && (
                             <Text style={styles.ledgerStruck}>{money(p.total)}</Text>
                           )}
