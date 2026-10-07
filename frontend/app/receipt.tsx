@@ -42,7 +42,8 @@ async function receiptLogoDataUrl(settings?: { has_logo: boolean; logo_version: 
 function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: string, storeName = STORE_NAME, showDiscount = true): string {
   const rows = sale.items
     .map(
-      (i) => `<tr>
+      (i, idx) => `<tr>
+        <td style="text-align:center;width:9%">${idx + 1}</td>
         <td>${i.name}</td>
         <td style="text-align:center">${i.quantity}</td>
         <td style="text-align:right">Rs ${i.unit_price.toLocaleString()}</td>
@@ -81,7 +82,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
       <div><b>Served by:</b> ${sale.cashier_name}</div>
     </div>
     <table>
-      <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead>
+      <thead><tr><th style="text-align:center;width:9%">No.</th><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
@@ -178,6 +179,7 @@ export default function Receipt() {
           </View>
 
           <View style={styles.tableHead}>
+            <Text style={[styles.th, { width: 30, textAlign: "center" }]}>No.</Text>
             <Text style={[styles.th, { flex: 2 }]}>Item</Text>
             <Text style={[styles.th, styles.center]}>Qty</Text>
             <Text style={[styles.th, styles.right]}>Price</Text>
@@ -187,6 +189,7 @@ export default function Receipt() {
             const ret = returnedMap[i.product_id] ?? 0;
             return (
               <View key={idx} style={styles.itemRow}>
+                <Text style={[styles.td, { width: 30, textAlign: "center", fontWeight: "800" }]}>{idx + 1}</Text>
                 <View style={{ flex: 2 }}>
                   <Text style={styles.td}>{i.name}</Text>
                   {ret > 0 && <Text style={styles.returnedTag}>{ret} returned</Text>}
