@@ -497,7 +497,7 @@ export default function Dashboard() {
               { label: "Revenue", value: Number(data.revenue ?? 0), tone: colors.brandPrimary },
               { label: "Gross Profit", value: Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), tone: colors.info },
               { label: "Net Profit", value: Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), tone: colors.success },
-              { label: "Remaining Balance", value: Number(data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
+              { label: "Remaining Balance", value: Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
             ].map((item) => {
               const max = Math.max(1, Math.abs(Number(data.revenue ?? 0)), Math.abs(Number(data.gross_profit ?? 0)), Math.abs(Number(data.net_profit ?? 0)), Math.abs(Number(data.remaining_balance ?? 0)));
               const width = Math.max(3, Math.min(100, Math.abs(item.value) / max * 100));
@@ -542,7 +542,8 @@ export default function Dashboard() {
               bold
               tone={data.remaining_balance >= 0 ? "success" : "error"}
             />
-            <Text style={styles.balanceHint}>Personal expenses are not deducted from balance.</Text>
+            <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(data.supplier_refunds ?? 0, fakeFinanceDisplay))} muted />
+            <Text style={styles.balanceHint}>Supplier payments reduce remaining balance; supplier refunds increase it. Personal expenses are not deducted.</Text>
           </Card>
 
           {/* Cash & payments */}
