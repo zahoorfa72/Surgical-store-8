@@ -2507,20 +2507,25 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     supplier_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "supplier_refund"), 2)
     customer_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "customer_refund"), 2)
 
-    # Remaining Balance is a period/day profit-derived figure.
     # Required store formula:
-    #   Remaining Balance = Sale/Net Sales - Gross Profit
-    #                    - Operational Expenses - COGS Expenses
-    # It is deliberately NOT total revenue, cash-in/out, supplier payments,
-    # purchase total, or opening cash. When the user selects a day/range,
-    # every component is calculated for that same selected period.
+    # Remaining Balance = Net Sales - Gross Profit - Supplier Payments
+    #                   - Operational Expenses - COGS Expenses
+    #                   + Supplier Refunds + Opening Purchase Budget
+    #                   + Monthly Expenses Budget.
+    # Budgets are configured store-level values and are added exactly once
+    # to the reported balance, including selected periods and All-Time.
+    budget_doc = await db.budget.find_one({"_id": "singleton"})
+    opening_purchase_budget = round(float((budget_doc or {}).get("opening_amount", 0) or 0), 2)
+    monthly_expenses_budget = round(float((budget_doc or {}).get("monthly_amount", 0) or 0), 2)
     remaining_balance = round(
         revenue
         - gross_profit
         - operating_expenses
         - cogs_expenses
         - supplier_payments
-        + supplier_refunds,
+        + supplier_refunds
+        + opening_purchase_budget
+        + monthly_expenses_budget,
         2,
     )
 
@@ -2535,8 +2540,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
     net_profit = round(gross_profit - total_expenses, 2)
-    budget_doc = await db.budget.find_one({"_id": "singleton"})
-    opening_cash = round(float((budget_doc or {}).get("opening_amount", 0) or 0), 2)
+    opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
                  if p.get("quantity", 0) <= p.get("low_stock_threshold", 5)]
@@ -2566,6 +2570,8 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         "cash_sales": cash_sales,
         "cash_sale_returns": round(cash_sale_returns, 2),
         "opening_cash": round(opening_cash, 2),
+        "opening_purchase_budget": opening_purchase_budget,
+        "monthly_expenses_budget": monthly_expenses_budget,
         "purchase_return_refunds": purchase_return_refunds,
         "net_profit": net_profit,
         "remaining_balance": remaining_balance,
