@@ -141,6 +141,8 @@ export default function Dashboard() {
   const [calendarTarget, setCalendarTarget] = useState<"day" | "month" | "year" | "from" | "to" | null>(null);
   const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
+  const [balanceDetailDate, setBalanceDetailDate] = useState(localDay);
+  const [balanceCalendarOpen, setBalanceCalendarOpen] = useState(false);
   const exactDate = displayToIso(date);
   const monthMatch = /^(\d{2})-(\d{4})$/.exec(month.trim());
   const validMonth = monthMatch && Number(monthMatch[1]) >= 1 && Number(monthMatch[1]) <= 12 ? monthMatch[2] + "-" + monthMatch[1] : "";
@@ -155,6 +157,23 @@ export default function Dashboard() {
   const { data: expenses = [] } = useExpenses();
   const { data: returns = [] } = useReturns();
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
+
+  const selectedBalanceDate = balanceDetailDate || exactDate || localDay;
+  const sameLocalDay = (iso?: string) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") === selectedBalanceDate;
+  };
+  const balanceDaySales = sales.filter((s: any) => sameLocalDay(s.created_at));
+  const balanceDayPayments = payments.filter((p: any) => sameLocalDay(p.created_at));
+  const balanceDayExpenses = expenses.filter((e: any) => sameLocalDay(e.created_at));
+  const balanceDayCashIn =
+    balanceDaySales.filter((s: any) => !s.credit).reduce((n: number, s: any) => n + Number(s.total ?? 0), 0) +
+    balanceDayPayments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
+  const balanceDayCashOut =
+    balanceDayPayments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0) +
+    balanceDayExpenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
+  const balanceDayChange = balanceDayCashIn - balanceDayCashOut;
 
   return (
     <View style={styles.root}>
@@ -235,7 +254,7 @@ export default function Dashboard() {
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
-            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("balance")} style={styles.statPressable}><StatTile label="Remaining Balance" value={money(data.remaining_balance)} icon="wallet" tone={data.remaining_balance >= 0 ? "success" : "error"} testID="stat-remaining-balance" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(exactDate || localDay); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="Remaining Balance" value={money(data.remaining_balance)} icon="wallet" tone={data.remaining_balance >= 0 ? "success" : "error"} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
 
@@ -284,15 +303,44 @@ export default function Dashboard() {
                 )}
                 {financeDetailsOpen === "balance" && (
                   <>
+                    <Pressable testID="remaining-balance-date-picker" style={styles.dateFilter} onPress={() => setBalanceCalendarOpen(true)}>
+                      <MaterialDesignIcons name="calendar" size={20} color={colors.brandPrimary} />
+                      <Text style={styles.dateValue}>{isoToDisplay(selectedBalanceDate)}</Text>
+                      <MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
+                    </Pressable>
+                    <DateCalendarModal
+                      visible={balanceCalendarOpen}
+                      mode="day"
+                      initialIso={selectedBalanceDate}
+                      onClose={() => setBalanceCalendarOpen(false)}
+                      onSelect={(iso) => { setBalanceDetailDate(iso); setBalanceCalendarOpen(false); }}
+                    />
+                    <Card>
+                      <Text style={styles.detailHeader}>Selected day — {isoToDisplay(selectedBalanceDate)}</Text>
+                      <View style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Cash in</Text>
+                        <Text style={styles.detailValue}>+{money(displayFinanceAmount(balanceDayCashIn, fakeFinanceDisplay))}</Text>
+                      </View>
+                      <View style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Cash out</Text>
+                        <Text style={styles.detailOut}>-{money(displayFinanceAmount(balanceDayCashOut, fakeFinanceDisplay))}</Text>
+                      </View>
+                      <View style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Day cash change</Text>
+                        <Text style={[styles.detailValue, balanceDayChange < 0 && { color: colors.error }]}>
+                          {balanceDayChange >= 0 ? "+" : "-"}{money(displayFinanceAmount(Math.abs(balanceDayChange), fakeFinanceDisplay))}
+                        </Text>
+                      </View>
+                    </Card>
                     <Card>
                       <Text style={styles.detailHeader}>Money in</Text>
-                      {sales.filter((s: any) => !s.credit).map((s: any) => (
+                      {balanceDaySales.filter((s: any) => !s.credit).map((s: any) => (
                         <View key={s.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{s.invoice_no} · Customer sale</Text>
                           <Text style={styles.detailValue}>+{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
-                      {payments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").map((p: any) => (
+                      {balanceDayPayments.filter((p: any) => p.kind === "receive" || p.kind === "supplier_refund").map((p: any) => (
                         <View key={p.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
                           <Text style={styles.detailValue}>+{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
@@ -301,13 +349,13 @@ export default function Dashboard() {
                     </Card>
                     <Card>
                       <Text style={styles.detailHeader}>Money out</Text>
-                      {payments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").map((p: any) => (
+                      {balanceDayPayments.filter((p: any) => p.kind === "pay" || p.kind === "customer_refund").map((p: any) => (
                         <View key={p.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{p.party_name} · {p.kind}</Text>
                           <Text style={styles.detailOut}>-{money(displayFinanceAmount(p.amount, fakeFinanceDisplay))}</Text>
                         </View>
                       ))}
-                      {expenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").map((e: any) => (
+                      {balanceDayExpenses.filter((e: any) => e.bucket === "cogs" || e.bucket === "operating").map((e: any) => (
                         <View key={e.id} style={styles.detailLine}>
                           <Text style={styles.detailLabel}>{e.title} · {e.bucket}</Text>
                           <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
