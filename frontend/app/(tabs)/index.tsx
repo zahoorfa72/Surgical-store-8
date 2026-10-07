@@ -142,7 +142,9 @@ export default function Dashboard() {
   const [financeDetailsOpen, setFinanceDetailsOpen] = useState<"revenue" | "net" | "balance" | "units" | "purchases" | "inventory" | "products" | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldown] = useState(true);
   const [balanceDetailDate, setBalanceDetailDate] = useState(localDay);
-  const [balanceCalendarOpen, setBalanceCalendarOpen] = useState(false);
+  const [balanceFromDate, setBalanceFromDate] = useState(localDay);
+  const [balanceToDate, setBalanceToDate] = useState(localDay);
+  const [balanceCalendarTarget, setBalanceCalendarTarget] = useState<"from" | "to" | null>(null);
   const exactDate = displayToIso(date);
   const monthMatch = /^(\d{2})-(\d{4})$/.exec(month.trim());
   const validMonth = monthMatch && Number(monthMatch[1]) >= 1 && Number(monthMatch[1]) <= 12 ? monthMatch[2] + "-" + monthMatch[1] : "";
@@ -158,6 +160,7 @@ export default function Dashboard() {
     range === "custom" && validTo ? "date:" + validTo :
     range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
+  const { data: allTimeReport } = useReport("all", !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
   const { data: sales = [] } = useSales();
   const { data: purchases = [] } = usePurchases();
@@ -166,16 +169,20 @@ export default function Dashboard() {
   const { data: returns = [] } = useReturns();
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
-  const selectedBalanceDate = balanceDetailDate || exactDate || localDay;
-  const sameLocalDay = (iso?: string) => {
+  const selectedBalanceFrom = balanceFromDate || localDay;
+  const selectedBalanceTo = balanceToDate || selectedBalanceFrom;
+  const balanceStart = new Date(selectedBalanceFrom + "T00:00:00");
+  const balanceEnd = new Date(selectedBalanceTo + "T00:00:00");
+  balanceEnd.setDate(balanceEnd.getDate() + 1);
+  const inBalanceRange = (iso?: string) => {
     if (!iso) return false;
     const d = new Date(iso);
-    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") === selectedBalanceDate;
+    return d >= balanceStart && d < balanceEnd;
   };
-  const balanceDaySales = sales.filter((s: any) => sameLocalDay(s.created_at));
-  const balanceDayPayments = payments.filter((p: any) => sameLocalDay(p.created_at));
-  const balanceDayExpenses = expenses.filter((e: any) => sameLocalDay(e.created_at));
-  const balanceDayReturns = returns.filter((r: any) => sameLocalDay(r.created_at));
+  const balanceDaySales = sales.filter((s: any) => inBalanceRange(s.created_at));
+  const balanceDayPayments = payments.filter((p: any) => inBalanceRange(p.created_at));
+  const balanceDayExpenses = expenses.filter((e: any) => inBalanceRange(e.created_at));
+  const balanceDayReturns = returns.filter((r: any) => inBalanceRange(r.created_at));
   const balanceDayRevenue = Math.max(0,
     balanceDaySales.reduce((n: number, s: any) => n + Number(s.total ?? 0), 0) -
     balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_total ?? 0), 0)
@@ -187,7 +194,10 @@ export default function Dashboard() {
   const balanceDayGrossProfit = balanceDayRevenue - balanceDayCogsGoods;
   const balanceDayOperating = balanceDayExpenses.filter((e: any) => e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
-  const balanceDayRemaining = balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense;
+  const balanceSupplierPayments = balanceDayPayments.filter((p: any) => p.kind === "pay").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
+  const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
+  const balanceDayRemaining = balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense - balanceSupplierPayments + balanceSupplierRefunds;
+  const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
 
   return (
     <View style={styles.root}>
