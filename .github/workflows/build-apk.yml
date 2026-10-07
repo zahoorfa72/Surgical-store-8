@@ -1,5 +1,7 @@
 name: Build Android APK
 
+# Trigger APK build for backend-linked release fixes.
+
 on:
   workflow_dispatch:
   push:
