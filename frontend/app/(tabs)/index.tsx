@@ -189,14 +189,12 @@ export default function Dashboard() {
   const balanceDayPayments = payments.filter((p: any) => inBalanceRange(p.created_at));
   const balanceDayExpenses = expenses.filter((e: any) => inBalanceRange(e.created_at));
   const balanceDayReturns = returns.filter((r: any) => inBalanceRange(r.created_at));
-  const balanceDayRevenue = Math.max(0,
+  const balanceDayRevenue =
     balanceDaySales.reduce((n: number, s: any) => n + Number(s.total ?? 0), 0) -
-    balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_total ?? 0), 0)
-  );
-  const balanceDayCogsGoods = Math.max(0,
+    balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_total ?? 0), 0);
+  const balanceDayCogsGoods =
     balanceDaySales.reduce((n: number, s: any) => n + Number(s.cogs ?? 0), 0) -
-    balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_cogs ?? 0), 0)
-  );
+    balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_cogs ?? 0), 0);
   const balanceDayGrossProfit = balanceDayRevenue - balanceDayCogsGoods;
   const balanceDayOperating = balanceDayExpenses.filter((e: any) => e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
