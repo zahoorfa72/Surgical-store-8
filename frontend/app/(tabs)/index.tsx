@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
-import { useDayClose, useReport, useSales, usePayments, useExpenses, useReturns } from "@/src/data";
+import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
@@ -160,6 +160,7 @@ export default function Dashboard() {
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
   const { data: sales = [] } = useSales();
+  const { data: purchases = [] } = usePurchases();
   const { data: payments = [] } = usePayments();
   const { data: expenses = [] } = useExpenses();
   const { data: returns = [] } = useReturns();
