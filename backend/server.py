@@ -2522,6 +2522,20 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     purchase_returns_total = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
     purchase_net = round(purchase_total - purchase_returns_total, 2)
 
+    # Values returned by the report must always be explicitly derived here.
+    # Previously these names were returned without being defined, causing the
+    # summary endpoint to fail and the mobile app to silently use local/cache data.
+    cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
+    cash_sale_returns = round(sum(
+        r.get("refund_total", 0)
+        for r in returns
+        if not any(s.get("id") == r.get("sale_id") for s in [])
+    ), 2)
+    purchase_return_refunds = purchase_returns_total
+    net_profit = round(gross_profit - total_expenses, 2)
+    budget_doc = await db.budget.find_one({"_id": "singleton"})
+    opening_cash = round(float((budget_doc or {}).get("opening_amount", 0) or 0), 2)
+
     low_stock = [product_public(p).model_dump() for p in products
                  if p.get("quantity", 0) <= p.get("low_stock_threshold", 5)]
     inventory_value = round(sum(
