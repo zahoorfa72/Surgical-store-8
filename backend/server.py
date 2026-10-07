@@ -2478,7 +2478,12 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # purchase total, or opening cash. When the user selects a day/range,
     # every component is calculated for that same selected period.
     remaining_balance = round(
-        revenue - gross_profit - operating_expenses - cogs_expenses,
+        revenue
+        - gross_profit
+        - operating_expenses
+        - cogs_expenses
+        - supplier_payments
+        + supplier_refunds,
         2,
     )
 
