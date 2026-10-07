@@ -2408,33 +2408,35 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     try:
         if date:
             local_day = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-            start = local_day - timedelta(minutes=tz_offset_minutes)
+            start = local_day + timedelta(minutes=tz_offset_minutes)
             end = start + timedelta(days=1)
         elif range.startswith("month:"):
             value = range.split(":", 1)[1]
             local_month = datetime.strptime(value, "%Y-%m").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-            start = local_month - timedelta(minutes=tz_offset_minutes)
+            start = local_month + timedelta(minutes=tz_offset_minutes)
             if local_month.month == 12:
                 next_month = datetime(local_month.year + 1, 1, 1, tzinfo=timezone.utc)
             else:
                 next_month = datetime(local_month.year, local_month.month + 1, 1, tzinfo=timezone.utc)
-            end = next_month - timedelta(minutes=tz_offset_minutes)
+            end = next_month + timedelta(minutes=tz_offset_minutes)
         elif range.startswith("year:"):
             value = range.split(":", 1)[1]
             local_year = datetime.strptime(value, "%Y").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-            start = local_year - timedelta(minutes=tz_offset_minutes)
-            end = datetime(local_year.year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(minutes=tz_offset_minutes)
+            start = local_year + timedelta(minutes=tz_offset_minutes)
+            end = datetime(local_year.year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
         elif range.startswith("date-range:"):
             parts = range.split(":")
             if len(parts) != 3:
                 raise ValueError
             from_value, to_value = parts[1].strip(), parts[2].strip()
-            local_from = datetime.fromisoformat(from_value).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) if from_value else None
-            local_to = datetime.fromisoformat(to_value).replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) if to_value else None
+            # Convert the user's local calendar dates to UTC boundaries.
+            # getTimezoneOffset() is minutes to ADD to local time to obtain UTC.
+            local_from = datetime.fromisoformat(from_value).replace(tzinfo=timezone.utc) if from_value else None
+            local_to = datetime.fromisoformat(to_value).replace(tzinfo=timezone.utc) if to_value else None
             if local_from and local_to and local_to < local_from:
                 raise ValueError
-            start = local_from - timedelta(minutes=tz_offset_minutes) if local_from else None
-            end = local_to + timedelta(days=1) - timedelta(minutes=tz_offset_minutes) if local_to else None
+            start = local_from + timedelta(minutes=tz_offset_minutes) if local_from else None
+            end = (local_to + timedelta(days=1) + timedelta(minutes=tz_offset_minutes)) if local_to else None
     except (ValueError, IndexError):
         raise HTTPException(status_code=400, detail="Invalid date range. Use YYYY-MM-DD or YYYY-MM.")
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
