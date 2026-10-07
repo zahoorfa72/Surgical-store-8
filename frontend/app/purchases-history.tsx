@@ -13,6 +13,7 @@ import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, 
 import { makeStyles, useTheme } from "@/src/theme";
 import { getHiddenSupplierIds } from "@/src/utils/finance-display";
 import { useFakeFinanceDisplay, fakePurchaseTotal, fakePurchaseNetTotal } from "@/src/utils/finance-display";
+import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 export default function PurchasesHistory() {
   const styles = useStyles();
@@ -52,11 +53,14 @@ export default function PurchasesHistory() {
     const d = date.trim();
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
     const localDate = (iso: string) => { const x = new Date(iso); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
-    return (purchases ?? []).filter((p) => {
-      if (p.supplier_id && hiddenSupplierIds.includes(p.supplier_id)) return false;
-      const matchesSearch = !q || p.ref_no.toLowerCase().includes(q) || p.supplier_name.toLowerCase().includes(q);
+    const searchFiltered = fuzzyFilter(
+      (purchases ?? []).filter((p) => !(p.supplier_id && hiddenSupplierIds.includes(p.supplier_id))),
+      q,
+      [(p) => p.ref_no, (p) => p.supplier_name],
+    );
+    return searchFiltered.filter((p) => {
       const matchesDate = !validDate || localDate(String(p.created_at ?? "")) === d;
-      return matchesSearch && matchesDate;
+      return matchesDate;
     });
   }, [purchases, search, date, hiddenSupplierIds]);
 
