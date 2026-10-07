@@ -41,14 +41,19 @@ export default function Payments() {
 
   // Refund total per purchase so the payable ledger shows the net amount owed
   // to a supplier after any goods were returned (offline + online).
+  const safeParties = Array.isArray(parties) ? parties.filter(Boolean) : [];
+  const safePayments = Array.isArray(payments) ? payments.filter(Boolean) : [];
+  const safePurchases = Array.isArray(purchases) ? purchases.filter(Boolean) : [];
+  const safePurchaseReturns = Array.isArray(purchaseReturns) ? purchaseReturns.filter(Boolean) : [];
+
   const refundByPurchase = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const r of (purchaseReturns ?? []) as any[]) {
+    for (const r of safePurchaseReturns as any[]) {
       if (!r.purchase_id) continue;
       m[r.purchase_id] = (m[r.purchase_id] ?? 0) + Number(r.refund_total ?? 0);
     }
     return m;
-  }, [purchaseReturns]);
+  }, [safePurchaseReturns]);
 
   const [active, setActive] = useState<Party | null>(null);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -61,19 +66,33 @@ export default function Payments() {
   const [receiptPhoto, setReceiptPhoto] = useState<string | null>(null);
   const [receiptPhotos, setReceiptPhotos] = useState<Record<string, string>>({});
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
-  useEffect(() => { void getHiddenSupplierIds().then(setHiddenSupplierIds); }, []);
-  useEffect(() => { void AsyncStorage.getAllKeys().then(async (keys) => { const ks = keys.filter((k) => k.startsWith("ssm.paymentReceipt.")); if (!ks.length) return; const pairs = await AsyncStorage.multiGet(ks); const map: Record<string,string> = {}; for (const [k,v] of pairs) if (v) map[k.replace("ssm.paymentReceipt.","")] = v; setReceiptPhotos(map); }); }, [payments?.length]);
+  useEffect(() => { void getHiddenSupplierIds().then(setHiddenSupplierIds).catch(() => setHiddenSupplierIds([])); }, []);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const ks = keys.filter((k) => k.startsWith("ssm.paymentReceipt."));
+        if (!ks.length) return;
+        const pairs = await AsyncStorage.multiGet(ks);
+        const map: Record<string, string> = {};
+        for (const [k, v] of pairs) if (v) map[k.replace("ssm.paymentReceipt.", "")] = v;
+        setReceiptPhotos(map);
+      } catch {
+        setReceiptPhotos({});
+      }
+    })();
+  }, [safePayments.length]);
   const pickReceiptPhoto = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, quality: 0.55, base64: true, exif: false }); if (result.canceled) return; const asset = result.assets[0]; if (!asset?.base64) { toast("Could not read the receipt photo", "error"); return; } if (asset.base64.length > 4_000_000) { toast("Photo is too large. Please choose a smaller receipt photo.", "error"); return; } setReceiptPhoto("data:image/jpeg;base64," + asset.base64); };
   const removeReceiptPhoto = () => setReceiptPhoto(null);
 
-  const visibleParties = useMemo(() => isSupplier ? (parties ?? []).filter((p) => !hiddenSupplierIds.includes(p.id)) : (parties ?? []), [parties, isSupplier, hiddenSupplierIds]);
+  const visibleParties = useMemo(() => isSupplier ? safeParties.filter((p) => !hiddenSupplierIds.includes(p.id)) : safeParties, [parties, isSupplier, hiddenSupplierIds]);
   const visiblePartyIds = useMemo(() => new Set(visibleParties.map((p) => p.id)), [visibleParties]);
   const fakeSupplierBalanceById = useMemo(() => {
     const result: Record<string, number> = {};
     if (!fakeFinanceDisplay || !isSupplier) return result;
 
     for (const party of visibleParties) {
-      const purchaseTotal = (purchases ?? [])
+      const purchaseTotal = safePurchases
         .filter((p) => p.supplier_id === party.id)
         .reduce((sum, p) => sum + fakePurchaseNetTotal(
           p.items ?? [],
@@ -82,11 +101,11 @@ export default function Payments() {
           refundByPurchase[p.id] ?? 0,
         ), 0);
 
-      const cashAndRefunds = (payments ?? [])
+      const cashAndRefunds = safePayments
         .filter((p) => p.party_id === party.id && (p.kind === "pay" || p.kind === "supplier_refund"))
         .reduce((sum, p) => sum + fakePaymentAmount(p.amount, String(p.id)), 0);
 
-      const adjustments = (payments ?? [])
+      const adjustments = safePayments
         .filter((p) => p.party_id === party.id && Number(p.adjustment ?? 0) !== 0)
         .reduce((sum, p) => sum + fakeDisplayAmount(p.adjustment), 0);
 
@@ -153,7 +172,7 @@ export default function Payments() {
     }
   };
 
-  const recentPayments = (payments ?? []).filter((p) => visiblePartyIds.has(p.party_id) && (
+  const recentPayments = safePayments.filter((p) => visiblePartyIds.has(p.party_id) && (
     isSupplier
       ? p.kind === "pay" || p.kind === "supplier_refund"
       : p.kind === "receive" || p.kind === "customer_refund"
@@ -171,7 +190,7 @@ export default function Payments() {
   const isRefundKind = (k: string) => k === "supplier_refund" || k === "customer_refund";
   // Supplier purchases are payable ledger entries. They create the supplier
   // balance when purchased; only a recorded Pay entry settles/cuts cash.
-  const supplierPurchases = (purchases ?? [])
+  const supplierPurchases = safePurchases
     .filter((p) => isSupplier && p.supplier_id && visiblePartyIds.has(p.supplier_id))
     .slice(0, 12);
 
