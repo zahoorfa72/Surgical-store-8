@@ -63,6 +63,7 @@ export type SaleItem = {
 export type Sale = {
   id: string;
   invoice_no: string;
+  serial_no?: number;
   items: SaleItem[];
   customer_id?: string | null;
   customer_name: string;
