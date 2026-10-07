@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
-import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns } from "@/src/data";
+import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
@@ -167,6 +167,7 @@ export default function Dashboard() {
   const { data: payments = [] } = usePayments();
   const { data: expenses = [] } = useExpenses();
   const { data: returns = [] } = useReturns();
+  const { data: products = [] } = useProducts();
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
   const selectedBalanceFrom = balanceFromDate || localDay;
