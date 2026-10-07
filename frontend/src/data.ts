@@ -90,11 +90,13 @@ function localReport(range: string): ReportSummary {
     const d = new Date(iso);
     if (exactStart) return d >= exactStart && d < exactEnd!;
     if (fromStart && toEnd) return d >= fromStart && d < toEnd;
+    if (fromStart) return d >= fromStart;
+    if (toEnd) return d < toEnd;
     if (monthStart && monthEnd) return d >= monthStart && d < monthEnd;
     if (yearStart && yearEnd) return d >= yearStart && d < yearEnd;
     return inRange(iso, range);
   };
-  const customPeriod = !!(exactStart || (fromStart && toEnd) || (monthStart && monthEnd) || (yearStart && yearEnd));
+  const customPeriod = !!(exactStart || fromStart || toEnd || (monthStart && monthEnd) || (yearStart && yearEnd));
   const filterRows = <T extends { created_at?: string }>(rows: T[]) => customPeriod ? rows.filter(r => matchesDate(r.created_at)) : rows.filter(r => inRange(r.created_at, range));
   const sales = filterRows(queryClient.getQueryData<Sale[]>(qk.sales) ?? []);
   const purchases = filterRows(queryClient.getQueryData<Purchase[]>(qk.purchases) ?? []);
@@ -136,8 +138,8 @@ function localReport(range: string): ReportSummary {
     personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating,
     total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
-    // Remaining Balance = Net Sales - Gross Profit - Operational Expenses - COGS Expenses.
-    remaining_balance: revenue - grossProfit - operating - cogsExpenses - supplierPayments + supplierRefunds,
+    // Remaining Balance = Net Sales - Gross Profit - Supplier Payments - Operational Expenses - COGS Expenses + Supplier Refunds.
+    remaining_balance: revenue - grossProfit - supplierPayments - operating - cogsExpenses + supplierRefunds,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
