@@ -164,7 +164,7 @@ export default function Dashboard() {
         topInset={insets.top}
         right={<IconButton name="cog" testID="settings-button" onPress={() => router.push("/settings")} />}
       />
-      <ChipRow options={RANGES as any} value={range} onChange={(value) => setRange(value)} testIDPrefix="range" />
+      <ChipRow options={RANGES as any} value={range} onChange={(value) => { setRange(value); if (value === "day") setDate(isoToDisplay(new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0") + "-" + String(new Date().getDate()).padStart(2, "0"))); }} testIDPrefix="range" />
       {range === "day" && (
         <Pressable testID="finance-day-input" style={styles.dateFilter} onPress={() => setCalendarTarget("day")}>
           <MaterialDesignIcons name="calendar" size={20} color={colors.brandPrimary} /><Text style={styles.dateValue}>{date || "DD-MM-YYYY"}</Text><MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
