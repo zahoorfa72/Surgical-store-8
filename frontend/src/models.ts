@@ -128,6 +128,7 @@ export type ReportSummary = {
   total_expenses: number;
   supplier_payments: number;
   customer_receipts: number;
+  supplier_refunds?: number;
   net_profit: number;
   remaining_balance: number;
   units_sold: number;
