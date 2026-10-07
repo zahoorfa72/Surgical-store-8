@@ -2526,11 +2526,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # Previously these names were returned without being defined, causing the
     # summary endpoint to fail and the mobile app to silently use local/cache data.
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
-    cash_sale_returns = round(sum(
-        r.get("refund_total", 0)
-        for r in returns
-        if not any(s.get("id") == r.get("sale_id") for s in [])
-    ), 2)
+    cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
     net_profit = round(gross_profit - total_expenses, 2)
     budget_doc = await db.budget.find_one({"_id": "singleton"})
