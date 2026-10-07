@@ -14,6 +14,7 @@ import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeUnitCost, fakeProfit } from "@/src/utils/finance-display";
+import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 const formatDetailDate = (value: string) => new Date(value).toLocaleString();
 
@@ -49,13 +50,11 @@ export default function Products() {
     }, []),
   );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (products ?? []).filter((p) => {
-      if (!q) return true;
-      return p.name.toLowerCase().includes(q) || String(p.barcode ?? "").toLowerCase().includes(q);
-    });
-  }, [products, search]);
+  const filtered = useMemo(() => fuzzyFilter(
+    products ?? [],
+    search,
+    [(p) => p.name, (p) => p.barcode],
+  ), [products, search]);
 
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
