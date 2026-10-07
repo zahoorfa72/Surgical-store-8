@@ -1394,6 +1394,7 @@ def sale_public(d: dict) -> dict:
     return {
         "id": oid(d["_id"]),
         "invoice_no": d.get("invoice_no"),
+        "serial_no": d.get("serial_no"),
         "items": d.get("items", []),
         "customer_id": d.get("customer_id"),
         "customer_name": d.get("customer_name", "Walk-in"),
@@ -1510,6 +1511,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
     seq = await next_seq("sale")
     doc = {
         "invoice_no": f"INV-{seq:05d}",
+        "serial_no": seq,
         "items": items,
         "customer_id": body.customer_id,
         "customer_name": customer_name,
