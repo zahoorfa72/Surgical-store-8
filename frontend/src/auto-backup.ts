@@ -55,6 +55,57 @@ async function writeAutoBackup() {
   for (const old of files.slice(7)) { try { await FileSystem.deleteAsync(AUTO_DIR + old, {idempotent:true}); } catch {} }
 }
 
+async function buildBackupJson(): Promise<string> {
+  const liveCache = dehydrate(queryClient, {
+    shouldDehydrateQuery: (q) => q.state.status === "success",
+  });
+  await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
+  const keys = (await AsyncStorage.getAllKeys()).filter(
+    (k) => k.startsWith(PREFIX) && !SESSION_KEYS.has(k),
+  );
+  const pairs = await AsyncStorage.multiGet(keys);
+  const saved: Record<string, string> = {};
+  for (const [k, v] of pairs) if (v !== null) saved[k] = v;
+  return JSON.stringify({
+    app: "surgical-store",
+    backup_version: 3,
+    created_at: new Date().toISOString(),
+    storage: saved,
+  });
+}
+
+let driveTimer: ReturnType<typeof setTimeout> | null = null;
+let driveUploading = false;
+let driveDirty = false;
+
+async function uploadLatestToDrive() {
+  if (driveUploading) return;
+  driveUploading = true;
+  try {
+    if (!(await hasGoogleDriveConnection())) return;
+    const json = await buildBackupJson();
+    await uploadBackupToGoogleDrive(json, "SurgicalStore-Auto-Backup.json");
+    driveDirty = false;
+  } catch {
+    driveDirty = true;
+  } finally {
+    driveUploading = false;
+  }
+}
+
+export function scheduleAutomaticGoogleDriveBackup(delayMs = 1800) {
+  driveDirty = true;
+  if (driveTimer) clearTimeout(driveTimer);
+  driveTimer = setTimeout(() => {
+    driveTimer = null;
+    void uploadLatestToDrive();
+  }, delayMs);
+}
+
+export function retryAutomaticGoogleDriveBackup() {
+  if (driveDirty) scheduleAutomaticGoogleDriveBackup(500);
+}
+
 export async function runDailyAutoBackup() {
   try {
     const now = new Date();
