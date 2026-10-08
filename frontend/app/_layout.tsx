@@ -11,7 +11,7 @@ import { queryClient } from "@/src/query-client";
 import { AuthProvider } from "@/src/auth";
 import { OfflineProvider } from "@/src/offline";
 import { ToastProvider } from "@/src/ui";
-import { startDailyAutoBackup } from "@/src/auto-backup";
+import { startDailyAutoBackup, scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
 import { registerDailyBackupTask } from "@/src/daily-backup-task";
 
 LogBox.ignoreAllLogs(true);
@@ -33,6 +33,8 @@ export default function RootLayout() {
   React.useEffect(() => {
     if (!cacheReady) return;
     void registerDailyBackupTask();
+    // If Drive is already connected, refresh the single cloud backup on app start.
+    scheduleAutomaticGoogleDriveBackup(2500);
     return startDailyAutoBackup();
   }, [cacheReady]);
 
