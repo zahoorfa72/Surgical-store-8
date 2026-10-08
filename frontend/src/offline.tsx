@@ -30,6 +30,7 @@ import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { money } from "@/src/format";
 import { makeStyles, useTheme } from "@/src/theme";
+import { scheduleAutomaticGoogleDriveBackup, retryAutomaticGoogleDriveBackup } from "@/src/auto-backup";
 
 const CACHE_KEY = "ssm.qcache.v1";
 const OUTBOX_KEY = "ssm.outbox.v1";
@@ -61,6 +62,7 @@ function startCachePersistence() {
         shouldDehydrateQuery: (q) => q.state.status === "success",
       });
       storage.setItem(CACHE_KEY, dumped as any);
+      scheduleAutomaticGoogleDriveBackup(1800);
     }, 800);
   };
   return queryClient.getQueryCache().subscribe(save);
@@ -324,8 +326,9 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       const isUp = !!(state.isConnected && state.isInternetReachable !== false);
       setOnline(isUp);
       if (isUp && !wasOnline.current) {
-        // Just came back online -> sync the outbox.
+        // Just came back online -> sync the outbox and retry the latest Drive backup.
         flush();
+        retryAutomaticGoogleDriveBackup();
       }
       wasOnline.current = isUp;
     });
