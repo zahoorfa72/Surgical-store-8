@@ -121,7 +121,6 @@ export default function BackupRestore() {
     }, 2000);
     return () => { active = false; unsubscribe(); clearInterval(timer); };
   }, []);
-  }, []);
 
   const connectGoogleDrive = async () => {
     setBusy(true);
