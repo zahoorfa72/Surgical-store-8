@@ -7,6 +7,8 @@ const TOKEN_KEY = "ssm.google-drive.token.v2";
 const FOLDER_KEY = "ssm.google-drive.folder.v2";
 const BACKUP_NAME_PREFIX = "SurgicalStore-";
 const CLIENT_ID_KEY = "ssm.google-drive.client-id.v1";
+const AUTO_BACKUP_FILE_KEY = "ssm.google-drive.auto-backup-file.v1";
+const AUTO_BACKUP_FILE_NAME = "SurgicalStore-Auto-Backup.json";
 
 const discovery = {
   authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -310,32 +312,73 @@ async function getOrCreateBackupFolder(): Promise<string> {
   return folder.id;
 }
 
+async function findAutoBackupFile(folderId: string): Promise<string | null> {
+  const cached = await SecureStore.getItemAsync(AUTO_BACKUP_FILE_KEY);
+  if (cached) {
+    try {
+      const check = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cached)}?fields=id,name,mimeType,trashed,parents`);
+      if (check.ok) {
+        const data = await check.json();
+        if (data?.id && data?.name === AUTO_BACKUP_FILE_NAME && data?.mimeType === "application/json" && !data?.trashed) return String(data.id);
+      }
+    } catch {}
+    await SecureStore.deleteItemAsync(AUTO_BACKUP_FILE_KEY);
+  }
+
+  const q = encodeURIComponent(`name = '${AUTO_BACKUP_FILE_NAME}' and mimeType = 'application/json' and trashed = false and '${folderId}' in parents`);
+  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime)&pageSize=10`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const id = Array.isArray(data?.files) && data.files.length ? String(data.files[0]?.id ?? "") || null : null;
+  if (id) await SecureStore.setItemAsync(AUTO_BACKUP_FILE_KEY, id);
+  return id;
+}
+
+async function deleteOldBackupFiles(keepId: string): Promise<void> {
+  try {
+    const q = encodeURIComponent(`trashed = false and mimeType = 'application/json' and name contains '${BACKUP_NAME_PREFIX}'`);
+    const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=100`);
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const file of Array.isArray(data?.files) ? data.files : []) {
+      const id = String(file?.id ?? "");
+      if (!id || id === keepId) continue;
+      try {
+        await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`, { method: "DELETE" });
+      } catch {}
+    }
+  } catch {}
+}
+
 export async function uploadBackupToGoogleDrive(json: string, filename: string): Promise<string> {
   const folderId = await getOrCreateBackupFolder();
+  const existingId = await findAutoBackupFile(folderId);
   const boundary = `surgical_store_${Date.now()}`;
   const body =
     `--${boundary}\r\n` +
     "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-    JSON.stringify({ name: filename, mimeType: "application/json", parents: [folderId] }) +
+    JSON.stringify({ name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json" }) +
     `\r\n--${boundary}\r\n` +
     "Content-Type: application/json\r\n\r\n" +
     json +
     `\r\n--${boundary}--`;
 
-  const res = await driveFetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
-    {
-      method: "POST",
-      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-      body,
-    },
-  );
+  const url = existingId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,webViewLink`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink";
+  const res = await driveFetch(url, {
+    method: existingId ? "PATCH" : "POST",
+    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    body,
+  });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Google Drive backup upload failed (${res.status})${detail ? `: ${detail.slice(0, 220)}` : ""}`);
   }
   const result = await res.json();
   if (!result?.id) throw new Error("Google Drive did not confirm the backup upload.");
+  await SecureStore.setItemAsync(AUTO_BACKUP_FILE_KEY, String(result.id));
+  await deleteOldBackupFiles(String(result.id));
   return result.id as string;
 }
 
