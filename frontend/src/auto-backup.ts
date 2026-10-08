@@ -10,6 +10,8 @@ const LAST_AUTO = "ssm.autoBackup.last";
 const AUTO_DIR_KEY = "ssm.auto-backup-dir";
 const AUTO_DIR = FileSystem.documentDirectory ? FileSystem.documentDirectory + "auto-backups/" : null;
 const SESSION_KEYS = new Set(["ssm.token", "ssm.user", "ssm.vault", "ssm.connectionmode.v2"]);
+const AUTO_STATUS_KEY = "ssm.auto-drive-backup-status.v1";
+export type AutoBackupStatus = "idle" | "pending" | "uploading" | "backed_up";
 
 async function writeAutoBackup() {
   if (!AUTO_DIR) return;
@@ -77,17 +79,42 @@ async function buildBackupJson(): Promise<string> {
 let driveTimer: ReturnType<typeof setTimeout> | null = null;
 let driveUploading = false;
 let driveDirty = false;
+const statusListeners = new Set<(status: AutoBackupStatus) => void>();
+
+function publishStatus(status: AutoBackupStatus) {
+  void AsyncStorage.setItem(AUTO_STATUS_KEY, JSON.stringify({ status, at: new Date().toISOString() }));
+  statusListeners.forEach((listener) => listener(status));
+}
+
+export function subscribeAutomaticBackupStatus(listener: (status: AutoBackupStatus) => void) {
+  statusListeners.add(listener);
+  void AsyncStorage.getItem(AUTO_STATUS_KEY).then((raw) => {
+    try { listener((JSON.parse(raw || "{}")?.status as AutoBackupStatus) || "idle"); } catch { listener("idle"); }
+  });
+  return () => statusListeners.delete(listener);
+}
+
+export async function getAutomaticBackupStatus(): Promise<{ status: AutoBackupStatus; at: string | null }> {
+  try {
+    const raw = await AsyncStorage.getItem(AUTO_STATUS_KEY);
+    const value = JSON.parse(raw || "{}");
+    return { status: (value?.status as AutoBackupStatus) || "idle", at: value?.at || null };
+  } catch { return { status: "idle", at: null }; }
+}
 
 async function uploadLatestToDrive() {
   if (driveUploading) return;
   driveUploading = true;
+  publishStatus("uploading");
   try {
     if (!(await hasGoogleDriveConnection())) return;
     const json = await buildBackupJson();
     await uploadBackupToGoogleDrive(json, "SurgicalStore-Auto-Backup.json");
     driveDirty = false;
+    publishStatus("backed_up");
   } catch {
     driveDirty = true;
+    publishStatus("pending");
   } finally {
     driveUploading = false;
   }
@@ -95,6 +122,7 @@ async function uploadLatestToDrive() {
 
 export function scheduleAutomaticGoogleDriveBackup(delayMs = 1800) {
   driveDirty = true;
+  publishStatus("pending");
   if (driveTimer) clearTimeout(driveTimer);
   driveTimer = setTimeout(() => {
     driveTimer = null;
