@@ -17,7 +17,7 @@ import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveWebClientId, googleDriveRedirectUri, connectGoogleDriveNative, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId, isValidGoogleDriveClientId, assertAndroidDriveOAuthClientsCompatible } from "@/src/google-drive";
 import { setConnectionMode } from "@/src/api";
-import { scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
+import { scheduleAutomaticGoogleDriveBackup, subscribeAutomaticBackupStatus, getAutomaticBackupStatus, AutoBackupStatus } from "@/src/auto-backup";
 
 
 WebBrowser.maybeCompleteAuthSession();
@@ -78,6 +78,8 @@ export default function BackupRestore() {
   const [driveConnected, setDriveConnected] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
   const [clientId, setClientId] = useState<string | null>(Platform.OS === "android" ? googleDriveWebClientId() : googleDriveClientId());
+  const [autoBackupStatus, setAutoBackupStatus] = useState<AutoBackupStatus>("idle");
+  const [lastAutoBackupAt, setLastAutoBackupAt] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -96,6 +98,29 @@ export default function BackupRestore() {
       } catch {}
     })();
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = subscribeAutomaticBackupStatus((status) => {
+      if (active) setAutoBackupStatus(status);
+    });
+    void getAutomaticBackupStatus().then((value) => {
+      if (active) {
+        setAutoBackupStatus(value.status);
+        setLastAutoBackupAt(value.status === "backed_up" ? value.at : null);
+      }
+    });
+    const timer = setInterval(() => {
+      void getAutomaticBackupStatus().then((value) => {
+        if (active) {
+          setAutoBackupStatus(value.status);
+          if (value.status === "backed_up") setLastAutoBackupAt(value.at);
+        }
+      });
+    }, 2000);
+    return () => { active = false; unsubscribe(); clearInterval(timer); };
+  }, []);
   }, []);
 
   const connectGoogleDrive = async () => {
@@ -166,7 +191,7 @@ export default function BackupRestore() {
     setBusy(true);
     try {
       const json = await makeBackup();
-      await uploadBackupToGoogleDrive(json, fileName());
+      await uploadBackupToGoogleDrive(json, "SurgicalStore-Auto-Backup.json");
       await storage.setItem("ssm.last-drive-backup-at", new Date().toISOString());
       toast("Backup uploaded to Google Drive", "success");
     } catch (e: any) { toast(e?.message || "Google Drive upload failed", "error"); }
@@ -403,7 +428,11 @@ export default function BackupRestore() {
           <MaterialDesignIcons name="google-drive" size={28} color={colors.brandPrimary} />
           <View style={{ flex: 1 }}>
             <Text style={styles.actionTitle}>Google Drive backup</Text>
-            <Text style={styles.driveStatus}>{driveConnected ? "Connected — automatic backup will upload to Drive" : "Not connected"}</Text>
+            <Text style={styles.driveStatus}>{!driveConnected ? "Not connected" :
+  autoBackupStatus === "uploading" ? "Uploading latest changes to the single backup file…" :
+  autoBackupStatus === "pending" ? "Changes waiting to be backed up…" :
+  autoBackupStatus === "backed_up" ? `✓ Backed up ${lastAutoBackupAt ? new Date(lastAutoBackupAt).toLocaleString() : "successfully"}` :
+  "Connected — automatic backup is ready"}</Text>
           </View>
         </View>
         {!driveConnected ? (
@@ -459,7 +488,7 @@ export default function BackupRestore() {
           <>
             <Pressable style={[styles.action, styles.restore, busy && styles.disabled]} onPress={uploadCurrentBackupToDrive} disabled={busy}>
               <MaterialDesignIcons name="cloud-upload-outline" size={24} color={colors.brandPrimary} />
-              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Backup now to Google Drive</Text><Text style={styles.actionSub}>Creates a timestamped cloud backup</Text></View>
+              <View style={{ flex: 1 }}><Text style={[styles.actionTitle, { color: colors.onSurface }]}>Backup now to Google Drive</Text><Text style={styles.actionSub}>Updates the single SurgicalStore-Auto-Backup.json file</Text></View>
             </Pressable>
             <Pressable style={[styles.action, styles.restore, busy && styles.disabled]} onPress={restoreLatestDriveBackup} disabled={busy}>
               <MaterialDesignIcons name="cloud-download-outline" size={24} color={colors.brandPrimary} />
@@ -471,7 +500,7 @@ export default function BackupRestore() {
           </>
         )}
 
-        <Text style={styles.note}>Automatic backup checks at 6:00 AM when the app is opened/resumed. On Android, select the backup folder once above so automatic backups can be written there.
+        <Text style={styles.note}>Automatic backup uploads the latest changed local data to one Google Drive file. The app shows “Backed up” after a successful upload and “Changes waiting to be backed up” if Drive is unavailable. The 6:00 AM check remains as an additional safety backup. On Android, select the backup folder once above so automatic backups can be written there.
           Offline changes remain on this phone until the server is available again. Restoring a backup does not delete
           anything from the online server.
         </Text>
