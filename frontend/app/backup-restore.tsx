@@ -17,6 +17,7 @@ import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import { hasGoogleDriveConnection, saveGoogleDriveToken, clearGoogleDriveConnection, googleDriveClientId, googleDriveWebClientId, googleDriveRedirectUri, connectGoogleDriveNative, GOOGLE_DRIVE_SCOPE, uploadBackupToGoogleDrive, listGoogleDriveBackups, downloadGoogleDriveBackup, setGoogleDriveClientId, getStoredGoogleDriveClientId, isValidGoogleDriveClientId, assertAndroidDriveOAuthClientsCompatible } from "@/src/google-drive";
 import { setConnectionMode } from "@/src/api";
+import { scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
 
 
 WebBrowser.maybeCompleteAuthSession();
@@ -110,6 +111,7 @@ export default function BackupRestore() {
       if (Platform.OS === "android") {
         await connectGoogleDriveNative(id);
         setDriveConnected(true);
+        scheduleAutomaticGoogleDriveBackup(500);
         toast("Google Drive connected.", "success");
         return;
       }
@@ -149,6 +151,7 @@ export default function BackupRestore() {
         tokenType: token.tokenType,
       });
       setDriveConnected(true);
+      scheduleAutomaticGoogleDriveBackup(500);
       toast("Google Drive connected.", "success");
     } catch (e: any) {
       toast(e?.message || "Google Drive connection failed", "error");
