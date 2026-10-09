@@ -1906,21 +1906,13 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
     if returned:
         raise HTTPException(status_code=400, detail="This purchase has supplier returns. Handle them before editing.")
 
-    # Validate before reversing so a failed edit never corrupts stock.
-    for it in purchase.get("items", []):
-        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
-        available = float(prod.get("quantity", 0)) if prod else 0
-        if available + 1e-9 < float(it["quantity"]):
-            raise HTTPException(status_code=400, detail=f"Cannot edit purchase: {it['name']} stock has already been used")
-    # Reverse the old purchase's exact cost lot.
-    for it in purchase.get("items", []):
-        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
-        layers = await _ensure_cost_layers(prod or {})
-        layers, _ = _consume_cost_layers_matching(layers, float(it["quantity"]), float(it.get("unit_cost", 0) or 0))
-        await db.products.update_one(
-            {"_id": ObjectId(it["product_id"])},
-            {"$inc": {"quantity": -it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
-        )
+    # Validate all existing stock and all replacement lines BEFORE changing
+    # anything. An invalid added item must never leave the old purchase reversed.
+    for old in purchase.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(old["product_id"]), "deleted": {"$ne": True}})
+        available = float(prod.get("quantity", 0) or 0) if prod else 0.0
+        if available + 1e-9 < float(old.get("quantity", 0) or 0):
+            raise HTTPException(status_code=400, detail=f"Cannot edit purchase: {old.get('name', 'Item')} stock has already been used")
 
     items = []
     total = 0.0
@@ -1942,21 +1934,34 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             "line_total": line_total,
         })
 
+    # Check the budget before stock layers are touched, so rejection is safe.
     budget_doc = await db.budget.find_one({"_id": "singleton"})
     opening_budget = float(budget_doc.get("opening_amount", 0)) if budget_doc else 0.0
     if opening_budget > 0:
         purchase_docs = await db.purchases.find({"deleted": {"$ne": True}, "_id": {"$ne": ObjectId(purchase_id)}}).to_list(20000)
-        already_spent = sum(float(p.get("total", 0)) for p in purchase_docs)
+        already_spent = sum(float(p.get("total", 0) or 0) for p in purchase_docs)
         if already_spent + total > opening_budget + 0.0001:
-            for old_it in purchase.get("items", []):
-                await db.products.update_one({"_id": ObjectId(old_it["product_id"])}, {"$inc": {"quantity": old_it["quantity"]}, "$set": {"updated_at": now_iso()}})
             raise HTTPException(status_code=400, detail=f"Purchase exceeds remaining opening budget of {max(0.0, opening_budget - already_spent):.2f}")
 
-    supplier_name = "—"
-    if body.supplier_id and ObjectId.is_valid(body.supplier_id):
-        s = await db.parties.find_one({"_id": ObjectId(body.supplier_id)})
-        if s:
-            supplier_name = s["name"]
+    supplier = await db.parties.find_one({"_id": ObjectId(body.supplier_id), "deleted": {"$ne": True}})
+    supplier_name = supplier.get("name", "—") if supplier else "—"
+
+    # Reverse each old lot and reconcile its remaining layers to stock. This
+    # tolerates legacy drift without blocking a valid purchase edit.
+    for old in purchase.get("items", []):
+        product_id = old["product_id"]
+        prod = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+        if not prod:
+            continue
+        old_qty = float(old.get("quantity", 0) or 0)
+        layers = await _ensure_cost_layers(prod)
+        layers, _ = await _consume_cost_layers_matching(layers, old_qty, float(old.get("unit_cost", 0) or 0))
+        next_qty = max(0.0, float(prod.get("quantity", 0) or 0) - old_qty)
+        layers = await _ensure_cost_layers({**prod, "quantity": next_qty, "cost_layers": layers})
+        await db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$set": {"quantity": round(next_qty, 8), "cost_layers": layers, "updated_at": now_iso()}},
+        )
 
     await db.purchases.update_one(
         {"_id": ObjectId(purchase_id)},
@@ -1969,19 +1974,22 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             "edited_at": now_iso(),
         }},
     )
-    # Apply the edited purchase as a separate cost layer.
+
+    # Apply the replacement lines as the edited purchase's cost lots.
     for it in body.items:
-        prod = await db.products.find_one({"_id": ObjectId(it.product_id)})
-        layers = await _ensure_cost_layers(prod or {})
+        product_id = it.product_id
+        prod = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+        if not prod:
+            continue
+        layers = await _ensure_cost_layers(prod)
         layers = _append_cost_layer(layers, it.quantity, it.unit_cost, purchase_id)
         await db.products.update_one(
-            {"_id": ObjectId(it.product_id)},
+            {"_id": ObjectId(product_id)},
             {"$inc": {"quantity": it.quantity},
              "$set": {"purchase_price": it.unit_cost, "cost_layers": layers, "updated_at": now_iso()}},
         )
     updated = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
     return purchase_public(updated)
-
 
 # ---------------------------------------------------------------------------
 # Expenses (two buckets)
