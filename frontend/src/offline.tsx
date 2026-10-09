@@ -429,7 +429,7 @@ function DraggableStatusPill({ storageKey, icon, label, backgroundColor, testID 
   const base = useRef({ x: 0, y: 0 });
   useEffect(() => {
     let active = true;
-    void storage.getItem<{ x: number; y: number }>(storageKey, { x: 0, y: 0 }).then((pos) => {
+    void storage.getItem<{ x: number; y: number }>(storageKey, { x: 0, y: storageKey.includes("drive-position") ? -34 : 0 }).then((pos) => {
       if (!active || !pos) return;
       base.current = { x: Number(pos.x) || 0, y: Number(pos.y) || 0 };
       pan.setValue(base.current);
