@@ -11,6 +11,7 @@ import { Platform } from "react-native";
 
 import { storage } from "@/src/utils/storage";
 import { queryClient } from "@/src/query-client";
+import { addToTrash } from "@/src/trash";
 
 const RAW_BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -861,6 +862,30 @@ function findLocalPartyDuplicate(body: any): any | null {
   }) ?? null;
 }
 
+function findRecordForDelete(path: string): any | null {
+  const match = path.match(/^\/(products|sales|purchases|parties|payments|expenses|returns|purchase-returns|users|inventory-adjustments|stock-transfers|cash-shifts|attachments)\/([^/?]+)/);
+  if (!match) return null;
+  const [, entity, id] = match;
+  const keys: any[][] = entity === "sales" ? [["sales"], ["sale", id]]
+    : entity === "purchases" ? [["purchases"], ["purchase", id]]
+    : entity === "products" ? [["products"]]
+    : entity === "parties" ? [["parties", "all"], ["parties", "supplier"], ["parties", "customer"]]
+    : entity === "expenses" ? [["expenses", "all"], ["expenses", "operating"], ["expenses", "personal"], ["expenses", "cogs"]]
+    : entity === "payments" ? [["payments", "all"], ["payments", id]]
+    : entity === "returns" ? [["returns"]]
+    : entity === "purchase-returns" ? [["purchase-returns"]]
+    : entity === "users" ? [["users"]]
+    : [[entity]];
+  for (const key of keys) {
+    const value = queryClient.getQueryData<any>(key);
+    if (Array.isArray(value)) {
+      const found = value.find((row) => String(row?.id) === id);
+      if (found) return found;
+    } else if (value && String(value.id) === id) return value;
+  }
+  return null;
+}
+
 export async function apiRequest<T = any>(
   path: string,
   options: { method?: string; body?: any } = {},
@@ -868,6 +893,14 @@ export async function apiRequest<T = any>(
   const method = options.method ?? "GET";
   const mode = await getConnectionMode();
   const expectedUpdatedAt = (method === "PUT" || method === "DELETE") ? getCachedUpdatedAt(path) : undefined;
+  // Capture the exact pre-delete record before either online deletion or offline queueing.
+  if (method === "DELETE") {
+    const record = findRecordForDelete(path);
+    if (record) {
+      const collectionPath = path.split("?")[0].replace(/\\/[^/]+$/, "");
+      await addToTrash(collectionPath, record);
+    }
+  }
 
   // Customer/supplier creation is idempotent locally as well as on the server.
   // This covers every creation entry point, including Purchase and Sell.
