@@ -897,7 +897,7 @@ export async function apiRequest<T = any>(
   if (method === "DELETE") {
     const record = findRecordForDelete(path);
     if (record) {
-      const collectionPath = path.split("?")[0].replace(/\\/[^/]+$/, "");
+      const collectionPath = path.split("?")[0].replace(/\/[^/]+$/, "");
       await addToTrash(collectionPath, record);
     }
   }
