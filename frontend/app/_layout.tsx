@@ -11,7 +11,7 @@ import { queryClient } from "@/src/query-client";
 import { AuthProvider } from "@/src/auth";
 import { OfflineProvider } from "@/src/offline";
 import { ToastProvider } from "@/src/ui";
-import { startDailyAutoBackup, scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
+import { startDailyAutoBackup } from "@/src/auto-backup";
 import { registerDailyBackupTask } from "@/src/daily-backup-task";
 
 LogBox.ignoreAllLogs(true);
@@ -34,7 +34,8 @@ export default function RootLayout() {
     if (!cacheReady) return;
     void registerDailyBackupTask();
     // If Drive is already connected, refresh the single cloud backup on app start.
-    scheduleAutomaticGoogleDriveBackup(2500);
+    // Do not force a Drive upload just because the app opened.
+    // Real data edits are debounced by cache persistence; daily backup remains enabled.
     return startDailyAutoBackup();
   }, [cacheReady]);
 
