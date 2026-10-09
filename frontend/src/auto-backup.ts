@@ -12,6 +12,8 @@ const AUTO_DIR = FileSystem.documentDirectory ? FileSystem.documentDirectory + "
 const SESSION_KEYS = new Set(["ssm.token", "ssm.user", "ssm.vault", "ssm.connectionmode.v2"]);
 const AUTO_STATUS_KEY = "ssm.auto-drive-backup-status.v1";
 export type AutoBackupStatus = "idle" | "pending" | "uploading" | "backed_up";
+const CHANGE_COUNT_KEY = "ssm.auto-drive-backup-change-count.v1";
+let pendingChangeCount = 0;
 
 async function writeAutoBackup() {
   if (!AUTO_DIR) return;
@@ -82,7 +84,8 @@ let driveDirty = false;
 const statusListeners = new Set<(status: AutoBackupStatus) => void>();
 
 function publishStatus(status: AutoBackupStatus) {
-  void AsyncStorage.setItem(AUTO_STATUS_KEY, JSON.stringify({ status, at: new Date().toISOString() }));
+  const at = new Date().toISOString();
+  void AsyncStorage.setItem(AUTO_STATUS_KEY, JSON.stringify({ status, at, pendingChanges: pendingChangeCount }));
   statusListeners.forEach((listener) => listener(status));
 }
 
@@ -107,10 +110,12 @@ async function uploadLatestToDrive() {
   driveUploading = true;
   publishStatus("uploading");
   try {
-    if (!(await hasGoogleDriveConnection())) return;
+    if (!(await hasGoogleDriveConnection())) { publishStatus("pending"); return; }
     const json = await buildBackupJson();
     await uploadBackupToGoogleDrive(json, "SurgicalStore-Auto-Backup.json");
     driveDirty = false;
+    pendingChangeCount = 0;
+    void AsyncStorage.setItem(CHANGE_COUNT_KEY, "0");
     publishStatus("backed_up");
   } catch {
     driveDirty = true;
@@ -120,8 +125,10 @@ async function uploadLatestToDrive() {
   }
 }
 
-export function scheduleAutomaticGoogleDriveBackup(delayMs = 1800) {
+export function scheduleAutomaticGoogleDriveBackup(delayMs = 7000) {
   driveDirty = true;
+  pendingChangeCount += 1;
+  void AsyncStorage.setItem(CHANGE_COUNT_KEY, String(pendingChangeCount));
   publishStatus("pending");
   if (driveTimer) clearTimeout(driveTimer);
   driveTimer = setTimeout(() => {
@@ -131,7 +138,7 @@ export function scheduleAutomaticGoogleDriveBackup(delayMs = 1800) {
 }
 
 export function retryAutomaticGoogleDriveBackup() {
-  if (driveDirty) scheduleAutomaticGoogleDriveBackup(500);
+  if (driveDirty) scheduleAutomaticGoogleDriveBackup(7000);
 }
 
 export async function runDailyAutoBackup() {
