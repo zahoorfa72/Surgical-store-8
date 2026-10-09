@@ -283,7 +283,8 @@ export default function Dashboard() {
     - periodReturns.reduce((n: number, x: any) => n + Number(x.refund_total ?? 0) - Number(x.refund_profit ?? 0), 0)
     - periodExpenses.filter((x: any) => x.bucket === "operating" || x.bucket === "cogs").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     - periodPayments.filter((x: any) => x.kind === "pay").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
-    + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0);
+    + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
+    + openingPurchaseBudget + monthlyExpensesBudget;
   const periodBalanceLabel = range === "day" ? "Selected Day Remaining" : range === "week" ? "Selected Week Remaining" : range === "month" ? "Selected Month Remaining" : range === "year" ? "Selected Year Remaining" : range === "custom" ? "Selected Dates Remaining" : "Period Remaining";
 
   const detailFromIso = displayToIso(detailFromDate);
