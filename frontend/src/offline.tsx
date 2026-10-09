@@ -53,19 +53,39 @@ async function restoreCache() {
   }
 }
 
+function cacheDataSignature(): string {
+  // Ignore observer/focus/navigation events and query timestamps. Only the
+  // actual cached business data should trigger a Drive backup.
+  const rows = queryClient.getQueryCache().getAll()
+    .filter((q) => q.state.status === "success" && q.state.data !== undefined)
+    .map((q) => [q.queryHash, q.state.data]);
+  try { return JSON.stringify(rows); } catch { return String(rows.length); }
+}
+
 function startCachePersistence() {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastDataSignature = cacheDataSignature();
   const save = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const dumped = dehydrate(queryClient, {
         shouldDehydrateQuery: (q) => q.state.status === "success",
       });
-      storage.setItem(CACHE_KEY, dumped as any);
-      scheduleAutomaticGoogleDriveBackup(7000);
+      void storage.setItem(CACHE_KEY, dumped as any);
+      const nextSignature = cacheDataSignature();
+      if (nextSignature !== lastDataSignature) {
+        lastDataSignature = nextSignature;
+        // Debounce from the latest real data change, not screen navigation.
+        scheduleAutomaticGoogleDriveBackup(7000);
+      }
     }, 800);
   };
-  return queryClient.getQueryCache().subscribe(save);
+  const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+    // Cache observer subscriptions are UI activity, not edits. Save only
+    // when the underlying query data has actually been updated.
+    if (event.type === "updated" && event.action.type === "success") save();
+  });
+  return () => { unsubscribe(); if (timer) clearTimeout(timer); };
 }
 
 // ---------------------------------------------------------------------------
