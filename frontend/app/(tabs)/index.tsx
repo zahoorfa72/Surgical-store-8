@@ -272,7 +272,7 @@ export default function Dashboard() {
     if (reportRange === "year") {
       const nowDate = new Date(); return d >= new Date(nowDate.getFullYear(), 0, 1) && d < new Date(nowDate.getFullYear() + 1, 0, 1);
     }
-    return reportRange === "all" || true;
+    return true;
   };
   const periodSales = sales.filter((x: any) => inOverviewBalancePeriod(x.created_at));
   const periodPayments = payments.filter((x: any) => inOverviewBalancePeriod(x.created_at));
