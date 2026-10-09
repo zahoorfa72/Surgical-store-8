@@ -484,11 +484,12 @@ function DriveBackupBanner() {
   const { colors } = useTheme();
   const [status, setStatus] = useState<AutoBackupStatus>("idle");
   const [lastAt, setLastAt] = useState<string | null>(null);
+  const [pendingChanges, setPendingChanges] = useState(0);
   useEffect(() => {
     let active = true;
     const refresh = async () => {
       const v = await getAutomaticBackupStatus();
-      if (active) { setStatus(v.status); if (v.status === "backed_up") setLastAt(v.at); }
+      if (active) { setStatus(v.status); setPendingChanges(v.pendingChanges); if (v.status === "backed_up") setLastAt(v.at); }
     };
     const unsubscribe = subscribeAutomaticBackupStatus((s) => { if (active) setStatus(s); });
     void refresh();
@@ -497,7 +498,7 @@ function DriveBackupBanner() {
   }, []);
   if (status === "idle") return null;
   const label = status === "uploading" ? "Drive backup uploading…"
-    : status === "pending" ? "Drive backup pending"
+     : status === "pending" ? `Drive backup pending · ${pendingChanges} change${pendingChanges === 1 ? "" : "s"}`
     : `Drive backed up · ${lastAt ? new Date(lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "saved"}`;
   return <DraggableStatusPill storageKey="ssm.indicator.drive-position.v1" icon={status === "backed_up" ? "cloud-check-outline" : "cloud-upload-outline"} label={label} backgroundColor={status === "backed_up" ? colors.success : colors.brandSecondary} testID="drive-backup-banner" />;
 }
