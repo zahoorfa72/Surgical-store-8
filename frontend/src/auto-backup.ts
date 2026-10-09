@@ -14,6 +14,7 @@ const AUTO_STATUS_KEY = "ssm.auto-drive-backup-status.v1";
 export type AutoBackupStatus = "idle" | "pending" | "uploading" | "backed_up";
 const CHANGE_COUNT_KEY = "ssm.auto-drive-backup-change-count.v1";
 let pendingChangeCount = 0;
+void AsyncStorage.getItem(CHANGE_COUNT_KEY).then((raw) => { const n = Number(raw ?? 0); if (Number.isFinite(n) && n > 0) pendingChangeCount = n; }).catch(() => {});
 
 async function writeAutoBackup() {
   if (!AUTO_DIR) return;
@@ -97,12 +98,12 @@ export function subscribeAutomaticBackupStatus(listener: (status: AutoBackupStat
   return () => statusListeners.delete(listener);
 }
 
-export async function getAutomaticBackupStatus(): Promise<{ status: AutoBackupStatus; at: string | null }> {
+export async function getAutomaticBackupStatus(): Promise<{ status: AutoBackupStatus; at: string | null; pendingChanges: number }> {
   try {
     const raw = await AsyncStorage.getItem(AUTO_STATUS_KEY);
     const value = JSON.parse(raw || "{}");
-    return { status: (value?.status as AutoBackupStatus) || "idle", at: value?.at || null };
-  } catch { return { status: "idle", at: null }; }
+    return { status: (value?.status as AutoBackupStatus) || "idle", at: value?.at || null, pendingChanges: Number(value?.pendingChanges ?? pendingChangeCount) || 0 };
+  } catch { return { status: "idle", at: null, pendingChanges: pendingChangeCount }; }
 }
 
 async function uploadLatestToDrive() {
