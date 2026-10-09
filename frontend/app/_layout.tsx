@@ -74,6 +74,7 @@ export default function RootLayout() {
                   <Stack.Screen name="customers-report" options={{ presentation: "modal" }} />
                   <Stack.Screen name="settings" options={{ presentation: "modal" }} />
                   <Stack.Screen name="backup-restore" options={{ presentation: "modal" }} />
+                  <Stack.Screen name="trash" options={{ presentation: "modal" }} />
                 </Stack>
                 </OfflineProvider>
               </ToastProvider>
