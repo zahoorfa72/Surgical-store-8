@@ -161,11 +161,14 @@ function ensureCostLayers(product: any): any[] {
 }
 
 function consumeCostLayersMatching(layers: any[], quantity: number, unitCost: number): { layers: any[]; totalCost: number } {
-  let remaining = Number(quantity), totalCost = 0;
-  const work = layers.map((x) => ({ ...x }));
+  let remaining = Math.max(0, Number(quantity) || 0), totalCost = 0;
+  const work = layers.map((x) => ({ ...x, quantity: Math.max(0, Number(x?.quantity ?? 0) || 0) }));
+  // First remove the exact purchase cost, then other available lots. Old
+  // cached inventory may not perfectly match purchase history; never let this
+  // optimistic/offline cache calculation abort a purchase edit.
   for (let pass = 0; pass < 2 && remaining > 1e-9; pass += 1) {
     for (let i = 0; i < work.length && remaining > 1e-9; i += 1) {
-      const layer = work[i], q = Number(layer?.quantity ?? 0);
+      const layer = work[i], q = Number(layer.quantity ?? 0);
       if (q <= 0 || (pass === 0 && Math.abs(Number(layer?.unit_cost ?? 0) - Number(unitCost)) > 1e-6)) continue;
       const take = Math.min(q, remaining);
       totalCost += take * Number(layer.unit_cost ?? 0);
@@ -173,7 +176,9 @@ function consumeCostLayersMatching(layers: any[], quantity: number, unitCost: nu
       remaining -= take;
     }
   }
-  if (remaining > 1e-9) throw new Error("Inventory cost layers are inconsistent with stock.");
+  // If historical layers are missing, the caller reconciles the final layers
+  // to authoritative product quantity below. Missing legacy lots must not
+  // throw and prevent a valid edit from being saved.
   return { layers: work.filter((x) => Number(x.quantity ?? 0) > 1e-9), totalCost };
 }
 
@@ -548,7 +553,9 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           for(const ni of newForProduct) layers.push({quantity:Number(ni.quantity||0),unit_cost:Number(ni.unit_cost||0),purchase_id:id});
           const newQty=newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           const oldQty=oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
-          return {...p,quantity:Number(p.quantity??0)+newQty-oldQty,cost_layers:layers,purchase_price:newForProduct.length?Number(newForProduct[newForProduct.length-1].unit_cost):p.purchase_price};
+          const nextQty = Math.max(0, Number(p.quantity ?? 0) + newQty - oldQty);
+          layers = ensureCostLayers({ ...p, quantity: nextQty, cost_layers: layers });
+          return {...p,quantity:nextQty,cost_layers:layers,purchase_price:newForProduct.length?Number(newForProduct[newForProduct.length-1].unit_cost):p.purchase_price};
         }));
         const total=newItems.reduce((a:number,x:any)=>a+Number(x.line_total||0),0);
         if(oldPurchase.supplier_id) queryClient.setQueryData<any[]>(["parties","supplier"],rows=>(rows??[]).map((p:any)=>p.id===oldPurchase.supplier_id?{...p,balance:Number(p.balance??0)-Number(oldPurchase.total??0)}:p));
