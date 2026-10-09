@@ -16,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Animated, Dimensions, Modal, PanResponder, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import NetInfo from "@react-native-community/netinfo";
 import { dehydrate, hydrate } from "@tanstack/react-query";
@@ -30,7 +30,7 @@ import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { money } from "@/src/format";
 import { makeStyles, useTheme } from "@/src/theme";
-import { scheduleAutomaticGoogleDriveBackup, retryAutomaticGoogleDriveBackup } from "@/src/auto-backup";
+import { scheduleAutomaticGoogleDriveBackup, retryAutomaticGoogleDriveBackup, subscribeAutomaticBackupStatus, getAutomaticBackupStatus, AutoBackupStatus } from "@/src/auto-backup";
 
 const CACHE_KEY = "ssm.qcache.v1";
 const OUTBOX_KEY = "ssm.outbox.v1";
@@ -62,7 +62,7 @@ function startCachePersistence() {
         shouldDehydrateQuery: (q) => q.state.status === "success",
       });
       storage.setItem(CACHE_KEY, dumped as any);
-      scheduleAutomaticGoogleDriveBackup(1800);
+      scheduleAutomaticGoogleDriveBackup(7000);
     }, 800);
   };
   return queryClient.getQueryCache().subscribe(save);
@@ -407,6 +407,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     <OfflineContext.Provider value={value}>
       {children}
       <OfflineBanner online={online} pending={pending} />
+      <DriveBackupBanner />
       <SyncSummaryModal summary={syncSummary} onClose={() => setSyncSummary(null)} />
     </OfflineContext.Provider>
   );
@@ -421,47 +422,84 @@ export function useOffline(): OfflineState {
 // ---------------------------------------------------------------------------
 // Banner shown when offline or when changes are waiting to sync.
 // ---------------------------------------------------------------------------
-function OfflineBanner({ online, pending }: { online: boolean; pending: number }) {
+function DraggableStatusPill({ storageKey, icon, label, backgroundColor, testID }: {
+  storageKey: string; icon: string; label: string; backgroundColor: string; testID: string;
+}) {
+  const pan = useRef(new Animated.ValueXY()).current;
+  const base = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    let active = true;
+    void storage.getItem<{ x: number; y: number }>(storageKey, { x: 0, y: 0 }).then((pos) => {
+      if (!active || !pos) return;
+      base.current = { x: Number(pos.x) || 0, y: Number(pos.y) || 0 };
+      pan.setValue(base.current);
+    });
+    return () => { active = false; };
+  }, [storageKey, pan]);
+  const responder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) + Math.abs(gesture.dy) > 3,
+    onPanResponderMove: (_, gesture) => pan.setValue({ x: base.current.x + gesture.dx, y: base.current.y + gesture.dy }),
+    onPanResponderRelease: (_, gesture) => {
+      const maxX = Math.max(0, Dimensions.get("window").width - 150);
+      const maxY = Math.max(0, Dimensions.get("window").height - 70);
+      base.current = {
+        x: Math.max(-maxX, Math.min(maxX, base.current.x + gesture.dx)),
+        y: Math.max(-maxY, Math.min(maxY, base.current.y + gesture.dy)),
+      };
+      pan.setValue(base.current);
+      void storage.setItem(storageKey, base.current);
+    },
+  })).current;
   const styles = useStyles();
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  return (
+    <Animated.View
+      testID={testID}
+      {...responder.panHandlers}
+      style={[styles.banner, {
+        position: "absolute", zIndex: 80, right: 8, bottom: insets.bottom + 8,
+        maxWidth: 155, minHeight: 24, opacity: 0.94,
+        backgroundColor, paddingHorizontal: 7, paddingVertical: 4,
+        transform: pan.getTranslateTransform(),
+      }]}
+    >
+      <MaterialDesignIcons name={icon as any} size={13} color="#FFFFFF" />
+      <Text numberOfLines={2} style={styles.bannerText}>{label}</Text>
+    </Animated.View>
+  );
+}
+
+function OfflineBanner({ online, pending }: { online: boolean; pending: number }) {
+  const { colors } = useTheme();
   if (online && pending === 0) return null;
   const offlineMode = !online;
-  return (
-    <View
-      testID="offline-banner"
-      pointerEvents="none"
-      style={[
-        styles.banner,
-        {
-          bottom: insets.bottom + 8,
-          right: 8,
-          left: undefined,
-          alignSelf: "flex-end",
-          paddingHorizontal: 6,
-          paddingVertical: 3,
-          borderRadius: 999,
-          maxWidth: 120,
-          minHeight: 22,
-          opacity: 0.88,
-        },
-        offlineMode ? styles.bannerOffline : styles.bannerPending,
-      ]}
-    >
-      <MaterialDesignIcons
-        name={offlineMode ? "cloud-off-outline" : "cloud-sync-outline"}
-        size={13}
-        color={colors.onSurfaceInverse}
-      />
-      <Text style={styles.bannerText} testID="offline-banner-text">
-        {offlineMode
-          ? pending > 0
-            ? `Offline · ${pending} change${pending > 1 ? "s" : ""} will sync`
-            : "Offline · data may be out of date"
-          : `Syncing ${pending} change${pending > 1 ? "s" : ""}…`}
-      </Text>
-    </View>
-  );
+  const label = offlineMode
+    ? pending > 0 ? `Offline · ${pending} change${pending > 1 ? "s" : ""} will sync` : "Offline · data may be out of date"
+    : `Syncing ${pending} change${pending > 1 ? "s" : ""}…`;
+  return <DraggableStatusPill storageKey="ssm.indicator.online-position.v1" icon={offlineMode ? "cloud-off-outline" : "cloud-sync-outline"} label={label} backgroundColor={offlineMode ? colors.surfaceInverse : colors.brandPrimary} testID="offline-banner" />;
+}
+
+function DriveBackupBanner() {
+  const { colors } = useTheme();
+  const [status, setStatus] = useState<AutoBackupStatus>("idle");
+  const [lastAt, setLastAt] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      const v = await getAutomaticBackupStatus();
+      if (active) { setStatus(v.status); if (v.status === "backed_up") setLastAt(v.at); }
+    };
+    const unsubscribe = subscribeAutomaticBackupStatus((s) => { if (active) setStatus(s); });
+    void refresh();
+    const timer = setInterval(() => void refresh(), 2500);
+    return () => { active = false; unsubscribe(); clearInterval(timer); };
+  }, []);
+  if (status === "idle") return null;
+  const label = status === "uploading" ? "Drive backup uploading…"
+    : status === "pending" ? "Drive backup pending"
+    : `Drive backed up · ${lastAt ? new Date(lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "saved"}`;
+  return <DraggableStatusPill storageKey="ssm.indicator.drive-position.v1" icon={status === "backed_up" ? "cloud-check-outline" : "cloud-upload-outline"} label={label} backgroundColor={status === "backed_up" ? colors.success : colors.brandSecondary} testID="drive-backup-banner" />;
 }
 
 // ---------------------------------------------------------------------------
