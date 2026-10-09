@@ -42,6 +42,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
     title: "Administration",
     items: [
       { label: "Manage users", sub: "Add sellers & cashiers", icon: "account-key", route: "/users", testID: "more-users", adminOnly: true },
+      { label: "Trash", sub: "Restore deleted entries for 30 days", icon: "delete-restore", route: "/trash", testID: "more-trash" },
       { label: "Backup & Restore", sub: "Save or restore all local store data", icon: "backup-restore", route: "/backup-restore", testID: "more-backup-restore" },
       { label: "Settings", sub: "Profile & sign out", icon: "cog", route: "/settings", testID: "more-settings" },
     ],
