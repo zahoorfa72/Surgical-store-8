@@ -233,6 +233,59 @@ export default function Dashboard() {
     if (reportRange === "all") return true;
     return true;
   };
+  const inOverviewBalancePeriod = (iso?: string) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return false;
+    const dayStart = (value: string) => new Date(value + "T00:00:00");
+    if (reportRange.startsWith("date:")) {
+      const start = dayStart(reportRange.slice(5)); const end = new Date(start); end.setDate(end.getDate() + 1);
+      return d >= start && d < end;
+    }
+    if (reportRange.startsWith("date-range:")) {
+      const [from, to] = reportRange.slice(11).split(":");
+      const start = from ? dayStart(from) : null; const end = to ? dayStart(to) : null;
+      if (end) end.setDate(end.getDate() + 1);
+      return (!start || d >= start) && (!end || d < end);
+    }
+    if (reportRange.startsWith("month:")) {
+      const [y, m] = reportRange.slice(6).split("-").map(Number);
+      const start = new Date(y, m - 1, 1); const end = new Date(y, m, 1);
+      return d >= start && d < end;
+    }
+    if (reportRange.startsWith("year:")) {
+      const y = Number(reportRange.slice(5)); return d >= new Date(y, 0, 1) && d < new Date(y + 1, 0, 1);
+    }
+    if (reportRange === "today" || reportRange === "day") {
+      const start = dayStart(localDay); const end = new Date(start); end.setDate(end.getDate() + 1);
+      return d >= start && d < end;
+    }
+    if (reportRange === "week") {
+      const nowDate = new Date(); const start = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      const end = new Date(start); end.setDate(end.getDate() + 7);
+      return d >= start && d < end;
+    }
+    if (reportRange === "month") {
+      const nowDate = new Date(); return d >= new Date(nowDate.getFullYear(), nowDate.getMonth(), 1) && d < new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 1);
+    }
+    if (reportRange === "year") {
+      const nowDate = new Date(); return d >= new Date(nowDate.getFullYear(), 0, 1) && d < new Date(nowDate.getFullYear() + 1, 0, 1);
+    }
+    return reportRange === "all" || true;
+  };
+  const periodSales = sales.filter((x: any) => inOverviewBalancePeriod(x.created_at));
+  const periodPayments = payments.filter((x: any) => inOverviewBalancePeriod(x.created_at));
+  const periodExpenses = expenses.filter((x: any) => inOverviewBalancePeriod(x.created_at));
+  const periodReturns = returns.filter((x: any) => inOverviewBalancePeriod(x.created_at));
+  const selectedPeriodRemaining =
+    periodSales.reduce((n: number, x: any) => n + Number(x.total ?? 0) - Number(x.profit ?? 0), 0)
+    - periodReturns.reduce((n: number, x: any) => n + Number(x.refund_total ?? 0) - Number(x.refund_profit ?? 0), 0)
+    - periodExpenses.filter((x: any) => x.bucket === "operating" || x.bucket === "cogs").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
+    - periodPayments.filter((x: any) => x.kind === "pay").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
+    + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0);
+  const periodBalanceLabel = range === "day" ? "Selected Day Remaining" : range === "week" ? "Selected Week Remaining" : range === "month" ? "Selected Month Remaining" : range === "year" ? "Selected Year Remaining" : range === "custom" ? "Selected Dates Remaining" : "Period Remaining";
+
   const detailFromIso = displayToIso(detailFromDate);
   const detailToIso = displayToIso(detailToDate);
   const inDetailRange = (iso?: string) => {
@@ -327,7 +380,7 @@ export default function Dashboard() {
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0)))} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
-            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(localDay); setBalanceFromDate(""); setBalanceToDate(""); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel="Selected Day Remaining Balance" secondaryValue={money(displayFinanceAmount(data.remaining_balance, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(localDay); setBalanceFromDate(""); setBalanceToDate(""); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel={periodBalanceLabel} secondaryValue={money(displayFinanceAmount(selectedPeriodRemaining, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
 
