@@ -1129,21 +1129,45 @@ async def create_stock_transfer(body: StockTransferIn, user: Staff):
     remaining = qty
     moved_layers = []
     kept_layers = []
-    for layer in source_layers:
-        q = float(layer.get("quantity", 0) or 0)
+    # Iterate by index (not list.index): duplicate lots can have identical
+    # values and list.index would then resume from the wrong lot.
+    for index, layer in enumerate(source_layers):
+        q = max(0.0, float(layer.get("quantity", 0) or 0))
         take = min(q, remaining)
-        if take > 0:
+        if take > 1e-9:
             moved_layers.append({**layer, "quantity": take, "purchase_id": None})
             remaining -= take
         left = q - take
         if left > 1e-9:
             kept_layers.append({**layer, "quantity": left})
         if remaining <= 1e-9:
-            idx = source_layers.index(layer)
-            kept_layers.extend(source_layers[idx + 1:])
+            kept_layers.extend(source_layers[index + 1:])
             break
     if remaining > 1e-9:
-        raise HTTPException(status_code=400, detail="Inventory cost layers are inconsistent with stock")
+        # Stock quantity is authoritative for legacy records with damaged or
+        # incomplete lots. Preserve the transfer instead of blocking it, and
+        # account for missing units at the product's current recorded cost.
+        fallback_cost = max(0.0, float(source.get("purchase_price", 0) or 0))
+        moved_layers.append({"quantity": remaining, "unit_cost": fallback_cost, "purchase_id": None})
+        remaining = 0.0
+    # Ensure the source's remaining layers still reconcile to its remaining
+    # stock quantity even when the old record had missing cost-layer units.
+    source_remaining_qty = max(0.0, float(source.get("quantity", 0) or 0) - qty)
+    layered_remaining = sum(max(0.0, float(x.get("quantity", 0) or 0)) for x in kept_layers)
+    if layered_remaining + 1e-9 < source_remaining_qty:
+        kept_layers = _append_cost_layer(
+            kept_layers, source_remaining_qty - layered_remaining,
+            max(0.0, float(source.get("purchase_price", 0) or 0)), None
+        )
+    elif layered_remaining > source_remaining_qty + 1e-9:
+        trimmed = []
+        left_to_keep = source_remaining_qty
+        for layer in kept_layers:
+            take = min(max(0.0, float(layer.get("quantity", 0) or 0)), left_to_keep)
+            if take > 1e-9:
+                trimmed.append({**layer, "quantity": take})
+                left_to_keep -= take
+        kept_layers = trimmed
     ts = now_iso()
     await db.products.update_one({"_id": ObjectId(source["_id"])}, {"$set": {
         "quantity": round(float(source.get("quantity", 0)) - qty, 8), "cost_layers": kept_layers, "updated_at": ts
