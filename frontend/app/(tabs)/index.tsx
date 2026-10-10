@@ -201,7 +201,6 @@ export default function Dashboard() {
   const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceSupplierPayments = balanceDayPayments.filter((p: any) => p.kind === "pay").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
-  const openingPurchaseBudget = Number(budget?.opening_amount ?? 0);
   const monthlyExpensesBudget = Number(budget?.monthly_amount ?? 0);
   const openingBudgetForBalanceRange = (budget?.opening_transactions ?? [])
     .filter((entry: any) => inBalanceRange(entry.date))
@@ -571,7 +570,7 @@ export default function Dashboard() {
                       <PLRow label="COGS expenses" value={"- " + money(displayFinanceAmount(balanceDayCogsExpense, fakeFinanceDisplay))} muted />
                       <PLRow label="Supplier payments" value={"- " + money(displayFinanceAmount(balanceSupplierPayments, fakeFinanceDisplay))} muted />
                       <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(balanceSupplierRefunds, fakeFinanceDisplay))} muted />
-                      <PLRow label="Opening purchase budget" value={"+ " + money(displayFinanceAmount(openingPurchaseBudget, fakeFinanceDisplay))} muted />
+                      <PLRow label="Opening purchase budget" value={"+ " + money(displayFinanceAmount(openingBudgetForBalanceRange, fakeFinanceDisplay))} muted />
                       <PLRow label="Monthly expenses budget" value={"+ " + money(displayFinanceAmount(monthlyExpensesBudget, fakeFinanceDisplay))} muted />
                       <View style={styles.plDivider} />
                       <PLRow label="Remaining balance" value={money(displayFinanceAmount(balanceDayRemaining, fakeFinanceDisplay))} bold tone={balanceDayRemaining >= 0 ? "success" : "error"} />
