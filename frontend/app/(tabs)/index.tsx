@@ -203,10 +203,13 @@ export default function Dashboard() {
   const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const openingPurchaseBudget = Number(budget?.opening_amount ?? 0);
   const monthlyExpensesBudget = Number(budget?.monthly_amount ?? 0);
+  const openingBudgetForBalanceRange = (budget?.opening_transactions ?? [])
+    .filter((entry: any) => inBalanceRange(entry.date))
+    .reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0);
   const balanceDayRemaining =
     balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense
     - balanceSupplierPayments + balanceSupplierRefunds
-    + openingPurchaseBudget + monthlyExpensesBudget;
+    + openingBudgetForBalanceRange + monthlyExpensesBudget;
   const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
   const inSelectedReport = (iso?: string) => {
     if (!iso) return false;
@@ -284,7 +287,8 @@ export default function Dashboard() {
     - periodExpenses.filter((x: any) => x.bucket === "operating" || x.bucket === "cogs").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     - periodPayments.filter((x: any) => x.kind === "pay").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
-    + openingPurchaseBudget + monthlyExpensesBudget;
+    + (budget?.opening_transactions ?? []).filter((entry: any) => inOverviewBalancePeriod(entry.date)).reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0)
+    + monthlyExpensesBudget;
   const periodBalanceLabel = range === "day" ? "Selected Day Remaining" : range === "week" ? "Selected Week Remaining" : range === "month" ? "Selected Month Remaining" : range === "year" ? "Selected Year Remaining" : range === "custom" ? "Selected Dates Remaining" : "Period Remaining";
 
   const detailFromIso = displayToIso(detailFromDate);
