@@ -406,7 +406,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
   } else if (entity === "budget") {
     if (method === "PUT") {
       const old = queryClient.getQueryData<any>(["budget"]) ?? {};
-      queryClient.setQueryData(["budget"], { ...old, monthly_amount: Number(body.monthly_amount ?? 0), opening_amount: Number(body.opening_amount ?? 0), pending: true });
+      queryClient.setQueryData(["budget"], { ...old, monthly_amount: Number(body.monthly_amount ?? old.monthly_amount ?? 0), opening_amount: Number(old.opening_amount ?? 0), opening_transactions: old.opening_transactions ?? [], pending: true });
     }
   } else if (entity === "sales") {
     if (method === "POST") {
