@@ -106,7 +106,19 @@ function localReport(range: string): ReportSummary {
   const payments = filterRows(queryClient.getQueryData<Payment[]>(qk.payments()) ?? []);
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
   const budget = queryClient.getQueryData<Budget>(qk.budget) ?? { monthly_amount: 0, opening_amount: 0, opening_transactions: [], spent_this_month: 0 };
-  const openingBudgetForRange = (budget.opening_transactions ?? []).filter((row) => customPeriod ? matchesDate(row.date) : inRange(row.date, range)).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+  const openingBudgetForRange = (budget.opening_transactions ?? []).filter((row) => {
+    if (customPeriod) return matchesDate(row.date);
+    if (range === "all") return true;
+    const start = startOfRange(range);
+    if (!start) return true;
+    const end = new Date(start);
+    if (range === "today" || range === "day") end.setDate(end.getDate() + 1);
+    else if (range === "week") end.setDate(end.getDate() + 7);
+    else if (range === "month") end.setMonth(end.getMonth() + 1);
+    else if (range === "year") end.setFullYear(end.getFullYear() + 1);
+    const date = new Date(row.date + "T00:00:00");
+    return date >= start && date < end;
+  }).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
 
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
