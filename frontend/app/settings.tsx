@@ -173,6 +173,14 @@ export default function Settings() {
 
         {admin && (
           <View style={styles.card}>
+            <Text style={styles.cardTitle}>Opening Purchase Budget</Text>
+            <Text style={styles.cardHint}>Add dated budget entries, review transaction history, or edit and delete individual entries. Purchases remain unchanged.</Text>
+            <PrimaryButton label="Manage opening budget" onPress={() => router.push("/opening-budget" as any)} testID="manage-opening-budget" />
+          </View>
+        )}
+
+        {admin && (
+          <View style={styles.card}>
             <Text style={styles.cardTitle}>Store branding</Text>
             <View style={styles.logoRow}>
               <View style={styles.logoBox}>
