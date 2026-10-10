@@ -319,6 +319,12 @@ class BudgetIn(BaseModel):
     opening_amount: Optional[float] = None
 
 
+class OpeningBudgetTransactionIn(BaseModel):
+    amount: float = Field(gt=0)
+    date: str = Field(min_length=10, max_length=10)
+    note: str = Field(default="", max_length=500)
+
+
 # ----- Sale models -----
 class SaleItemIn(BaseModel):
     product_id: str
@@ -593,6 +599,11 @@ async def lifespan(app: FastAPI):
         await db.connect()
         await db.users.create_index("email", unique=True)
         await db.password_resets.create_index("expires_at", expireAfterSeconds=0)
+        await db.opening_budget_transactions.create_index("date")
+        # Opening Purchase Budget is now a dated ledger. Clear the old single
+        # amount once, but never touch purchase or other transaction records.
+        if await db.opening_budget_transactions.count_documents({}) == 0:
+            await db.budget.update_one({"_id": "singleton"}, {"$set": {"opening_amount": 0.0}})
         await seed_user(ADMIN_EMAIL, "Administrator", ADMIN_PASSWORD, Role.admin)
         await seed_user(PARTNER_EMAIL, "Store Partner", PARTNER_PASSWORD, Role.partner)
         await seed_user(CASHIER_EMAIL, "Front Cashier", CASHIER_PASSWORD, Role.cashier)
@@ -1398,11 +1409,98 @@ async def edit_payment(payment_id: str, body: PaymentIn, _: AdminOnly):
 # ---------------------------------------------------------------------------
 # Expense budget (single monthly target)
 # ---------------------------------------------------------------------------
+def opening_budget_public(doc: dict) -> dict:
+    return {
+        "id": oid(doc["_id"]),
+        "amount": round(float(doc.get("amount", 0) or 0), 2),
+        "date": doc.get("date", ""),
+        "note": doc.get("note", ""),
+        "created_at": doc.get("created_at", ""),
+        "updated_at": doc.get("updated_at", doc.get("created_at", "")),
+    }
+
+
+async def _opening_budget_total() -> float:
+    rows = await db.opening_budget_transactions.find({}).to_list(50000)
+    return round(sum(float(row.get("amount", 0) or 0) for row in rows), 2)
+
+
+async def _save_opening_budget_total() -> float:
+    total = await _opening_budget_total()
+    await db.budget.update_one(
+        {"_id": "singleton"},
+        {"$set": {"opening_amount": total}},
+        upsert=True,
+    )
+    return total
+
+
+@api.get("/opening-budget-transactions")
+async def list_opening_budget_transactions(_: Staff):
+    rows = await db.opening_budget_transactions.find({}).sort([("date", -1), ("created_at", -1)]).to_list(50000)
+    return [opening_budget_public(row) for row in rows]
+
+
+@api.post("/opening-budget-transactions")
+async def create_opening_budget_transaction(body: OpeningBudgetTransactionIn, _: AdminOnly):
+    try:
+        parsed_date = datetime.strptime(body.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    now = now_iso()
+    doc = {
+        "amount": round(float(body.amount), 2),
+        "date": parsed_date.strftime("%Y-%m-%d"),
+        "note": body.note.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await db.opening_budget_transactions.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    await _save_opening_budget_total()
+    return opening_budget_public(doc)
+
+
+@api.put("/opening-budget-transactions/{transaction_id}")
+async def update_opening_budget_transaction(transaction_id: str, body: OpeningBudgetTransactionIn, _: AdminOnly):
+    try:
+        parsed_id = ObjectId(transaction_id)
+        parsed_date = datetime.strptime(body.date, "%Y-%m-%d")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid transaction ID or date")
+    update = {
+        "amount": round(float(body.amount), 2),
+        "date": parsed_date.strftime("%Y-%m-%d"),
+        "note": body.note.strip(),
+        "updated_at": now_iso(),
+    }
+    result = await db.opening_budget_transactions.update_one({"_id": parsed_id}, {"$set": update})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Opening budget transaction not found")
+    await _save_opening_budget_total()
+    doc = await db.opening_budget_transactions.find_one({"_id": parsed_id})
+    return opening_budget_public(doc)
+
+
+@api.delete("/opening-budget-transactions/{transaction_id}")
+async def delete_opening_budget_transaction(transaction_id: str, _: AdminOnly):
+    try:
+        parsed_id = ObjectId(transaction_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid transaction ID")
+    result = await db.opening_budget_transactions.delete_one({"_id": parsed_id})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="Opening budget transaction not found")
+    await _save_opening_budget_total()
+    return {"ok": True}
+
+
 @api.get("/budget")
 async def get_budget(_: Staff):
     doc = await db.budget.find_one({"_id": "singleton"})
     monthly = doc.get("monthly_amount", 0.0) if doc else 0.0
-    opening = doc.get("opening_amount", 0.0) if doc else 0.0
+    opening_transactions = await list_opening_budget_transactions(_)
+    opening = round(sum(float(row.get("amount", 0) or 0) for row in opening_transactions), 2)
     start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_expenses = await db.expenses.find(
         {"deleted": {"$ne": True}, "created_at": {"$gte": start.isoformat()}}
@@ -1410,16 +1508,14 @@ async def get_budget(_: Staff):
     spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
     purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
     purchase_spent = round(sum(p.get("total", 0) for p in purchase_docs), 2)
-    return {"monthly_amount": round(monthly, 2), "opening_amount": round(opening, 2), "spent_this_month": spent, "purchase_spent": purchase_spent, "purchase_remaining": round(max(0.0, opening - purchase_spent), 2)}
+    return {"monthly_amount": round(monthly, 2), "opening_amount": opening, "opening_transactions": opening_transactions, "spent_this_month": spent, "purchase_spent": purchase_spent, "purchase_remaining": round(max(0.0, opening - purchase_spent), 2)}
 
 
 @api.put("/budget")
 async def set_budget(body: BudgetIn, _: AdminOnly):
-    await db.budget.update_one(
-        {"_id": "singleton"},
-        {"$set": {"monthly_amount": round(max(0.0, body.monthly_amount), 2), **({"opening_amount": round(max(0.0, body.opening_amount), 2)} if body.opening_amount is not None else {})}},
-        upsert=True,
-    )
+    values = {"monthly_amount": round(max(0.0, body.monthly_amount), 2)}
+    # Opening budget changes must be made through the dated transaction ledger.
+    await db.budget.update_one({"_id": "singleton"}, {"$set": values}, upsert=True)
     return await get_budget(_)
 
 
@@ -2559,7 +2655,13 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # Budgets are configured store-level values and are added exactly once
     # to the reported balance, including selected periods and All-Time.
     budget_doc = await db.budget.find_one({"_id": "singleton"})
-    opening_purchase_budget = round(float((budget_doc or {}).get("opening_amount", 0) or 0), 2)
+    opening_rows = await db.opening_budget_transactions.find({}).to_list(50000)
+    opening_purchase_budget = round(sum(
+        float(row.get("amount", 0) or 0)
+        for row in opening_rows
+        if (start is None or datetime.strptime(row.get("date", "1970-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) >= start)
+        and (end is None or datetime.strptime(row.get("date", "1970-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) < end)
+    ), 2)
     monthly_expenses_budget = round(float((budget_doc or {}).get("monthly_amount", 0) or 0), 2)
     remaining_balance = round(
         revenue
