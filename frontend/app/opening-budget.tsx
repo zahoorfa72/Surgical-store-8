@@ -43,6 +43,7 @@ export default function OpeningBudgetLedger() {
       ...(old ?? { monthly_amount: 0, spent_this_month: 0 }),
       opening_amount: total,
       opening_transactions: ordered,
+      purchase_remaining: Math.max(0, total - Number(old?.purchase_spent ?? 0)),
     }));
     await queryClient.invalidateQueries({ queryKey: ["report"] });
   };
@@ -59,6 +60,7 @@ export default function OpeningBudgetLedger() {
           ...(old ?? { monthly_amount: 0, spent_this_month: 0 }),
           opening_amount: cachedTotal,
           opening_transactions: cached ?? [],
+          purchase_remaining: Math.max(0, cachedTotal - Number(old?.purchase_spent ?? 0)),
         }));
       }
       try {
