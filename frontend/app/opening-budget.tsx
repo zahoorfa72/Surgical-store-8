@@ -171,7 +171,7 @@ export default function OpeningBudgetLedger() {
                 <Text style={{ color: colors.muted, fontSize: 12 }}>{item.date}{item.pending ? " · Pending sync" : ""}</Text>
               </View>
               {admin && <Pressable onPress={() => edit(item)} accessibilityLabel="Edit opening budget entry" style={{ padding: 9 }}><MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary} /></Pressable>}
-              {admin && <Pressable onPress={() => remove(item)} accessibilityLabel="Delete opening budget entry" style={{ padding: 9 }}><MaterialDesignIcons name="delete-outline" size={21} color={colors.danger} /></Pressable>}
+              {admin && <Pressable onPress={() => remove(item)} accessibilityLabel="Delete opening budget entry" style={{ padding: 9 }}><MaterialDesignIcons name="delete-outline" size={21} color={colors.error} /></Pressable>}
             </View>
             {!!item.note && <Text style={{ color: colors.onSurface, fontSize: 13 }}>{item.note}</Text>}
           </View>)}
