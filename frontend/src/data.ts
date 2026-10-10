@@ -105,7 +105,8 @@ function localReport(range: string): ReportSummary {
   const expenses = filterRows(queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? []);
   const payments = filterRows(queryClient.getQueryData<Payment[]>(qk.payments()) ?? []);
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
-  const budget = queryClient.getQueryData<Budget>(qk.budget) ?? { monthly_amount: 0, opening_amount: 0, spent_this_month: 0 };
+  const budget = queryClient.getQueryData<Budget>(qk.budget) ?? { monthly_amount: 0, opening_amount: 0, opening_transactions: [], spent_this_month: 0 };
+  const openingBudgetForRange = (budget.opening_transactions ?? []).filter((row) => customPeriod ? matchesDate(row.date) : inRange(row.date, range)).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
 
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
@@ -147,7 +148,7 @@ function localReport(range: string): ReportSummary {
     // - COGS Expenses + Supplier Refunds + Opening Purchase Budget + Monthly Expenses Budget.
     remaining_balance:
       revenue - grossProfit - supplierPayments - operating - cogsExpenses + supplierRefunds
-      + Number(budget.opening_amount ?? 0) + Number(budget.monthly_amount ?? 0),
+      + openingBudgetForRange + Number(budget.monthly_amount ?? 0),
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
     net_profit: grossProfit - personal,
@@ -201,7 +202,7 @@ export function usePayments(partyId?: string) {
   return useQuery({ queryKey: qk.payments(partyId), queryFn: () => localOrFetch(qk.payments(partyId), () => apiRequest<Payment[]>(`/payments${partyId ? `?party_id=${partyId}` : ""}`), []) });
 }
 export function useBudget() {
-  return useQuery({ queryKey: qk.budget, queryFn: () => localOrFetch(qk.budget, () => apiRequest<Budget>("/budget"), { monthly_amount: 0, spent_this_month: 0 }) });
+  return useQuery({ queryKey: qk.budget, queryFn: () => localOrFetch(qk.budget, () => apiRequest<Budget>("/budget"), { monthly_amount: 0, opening_amount: 0, opening_transactions: [], spent_this_month: 0 }) });
 }
 export function useUsers() {
   return useQuery({ queryKey: qk.users, queryFn: () => localOrFetch(qk.users, () => apiRequest<AppUser[]>("/users"), []) });
