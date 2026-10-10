@@ -92,11 +92,12 @@ const WRITE_SEQ = "ssm.writeseq.v1";
 
 type WriteOp = { id: string; method: string; path: string; body: any; expected_updated_at?: string };
 
-const QUEUEABLE = ["/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments"];
+const QUEUEABLE = ["/opening-budget-transactions", "/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments"];
 function isQueueable(path: string): boolean {
   return QUEUEABLE.some((p) => path === p || path.startsWith(p + "/"));
 }
-function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | null {
+function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | "opening-budget-transactions" | null {
+  if (path.startsWith("/opening-budget-transactions")) return "opening-budget-transactions";
   if (path.startsWith("/products")) return "products";
   if (path.startsWith("/parties")) return "parties";
   if (path.startsWith("/expenses")) return "expenses";
@@ -988,6 +989,7 @@ function localCacheForPath(path: string): any {
   if (path === "/expenses") return queryClient.getQueryData(["expenses", "all"]);
   if (path.startsWith("/payments")) return queryClient.getQueryData(["payments", "all"]);
   if (path === "/budget") return queryClient.getQueryData(["budget"]);
+  if (path === "/opening-budget-transactions") return queryClient.getQueryData(["opening-budget-transactions"]);
   if (path === "/users") return queryClient.getQueryData(["users"]);
   if (path === "/settings") return queryClient.getQueryData(["settings"]);
   if (path.startsWith("/sales/")) return queryClient.getQueryData(["sale", path.split("/")[2]]);
