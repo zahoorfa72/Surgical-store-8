@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth, isAdmin } from "@/src/auth";
@@ -19,6 +20,7 @@ const todayIso = () => {
 
 export default function OpeningBudgetLedger() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { colors } = useTheme();
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
@@ -141,7 +143,7 @@ export default function OpeningBudgetLedger() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Opening Purchase Budget" subtitle="Dated transaction history" topInset={insets.top} onBack={() => {}} />
+      <ScreenHeader title="Opening Purchase Budget" subtitle="Dated transaction history" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 28, gap: 16 }}>
         <View style={{ padding: 18, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, gap: 6 }}>
           <Text style={{ color: colors.muted, fontSize: 13, fontWeight: "700" }}>Current opening budget total</Text>
