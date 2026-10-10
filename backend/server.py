@@ -2656,12 +2656,51 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # to the reported balance, including selected periods and All-Time.
     budget_doc = await db.budget.find_one({"_id": "singleton"})
     opening_rows = await db.opening_budget_transactions.find({}).to_list(50000)
-    opening_purchase_budget = round(sum(
-        float(row.get("amount", 0) or 0)
-        for row in opening_rows
-        if (start is None or datetime.strptime(row.get("date", "1970-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) >= start)
-        and (end is None or datetime.strptime(row.get("date", "1970-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes) < end)
-    ), 2)
+    # Use the user's local calendar dates for budget entries (the ledger stores
+    # YYYY-MM-DD dates, not timestamps) so the amount is credited to its actual day.
+    opening_period_start = None
+    opening_period_end = None
+    if date:
+        opening_period_start = datetime.strptime(date, "%Y-%m-%d").date()
+        opening_period_end = opening_period_start + timedelta(days=1)
+    elif range.startswith("date-range:"):
+        parts = range.split(":")
+        if len(parts) == 3:
+            opening_from, opening_to = parts[1].strip(), parts[2].strip()
+            opening_period_start = datetime.strptime(opening_from, "%Y-%m-%d").date() if opening_from else None
+            opening_period_end = datetime.strptime(opening_to, "%Y-%m-%d").date() + timedelta(days=1) if opening_to else None
+    elif range.startswith("month:"):
+        opening_period_start = datetime.strptime(range.split(":", 1)[1], "%Y-%m").date().replace(day=1)
+        opening_period_end = (opening_period_start.replace(year=opening_period_start.year + 1, month=1) if opening_period_start.month == 12 else opening_period_start.replace(month=opening_period_start.month + 1))
+    elif range.startswith("year:"):
+        opening_period_start = datetime.strptime(range.split(":", 1)[1], "%Y").date()
+        opening_period_end = opening_period_start.replace(year=opening_period_start.year + 1)
+    elif range in ("today", "week", "month", "year"):
+        local_today = (datetime.now(timezone.utc) - timedelta(minutes=tz_offset_minutes)).date()
+        if range == "today":
+            opening_period_start = local_today
+            opening_period_end = local_today + timedelta(days=1)
+        elif range == "week":
+            opening_period_start = local_today - timedelta(days=local_today.weekday())
+            opening_period_end = opening_period_start + timedelta(days=7)
+        elif range == "month":
+            opening_period_start = local_today.replace(day=1)
+            opening_period_end = (opening_period_start.replace(year=opening_period_start.year + 1, month=1) if opening_period_start.month == 12 else opening_period_start.replace(month=opening_period_start.month + 1))
+        else:
+            opening_period_start = local_today.replace(month=1, day=1)
+            opening_period_end = opening_period_start.replace(year=opening_period_start.year + 1)
+    opening_total = 0.0
+    for opening_row in opening_rows:
+        try:
+            entry_date = datetime.strptime(opening_row.get("date", ""), "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if opening_period_start is not None and entry_date < opening_period_start:
+            continue
+        if opening_period_end is not None and entry_date >= opening_period_end:
+            continue
+        opening_total += float(opening_row.get("amount", 0) or 0)
+    opening_purchase_budget = round(opening_total, 2)
     monthly_expenses_budget = round(float((budget_doc or {}).get("monthly_amount", 0) or 0), 2)
     remaining_balance = round(
         revenue
