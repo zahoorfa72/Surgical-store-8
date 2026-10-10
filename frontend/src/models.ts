@@ -41,7 +41,8 @@ export type Payment = {
   created_at: string;
 };
 
-export type Budget = { monthly_amount: number; opening_amount?: number; spent_this_month: number; purchase_spent?: number; purchase_remaining?: number };
+export type OpeningBudgetTransaction = { id: string; amount: number; date: string; note: string; created_at: string; updated_at?: string; pending?: boolean };
+export type Budget = { monthly_amount: number; opening_amount?: number; opening_transactions?: OpeningBudgetTransaction[]; spent_this_month: number; purchase_spent?: number; purchase_remaining?: number };
 
 export type InventoryUsageRow = {
   product_id: string;
