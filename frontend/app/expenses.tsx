@@ -37,6 +37,7 @@ export default function Expenses() {
   const [filter, setFilter] = useState<string>("all");
   const bucket = filter === "all" ? undefined : (filter as ExpenseBucket);
   const { data: expenses, isLoading } = useExpenses(bucket);
+  const { data: allExpenses } = useExpenses();
   const { data: budget } = useBudget();
   const [toDelete, setToDelete] = useState<Expense | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
@@ -45,6 +46,18 @@ export default function Expenses() {
   const [savingBudget, setSavingBudget] = useState(false);
 
   const total = (expenses ?? []).reduce((s, e) => s + e.amount, 0);
+  const branchTotals = {
+    operating: (allExpenses ?? []).filter((e) => e.bucket === "operating").reduce((sum, e) => sum + e.amount, 0),
+    cogs: (allExpenses ?? []).filter((e) => e.bucket === "cogs").reduce((sum, e) => sum + e.amount, 0),
+    personal: (allExpenses ?? []).filter((e) => e.bucket === "personal").reduce((sum, e) => sum + e.amount, 0),
+  };
+  const filterOptions = FILTERS.map((option) => ({
+    ...option,
+    label: option.key === "all" ? `All · ${money((allExpenses ?? []).reduce((sum, e) => sum + e.amount, 0))}`
+      : option.key === "operating" ? `Operating · ${money(branchTotals.operating)}`
+      : option.key === "cogs" ? `Direct · ${money(branchTotals.cogs)}`
+      : `Personal · ${money(branchTotals.personal)}`,
+  }));
 
   const saveBudget = async () => {
     setSavingBudget(true);
@@ -77,7 +90,7 @@ export default function Expenses() {
   return (
     <View style={styles.root}>
       <ScreenHeader title="Expenses" subtitle={`Total ${money(total)}`} topInset={insets.top} onBack={() => router.back()} />
-      <ChipRow options={FILTERS as any} value={filter} onChange={setFilter} testIDPrefix="expense-filter" />
+      <ChipRow options={filterOptions as any} value={filter} onChange={setFilter} testIDPrefix="expense-filter" />
 
       {isLoading ? (
         <Loader />
