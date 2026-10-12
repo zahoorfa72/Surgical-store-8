@@ -156,14 +156,14 @@ function localReport(range: string): ReportSummary {
     personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating,
     total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
-    // Remaining Balance = Net Sales - Gross Profit - Supplier Payments - Operational Expenses
-    // - COGS Expenses + Supplier Refunds + Opening Purchase Budget + Monthly Expenses Budget.
+    // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
+    // Preserve the other agreed balance components and budget attribution.
     remaining_balance:
-      revenue - grossProfit - supplierPayments - operating - cogsExpenses + supplierRefunds
+      revenue - grossProfit - supplierPayments - cogsExpenses + supplierRefunds
       + openingBudgetForRange + Number(budget.monthly_amount ?? 0),
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
-    net_profit: grossProfit - personal,
+    net_profit: grossProfit - personal - operating,
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
     product_count: products.length,
     low_stock: products.filter(p => Number(p.quantity ?? 0) <= Number(p.low_stock_threshold ?? 0)),
