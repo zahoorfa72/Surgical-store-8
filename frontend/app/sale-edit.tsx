@@ -116,12 +116,18 @@ export default function SaleEdit() {
         body: {
           items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_price: l.unit_price })),
           customer_id: customerId,
+          // Preserve the sale's credit status while changing its customer.
+          credit: Boolean(sale.credit && customerId),
           discount: discountNum,
         },
       });
       await queryClient.invalidateQueries({ queryKey: qk.sales });
       await queryClient.invalidateQueries({ queryKey: qk.products });
       await queryClient.invalidateQueries({ queryKey: qk.sale(id!) });
+      // Customer balances are derived from credit sales and payments. Refresh
+      // them after editing the customer so both the old and new customer update.
+      await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
+      await queryClient.invalidateQueries({ queryKey: qk.payments() });
       toast("Sale updated", "success");
       router.back();
     } catch (e: any) {
