@@ -2702,10 +2702,10 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         opening_total += float(opening_row.get("amount", 0) or 0)
     opening_purchase_budget = round(opening_total, 2)
     monthly_expenses_budget = round(float((budget_doc or {}).get("monthly_amount", 0) or 0), 2)
+    # Operating expenses reduce Net Profit, not Remaining Balance.
     remaining_balance = round(
         revenue
         - gross_profit
-        - operating_expenses
         - cogs_expenses
         - supplier_payments
         + supplier_refunds
@@ -2724,7 +2724,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
-    net_profit = round(gross_profit - personal_expenses, 2)
+    net_profit = round(gross_profit - personal_expenses - operating_expenses, 2)
     opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
