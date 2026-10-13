@@ -480,6 +480,29 @@ async def _consume_cost_layers_matching(layers: list, quantity: float, unit_cost
     return [x for i, x in enumerate(layers) if not used[i] and float(x.get("quantity", 0) or 0) > 1e-9], total
 
 
+def _purchase_lot_quantity(layers: list, purchase_id: str) -> float:
+    return sum(float(layer.get("quantity", 0) or 0) for layer in layers
+               if str(layer.get("purchase_id") or "") == purchase_id)
+
+
+def _remove_purchase_lot(layers: list, quantity: float, purchase_id: str) -> list:
+    """Remove only this purchase's identified cost lot; never consume a different lot."""
+    remaining = float(quantity)
+    result = []
+    for layer in layers:
+        q = max(0.0, float(layer.get("quantity", 0) or 0))
+        if remaining > 1e-9 and str(layer.get("purchase_id") or "") == purchase_id:
+            take = min(q, remaining)
+            remaining -= take
+            if q - take > 1e-9:
+                result.append({**layer, "quantity": q - take})
+        else:
+            result.append(layer)
+    if remaining > 1e-9:
+        raise HTTPException(status_code=400, detail="Cannot change this purchase safely: its own remaining stock lot is missing or already used. Other lots were left untouched.")
+    return [layer for layer in result if float(layer.get("quantity", 0) or 0) > 1e-9]
+
+
 async def _migrate_legacy_cost_layers() -> dict:
     """Reconstruct cost lots for existing products from historical transactions."""
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(10000)
@@ -1961,22 +1984,27 @@ async def delete_purchase(purchase_id: str, _: AdminOnly):
     if not purchase or purchase.get("deleted"):
         raise HTTPException(status_code=404, detail="Purchase not found")
     returned = await _purchase_returned_map(purchase_id)  # product_id -> qty returned to supplier
-    # Check we can safely reverse the stock still in inventory (bought − returned).
+    # Validate stock and this purchase's own remaining lot before changing anything.
+    required_by_product: dict[str, float] = {}
     for it in purchase.get("items", []):
-        net_in = float(it["quantity"]) - float(returned.get(it["product_id"], 0))
-        if net_in <= 0:
+        net_in = max(0.0, float(it.get("quantity", 0) or 0) - float(returned.get(it["product_id"], 0) or 0))
+        required_by_product[it["product_id"]] = required_by_product.get(it["product_id"], 0.0) + net_in
+    for product_id, required in required_by_product.items():
+        if required <= 0:
             continue
-        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
-        available = float(prod.get("quantity", 0)) if prod else 0
-        if available + 1e-9 < net_in:
-            raise HTTPException(status_code=400, detail=f"Cannot delete purchase: {it['name']} stock has already been used")
+        prod = await db.products.find_one({"_id": ObjectId(product_id)})
+        if not prod or float(prod.get("quantity", 0) or 0) + 1e-9 < required:
+            raise HTTPException(status_code=400, detail="Cannot delete purchase: stock has already been used")
+        layers = await _ensure_cost_layers(prod)
+        if _purchase_lot_quantity(layers, purchase_id) + 1e-9 < required:
+            raise HTTPException(status_code=400, detail="Cannot delete purchase safely: its original stock lot has been used or cannot be reconciled. Other lots were left untouched.")
     # Reverse only this purchase's remaining cost lot.
     for it in purchase.get("items", []):
         net_in = float(it["quantity"]) - float(returned.get(it["product_id"], 0))
         if net_in > 0:
             prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
             layers = await _ensure_cost_layers(prod or {})
-            layers, _ = _consume_cost_layers_matching(layers, net_in, float(it.get("unit_cost", 0) or 0))
+            layers = _remove_purchase_lot(layers, net_in, purchase_id)
             await db.products.update_one(
                 {"_id": ObjectId(it["product_id"])},
                 {"$inc": {"quantity": -net_in}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
@@ -2003,13 +2031,17 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
     if returned:
         raise HTTPException(status_code=400, detail="This purchase has supplier returns. Handle them before editing.")
 
-    # Validate all existing stock and all replacement lines BEFORE changing
-    # anything. An invalid added item must never leave the old purchase reversed.
+    # Validate the original purchase-specific lots before any inventory writes.
+    required_by_product: dict[str, float] = {}
     for old in purchase.get("items", []):
-        prod = await db.products.find_one({"_id": ObjectId(old["product_id"]), "deleted": {"$ne": True}})
-        available = float(prod.get("quantity", 0) or 0) if prod else 0.0
-        if available + 1e-9 < float(old.get("quantity", 0) or 0):
-            raise HTTPException(status_code=400, detail=f"Cannot edit purchase: {old.get('name', 'Item')} stock has already been used")
+        required_by_product[old["product_id"]] = required_by_product.get(old["product_id"], 0.0) + float(old.get("quantity", 0) or 0)
+    for product_id, required in required_by_product.items():
+        prod = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+        if not prod or float(prod.get("quantity", 0) or 0) + 1e-9 < required:
+            raise HTTPException(status_code=400, detail="Cannot edit purchase: stock has already been used")
+        layers = await _ensure_cost_layers(prod)
+        if _purchase_lot_quantity(layers, purchase_id) + 1e-9 < required:
+            raise HTTPException(status_code=400, detail=f"Cannot edit purchase: {prod.get('name', 'Item')} original lot has already been used or cannot be reconciled. Other lots were left untouched.")
 
     items = []
     total = 0.0
@@ -2052,7 +2084,7 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             continue
         old_qty = float(old.get("quantity", 0) or 0)
         layers = await _ensure_cost_layers(prod)
-        layers, _ = await _consume_cost_layers_matching(layers, old_qty, float(old.get("unit_cost", 0) or 0))
+        layers = _remove_purchase_lot(layers, old_qty, purchase_id)
         next_qty = max(0.0, float(prod.get("quantity", 0) or 0) - old_qty)
         layers = await _ensure_cost_layers({**prod, "quantity": next_qty, "cost_layers": layers})
         await db.products.update_one(
