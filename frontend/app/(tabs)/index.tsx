@@ -197,7 +197,6 @@ export default function Dashboard() {
     balanceDaySales.reduce((n: number, s: any) => n + Number(s.cogs ?? 0), 0) -
     balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_cogs ?? 0), 0);
   const balanceDayGrossProfit = balanceDaySales.reduce((n: number, s: any) => n + Number(s.profit ?? 0), 0) - balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_profit ?? 0), 0);
-  const balanceDayOperating = balanceDayExpenses.filter((e: any) => e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceSupplierPayments = balanceDayPayments.filter((p: any) => p.kind === "pay").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
@@ -206,7 +205,7 @@ export default function Dashboard() {
     .filter((entry: any) => inBalanceRange(entry.date))
     .reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0);
   const balanceDayRemaining =
-    balanceDayRevenue - balanceDayGrossProfit - balanceDayOperating - balanceDayCogsExpense
+    balanceDayRevenue - balanceDayGrossProfit - balanceDayCogsExpense
     - balanceSupplierPayments + balanceSupplierRefunds
     + openingBudgetForBalanceRange + monthlyExpensesBudget;
   const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
@@ -283,7 +282,7 @@ export default function Dashboard() {
   const selectedPeriodRemaining =
     periodSales.reduce((n: number, x: any) => n + Number(x.total ?? 0) - Number(x.profit ?? 0), 0)
     - periodReturns.reduce((n: number, x: any) => n + Number(x.refund_total ?? 0) - Number(x.refund_profit ?? 0), 0)
-    - periodExpenses.filter((x: any) => x.bucket === "operating" || x.bucket === "cogs").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
+    - periodExpenses.filter((x: any) => x.bucket === "cogs").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     - periodPayments.filter((x: any) => x.kind === "pay").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + (budget?.opening_transactions ?? []).filter((entry: any) => inOverviewBalancePeriod(entry.date)).reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0)
@@ -569,7 +568,6 @@ export default function Dashboard() {
                       <Text style={styles.detailHeader}>Remaining balance — {selectedBalanceFrom ? isoToDisplay(selectedBalanceFrom) : "All dates"}{selectedBalanceTo ? " to " + isoToDisplay(selectedBalanceTo) : " onward"}</Text>
                       <PLRow label="Sale / Net sales" value={money(displayFinanceAmount(balanceDayRevenue, fakeFinanceDisplay))} />
                       <PLRow label="Gross profit" value={"- " + money(displayFinanceAmount(balanceDayGrossProfit, fakeFinanceDisplay))} muted />
-                      <PLRow label="Operational expenses" value={"- " + money(displayFinanceAmount(balanceDayOperating, fakeFinanceDisplay))} muted />
                       <PLRow label="COGS expenses" value={"- " + money(displayFinanceAmount(balanceDayCogsExpense, fakeFinanceDisplay))} muted />
                       <PLRow label="Supplier payments" value={"- " + money(displayFinanceAmount(balanceSupplierPayments, fakeFinanceDisplay))} muted />
                       <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(balanceSupplierRefunds, fakeFinanceDisplay))} muted />
