@@ -3033,8 +3033,22 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     adjustments_in_period = [row for row in all_lost_adjustments
         if (not opening_period_start or str(row.get("date") or row.get("created_at", "")[:10])[:10] >= opening_period_start.isoformat())
         and (not opening_period_end or str(row.get("date") or row.get("created_at", "")[:10])[:10] < opening_period_end.isoformat())]
-    net_profit_adjustment = round(sum(float(row.get("net_profit_adjustment", 0) or 0) for row in adjustments_in_period), 2)
-    remaining_balance_adjustment = round(sum(float(row.get("remaining_balance_adjustment", 0) or 0) for row in adjustments_in_period), 2)
+    # Lost-product loss is always split evenly: half reduces Net Profit and
+    # half reduces Remaining Balance. Do not trust stale optional UI fields here:
+    # older records saved with "None" must follow the same accounting rule.
+    net_profit_adjustment = 0.0
+    remaining_balance_adjustment = 0.0
+    for adjustment in adjustments_in_period:
+        adjustment_type = adjustment.get("adjustment_type")
+        if adjustment_type == "lost_product":
+            half_loss = round(max(0.0, float(adjustment.get("loss_cost", 0) or 0)) / 2.0, 2)
+            net_profit_adjustment -= half_loss
+            remaining_balance_adjustment -= half_loss
+        else:
+            net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
+            remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
+    net_profit_adjustment = round(net_profit_adjustment, 2)
+    remaining_balance_adjustment = round(remaining_balance_adjustment, 2)
 
     opening_total = 0.0
     for opening_row in opening_rows:

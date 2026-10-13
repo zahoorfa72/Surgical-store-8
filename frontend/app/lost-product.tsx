@@ -35,16 +35,12 @@ export default function LostProductScreen() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { colors } = useTheme();
-  const { user } = useAuth();
-  const canAdjustAccounting = user?.role === "admin";
   const { data: products = [] } = useProducts();
   const [productId, setProductId] = useState("");
   const [search, setSearch] = useState("");
   const [quantityText, setQuantityText] = useState("1");
   const [date, setDate] = useState(today());
   const [reason, setReason] = useState("");
-  const [accountingTarget, setAccountingTarget] = useState<"none" | "net_profit" | "remaining_balance" | "both">("none");
-  const [accountingAmountText, setAccountingAmountText] = useState("0");
   const [history, setHistory] = useState<LossRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -81,12 +77,10 @@ export default function LostProductScreen() {
     if (qty > Number(selected.quantity || 0) + (oldEdit && oldEdit.product_id === selected.id ? Math.abs(Number(oldEdit.delta)) : 0)) { toast("Lost quantity cannot exceed available stock after edit"); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(date+"T00:00:00").getTime())) { toast("Enter date as YYYY-MM-DD"); return; }
     if (!reason.trim()) { toast("Enter the reason for loss"); return; }
-    const accountingAmount = Number(accountingAmountText);
-    if (!Number.isFinite(accountingAmount) || accountingAmount < 0) { toast("Enter a valid accounting amount"); return; }
     setSaving(true);
     const lossCost = Math.round(costPreview * 100) / 100;
-    const netProfitAdjustment = accountingTarget === "net_profit" || accountingTarget === "both" ? -Math.round(accountingAmount * 100) / 100 : 0;
-    const remainingBalanceAdjustment = accountingTarget === "remaining_balance" || accountingTarget === "both" ? -Math.round(accountingAmount * 100) / 100 : 0;
+    const netProfitAdjustment = -Math.round((lossCost / 2) * 100) / 100;
+    const remainingBalanceAdjustment = -Math.round((lossCost / 2) * 100) / 100;
     const clientId = editingId ? (history.find(row => row.id === editingId)?.client_id || "lost-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)) : "lost-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
     const localRow: LossRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: -qty, reason: reason.trim(), date, loss_cost: lossCost, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, created_at: new Date().toISOString(), adjustment_type: "lost_product" };
     try {
@@ -99,7 +93,7 @@ export default function LostProductScreen() {
       void queryClient.invalidateQueries({ queryKey: ["report"] });
       setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
       toast("Lost product recorded. Stock and FIFO cost lots updated.");
-      setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setAccountingTarget("none"); setAccountingAmountText("0"); setEditingId(null);
+      setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setEditingId(null);
     } catch (e: any) {
       toast(e?.message || "Could not record lost product");
     } finally { setSaving(false); }
@@ -118,25 +112,22 @@ export default function LostProductScreen() {
           {selected && <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surfaceTertiary, marginVertical: 8 }}><Text style={{ color: colors.onSurface }}>Available stock: {selected.quantity}</Text><Text style={{ color: colors.onSurface }}>Estimated loss value: {money(costPreview)}</Text></View>}
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 8 }}>Lost quantity</Text>
           <TextInput value={quantityText} onChangeText={setQuantityText} keyboardType="decimal-pad" placeholder="Quantity" placeholderTextColor={colors.muted} style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 6 }} />
-          {canAdjustAccounting && <>
-          <Text style={{ color: colors.onSurface, fontWeight: "700", marginTop: 14 }}>Optional accounting impact (default: none)</Text>
-          <Text style={{ color: colors.muted, fontSize: 12, marginTop: 3 }}>Stock loss always updates stock. Only apply a financial amount if you choose a destination.</Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 }}>
-            {([{value:"none",label:"None"},{value:"net_profit",label:"Net Profit"},{value:"remaining_balance",label:"Remaining Balance"},{value:"both",label:"Both"}] as const).map(option => <Pressable key={option.value} onPress={() => setAccountingTarget(option.value)} style={{ paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9, backgroundColor: accountingTarget === option.value ? colors.brandPrimary : colors.surfaceTertiary }}><Text style={{ color: accountingTarget === option.value ? colors.onBrandPrimary : colors.onSurface, fontWeight: "600" }}>{option.label}</Text></Pressable>)}
+          <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surfaceTertiary, marginTop: 12 }}>
+            <Text style={{ color: colors.onSurface, fontWeight: "700" }}>Automatic accounting split</Text>
+            <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>The loss value is always split equally: 50% is deducted from Net Profit and 50% from Remaining Balance. This applies even to entries created earlier when accounting was set to None.</Text>
+            <Text style={{ color: colors.onSurface, marginTop: 6 }}>Net Profit: -{money(Math.round((costPreview / 2) * 100) / 100)} · Remaining Balance: -{money(Math.round((costPreview / 2) * 100) / 100)}</Text>
           </View>
-          <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 10 }}>Amount to deduct (PKR)</Text>
-          <TextInput value={accountingAmountText} onChangeText={setAccountingAmountText} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 6 }} />
-          </>}
+/>}
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 12 }}>Loss date (YYYY-MM-DD)</Text>
           <TextInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.muted} style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 6 }} />
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 12 }}>Reason</Text>
           <TextInput value={reason} onChangeText={setReason} placeholder="Damaged, expired, missing..." placeholderTextColor={colors.muted} multiline style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, minHeight: 72, marginTop: 6, textAlignVertical: "top" }} />
-          <Pressable disabled={saving} onPress={() => void save()} style={{ padding: 14, borderRadius: 10, backgroundColor: saving ? colors.muted : colors.brandPrimary, alignItems: "center", marginTop: 14 }}><Text style={{ color: colors.onBrandPrimary, fontWeight: "700" }}>{saving ? "Saving..." : editingId ? "Save Lost Product Changes" : "Record Lost Product"}</Text></Pressable>{editingId && <Pressable disabled={saving} onPress={() => { setEditingId(null); setProductId(""); setSearch(""); setQuantityText("1"); setDate(today()); setReason(""); setAccountingTarget("none"); setAccountingAmountText("0"); }} style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surfaceTertiary, alignItems: "center", marginTop: 8 }}><Text style={{ color: colors.onSurface, fontWeight: "700" }}>Cancel editing</Text></Pressable>}
+          <Pressable disabled={saving} onPress={() => void save()} style={{ padding: 14, borderRadius: 10, backgroundColor: saving ? colors.muted : colors.brandPrimary, alignItems: "center", marginTop: 14 }}><Text style={{ color: colors.onBrandPrimary, fontWeight: "700" }}>{saving ? "Saving..." : editingId ? "Save Lost Product Changes" : "Record Lost Product"}</Text></Pressable>{editingId && <Pressable disabled={saving} onPress={() => { setEditingId(null); setProductId(""); setSearch(""); setQuantityText("1"); setDate(today()); setReason(""); }} style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surfaceTertiary, alignItems: "center", marginTop: 8 }}><Text style={{ color: colors.onSurface, fontWeight: "700" }}>Cancel editing</Text></Pressable>}
         </Card>
         <Card>
           <Text style={{ color: colors.onSurface, fontSize: 17, fontWeight: "700" }}>Lost product history</Text>
           <Text style={{ color: colors.muted, marginTop: 4, marginBottom: 10 }}>{history.length} records · Total purchase-cost loss {money(totalLost)}</Text>
-          {history.length === 0 ? <Text style={{ color: colors.muted }}>No lost-product entries yet.</Text> : history.slice(0, 100).map((row) => <View key={row.id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 }}><Text style={{ color: colors.onSurface, fontWeight: "600" }}>{row.product_name || products.find((p) => p.id === row.product_id)?.name || "Product"} · {Math.abs(Number(row.delta))} lost</Text><Text style={{ color: colors.muted, fontSize: 12 }}>{row.date} · {row.reason}</Text><Text style={{ color: colors.error, fontWeight: "700", marginTop: 3 }}>Loss: {money(row.loss_cost)}</Text><View style={{flexDirection:"row",alignItems:"center",flexWrap:"wrap"}}><Pressable onPress={() => { setEditingId(row.id); setProductId(row.product_id); setSearch(products.find(p => p.id === row.product_id)?.name ?? ""); setQuantityText(String(Math.abs(Number(row.delta)))); setDate(row.date); setReason(row.reason); const np = Number(row.net_profit_adjustment || 0), rb = Number(row.remaining_balance_adjustment || 0); setAccountingAmountText(String(Math.max(Math.abs(np), Math.abs(rb)))); setAccountingTarget(np && rb ? "both" : np ? "net_profit" : rb ? "remaining_balance" : "none"); }} style={{ alignSelf:"flex-start", marginTop:8, marginRight:8, paddingVertical:7, paddingHorizontal:10, borderRadius:8, backgroundColor:colors.surfaceTertiary }}><Text style={{ color:colors.onSurface, fontWeight:"700" }}>Edit</Text></Pressable><Pressable onPress={async()=>{try{await apiRequest(`/inventory-adjustments/${row.id}`,{method:"DELETE"});setHistory(old=>old.filter(item=>item.id!==row.id));await storage.setItem(HISTORY_KEY,(await storage.getItem<any>(HISTORY_KEY,[])).filter((item:any)=>item.id!==row.id));await queryClient.invalidateQueries({queryKey:["products"]});await queryClient.invalidateQueries({queryKey:["report"]});await queryClient.invalidateQueries({queryKey:["inventory-adjustments"]});toast("Entry undone and removed from active history; stock restored.");}catch(e:any){toast(e?.message||"Could not reverse entry");}}} style={{alignSelf:"flex-start",marginTop:8,paddingVertical:7,paddingHorizontal:10,borderRadius:8,backgroundColor:colors.surfaceTertiary}}><Text style={{color:colors.onSurface,fontWeight:"700"}}>Undo & return stock</Text></Pressable></View></View>)}
+          {history.length === 0 ? <Text style={{ color: colors.muted }}>No lost-product entries yet.</Text> : history.slice(0, 100).map((row) => <View key={row.id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 }}><Text style={{ color: colors.onSurface, fontWeight: "600" }}>{row.product_name || products.find((p) => p.id === row.product_id)?.name || "Product"} · {Math.abs(Number(row.delta))} lost</Text><Text style={{ color: colors.muted, fontSize: 12 }}>{row.date} · {row.reason}</Text><Text style={{ color: colors.error, fontWeight: "700", marginTop: 3 }}>Loss: {money(row.loss_cost)}</Text><View style={{flexDirection:"row",alignItems:"center",flexWrap:"wrap"}}><Pressable onPress={() => { setEditingId(row.id); setProductId(row.product_id); setSearch(products.find(p => p.id === row.product_id)?.name ?? ""); setQuantityText(String(Math.abs(Number(row.delta)))); setDate(row.date); setReason(row.reason); const np = Number(row.net_profit_adjustment || 0), rb = Number(row.remaining_balance_adjustment || 0);  }} style={{ alignSelf:"flex-start", marginTop:8, marginRight:8, paddingVertical:7, paddingHorizontal:10, borderRadius:8, backgroundColor:colors.surfaceTertiary }}><Text style={{ color:colors.onSurface, fontWeight:"700" }}>Edit</Text></Pressable><Pressable onPress={async()=>{try{await apiRequest(`/inventory-adjustments/${row.id}`,{method:"DELETE"});setHistory(old=>old.filter(item=>item.id!==row.id));await storage.setItem(HISTORY_KEY,(await storage.getItem<any>(HISTORY_KEY,[])).filter((item:any)=>item.id!==row.id));await queryClient.invalidateQueries({queryKey:["products"]});await queryClient.invalidateQueries({queryKey:["report"]});await queryClient.invalidateQueries({queryKey:["inventory-adjustments"]});toast("Entry undone and removed from active history; stock restored.");}catch(e:any){toast(e?.message||"Could not reverse entry");}}} style={{alignSelf:"flex-start",marginTop:8,paddingVertical:7,paddingHorizontal:10,borderRadius:8,backgroundColor:colors.surfaceTertiary}}><Text style={{color:colors.onSurface,fontWeight:"700"}}>Undo & return stock</Text></Pressable></View></View>)}
         </Card>
       </ScrollView>
     </View>
