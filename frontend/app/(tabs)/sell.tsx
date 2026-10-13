@@ -28,7 +28,7 @@ import { EmptyState, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
-type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number };
+type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number; kitNames?: string[] };
 type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean };
 type ProductKit = { id: string; name: string; components: { product_id: string; quantity: number }[] };
 
@@ -219,9 +219,9 @@ export default function Sell() {
         const qty = Number(row.component.quantity);
         const found = next.find((line) => line.id === p.id);
         if (found) {
-          next = next.map((line) => line.id === p.id ? { ...line, quantity: line.quantity + qty, stock: Number(p.quantity ?? 0) } : line);
+          next = next.map((line) => line.id === p.id ? { ...line, quantity: line.quantity + qty, stock: Number(p.quantity ?? 0), kitNames: Array.from(new Set([...(line.kitNames ?? []), kit.name])) } : line);
         } else {
-          next.push({ id: p.id, name: p.name, stock: Number(p.quantity ?? 0), quantity: qty, unit_price: p.sale_price, threshold: p.low_stock_threshold });
+          next.push({ id: p.id, name: p.name, stock: Number(p.quantity ?? 0), quantity: qty, unit_price: p.sale_price, threshold: p.low_stock_threshold, kitNames: [kit.name] });
         }
       }
       return next;
@@ -561,7 +561,7 @@ export default function Sell() {
             {reviewedCart.map((c) => (
               <View key={c.id} style={styles.cartLine} testID={`cart-line-${c.id}`}>
                 <View style={styles.cartLineHead}>
-                  <Text style={styles.cartLineName}>{c.name}</Text>
+                  <View style={{ flex: 1 }}><Text style={styles.cartLineName}>{c.name}</Text>{!!c.kitNames?.length && <Text style={{ color: colors.brandPrimary, fontSize: 11, fontWeight: "700", marginTop: 2 }}>Kit component · {c.kitNames.join(", ")}</Text>}</View>
                   <Pressable testID={`remove-${c.id}`} onPress={() => removeLine(c.id)} hitSlop={8}>
                     <MaterialDesignIcons name="close" size={20} color={colors.muted} />
                   </Pressable>
