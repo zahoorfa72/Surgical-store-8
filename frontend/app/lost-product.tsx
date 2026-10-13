@@ -9,7 +9,7 @@ import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
 
-type LossRow = { id: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; created_at: string; adjustment_type?: string; user_name?: string };
+type LossRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; created_at: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.lost-products.v1";
 const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
@@ -57,7 +57,7 @@ export default function LostProductScreen() {
       const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "lost_product").map((r) => ({ ...r, product_name: productName(r.product_id) })), ...(local ?? [])];
       const unique = new Map<string, LossRow>();
       for (const row of rows) {
-        const key = row.id && !row.id.startsWith("local-") ? row.id : [row.product_id,row.date,row.delta,row.reason,Number(row.loss_cost).toFixed(2)].join("|");
+        const key = row.client_id || (row.id && !row.id.startsWith("local-") ? row.id : [row.product_id,row.date,row.delta,row.reason,Number(row.loss_cost).toFixed(2)].join("|"));
         if (!unique.has(key)) unique.set(key, row);
       }
       setHistory([...unique.values()].sort((a,b) => String(b.created_at || b.date).localeCompare(String(a.created_at || a.date))));
@@ -73,10 +73,11 @@ export default function LostProductScreen() {
     if (!reason.trim()) { toast("Enter the reason for loss"); return; }
     setSaving(true);
     const lossCost = Math.round(costPreview * 100) / 100;
-    const localRow: LossRow = { id: "local-"+Date.now(), product_id: selected.id, product_name: selected.name, delta: -qty, reason: reason.trim(), date, loss_cost: lossCost, created_at: new Date().toISOString(), adjustment_type: "lost_product" };
+    const clientId = "lost-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
+    const localRow: LossRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: -qty, reason: reason.trim(), date, loss_cost: lossCost, created_at: new Date().toISOString(), adjustment_type: "lost_product" };
     try {
-      const response = await apiRequest<any>("/inventory-adjustments", { method: "POST", body: { product_id: selected.id, delta: -qty, reason: reason.trim(), adjustment_type: "lost_product", date, loss_cost: lossCost } });
-      const row: LossRow = response?.adjustment ? { ...response.adjustment, product_name: selected.name } : localRow;
+      const response = await apiRequest<any>("/inventory-adjustments", { method: "POST", body: { product_id: selected.id, delta: -qty, reason: reason.trim(), adjustment_type: "lost_product", date, loss_cost: lossCost, client_id: clientId } });
+      const row: LossRow = response?.adjustment ? { ...response.adjustment, client_id: response.adjustment.client_id || clientId, product_name: selected.name } : localRow;
       const next = [row, ...(await storage.getItem<LossRow[]>(HISTORY_KEY, []) ?? [])];
       const dedup = next.filter((r, i, arr) => arr.findIndex(x => [x.product_id,x.date,x.delta,x.reason,Number(x.loss_cost).toFixed(2)].join("|") === [r.product_id,r.date,r.delta,r.reason,Number(r.loss_cost).toFixed(2)].join("|")) === i);
       await storage.setItem(HISTORY_KEY, dedup as any);
