@@ -110,7 +110,7 @@ export default function ProfitProductScreen() {
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 12 }}>Profit date (YYYY-MM-DD)</Text>
           <TextInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.muted} style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 6 }} />
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 12 }}>Reason</Text>
-          <TextInput value={reason} onChangeText={setReason} placeholder="Damaged, expired, missing..." placeholderTextColor={colors.muted} multiline style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, minHeight: 72, marginTop: 6, textAlignVertical: "top" }} />
+          <TextInput value={reason} onChangeText={setReason} placeholder="Found stock, bonus stock, opening correction..." placeholderTextColor={colors.muted} multiline style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, minHeight: 72, marginTop: 6, textAlignVertical: "top" }} />
           <Pressable disabled={saving} onPress={() => void save()} style={{ padding: 14, borderRadius: 10, backgroundColor: saving ? colors.muted : colors.brandPrimary, alignItems: "center", marginTop: 14 }}><Text style={{ color: colors.onBrandPrimary, fontWeight: "700" }}>{saving ? "Saving..." : "Record Profit Product"}</Text></Pressable>
         </Card>
         <Card>
