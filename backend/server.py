@@ -361,6 +361,7 @@ class InventoryAdjustmentIn(BaseModel):
     adjustment_type: str = "adjustment"
     date: Optional[str] = None
     loss_cost: float = 0
+    client_id: Optional[str] = None
 
 
 class StockTransferIn(BaseModel):
@@ -1125,7 +1126,7 @@ async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=
         "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "delta": row.get("delta", 0),
         "reason": row.get("reason", ""), "adjustment_type": row.get("adjustment_type", "adjustment"),
         "date": row.get("date") or row.get("created_at", "")[:10], "loss_cost": row.get("loss_cost", 0),
-        "user_name": row.get("user_name", ""), "created_at": row.get("created_at", ""),
+        "client_id": row.get("client_id"), "user_name": row.get("user_name", ""), "created_at": row.get("created_at", ""),
     } for row in rows]
 
 
@@ -1159,11 +1160,12 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         "product_id": body.product_id, "delta": delta, "reason": body.reason.strip(),
         "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
         "loss_cost": round(loss_cost if delta < 0 else max(0.0, float(body.loss_cost or 0)), 2),
+        "client_id": body.client_id,
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
     }
     result = await db.inventory_adjustments.insert_one(row)
     row["id"] = oid(result.inserted_id)
-    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "user_name", "created_at")},
+    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "client_id", "user_name", "created_at")},
             "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
