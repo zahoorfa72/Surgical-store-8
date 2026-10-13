@@ -50,7 +50,7 @@ export default function ProfitProductScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
-  const costPreview = useMemo(() => selected ? Math.max(0, Number(selected.purchase_price) || 0) * Math.max(0, qty) : 0, [selected, qty]);
+  const costPreview = useMemo(() => fifoProfitValue(selected, Math.max(0, qty)), [selected, qty]);
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 80);
   const totalAdded = history.reduce((sum, row) => sum + Math.max(0, Number(row.profit_value ?? (row as any).loss_cost) || 0), 0);
 
