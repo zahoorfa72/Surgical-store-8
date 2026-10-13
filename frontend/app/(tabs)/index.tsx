@@ -382,7 +382,7 @@ export default function Dashboard() {
         >
           <View style={styles.financeGrid}>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
-            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0)))} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
+            <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_cost ?? 0)))} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable>
             <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
             <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(localDay); setBalanceFromDate(""); setBalanceToDate(""); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel={periodBalanceLabel} secondaryValue={money(displayFinanceAmount(selectedPeriodRemaining, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
@@ -411,12 +411,13 @@ export default function Dashboard() {
                 )}
                 {financeDetailsOpen === "net" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Net profit = Gross profit − Personal expenses − Operating expenses</Text>
+                    <Text style={styles.detailHeader}>Net profit = Gross profit − Personal expenses − Operating expenses − Lost product loss</Text>
                     <PLRow label="Gross profit" value={money(displayFinanceAmount(data.gross_profit, fakeFinanceDisplay))} />
                     <PLRow label="Personal expenses" value={"- " + money(displayFinanceAmount(data.personal_expenses, fakeFinanceDisplay))} muted />
                     <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
+                    <PLRow label="Lost product loss" value={"- " + money(displayFinanceAmount(data.lost_products_cost ?? 0, fakeFinanceDisplay))} muted />
                     <View style={styles.plDivider} />
-                    <PLRow label="Net profit" value={money(displayFinanceAmount(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0), fakeFinanceDisplay))} bold tone={(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0)) >= 0 ? "success" : "error"} />
+                    <PLRow label="Net profit" value={money(displayFinanceAmount(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_cost ?? 0), fakeFinanceDisplay))} bold tone={(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_cost ?? 0)) >= 0 ? "success" : "error"} />
                     {sales.filter((s:any) => inSelectedReport(s.created_at)).map((s:any) => (
                       <View key={s.id} style={styles.detailLine}>
                         <Text style={styles.detailLabel}>{s.invoice_no} · Gross profit</Text>
@@ -663,6 +664,7 @@ export default function Dashboard() {
             <PLRow label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
             <PLRow label="Personal expenses" value={"- " + money(data.personal_expenses)} muted />
             <PLRow label="Operating expenses" value={"- " + money(data.operating_expenses)} muted />
+            <PLRow label="Lost product loss" value={"- " + money(data.lost_products_cost ?? 0)} muted />
             <View style={styles.plDivider} />
             <PLRow label="Net profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>
