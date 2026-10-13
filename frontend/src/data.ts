@@ -132,6 +132,7 @@ function localReport(range: string): ReportSummary {
   const cogsExpenses = expenses.filter(e => e.bucket === "cogs").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const personal = expenses.filter(e => e.bucket === "personal").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
+  const lostProductsCost = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })).filter((row) => row.adjustment_type === "lost_product")).reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
   const revenue = salesRevenue - returnsTotal;
   // Cash movement is the actual amount field only. Adjustment is a
   // non-cash settlement/discount and must not be counted as money in hand.
@@ -153,7 +154,7 @@ function localReport(range: string): ReportSummary {
   return {
     range, revenue, gross_revenue: grossRevenue, returns_total: returnsTotal, returns_count: returns.length,
     cogs_goods: cogsGoods, cogs_expenses: cogsExpenses, cogs_total: cogsGoods + cogsExpenses,
-    personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating,
+    personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating, lost_products_cost: lostProductsCost,
     total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
     // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
@@ -163,7 +164,7 @@ function localReport(range: string): ReportSummary {
       + openingBudgetForRange + Number(budget.monthly_amount ?? 0),
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
-    net_profit: grossProfit - personal - operating,
+    net_profit: grossProfit - personal - operating - lostProductsCost,
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
     product_count: products.length,
     low_stock: products.filter(p => Number(p.quantity ?? 0) <= Number(p.low_stock_threshold ?? 0)),
