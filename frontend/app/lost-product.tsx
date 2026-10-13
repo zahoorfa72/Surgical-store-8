@@ -47,6 +47,9 @@ export default function LostProductScreen() {
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
   const costPreview = useMemo(() => fifoLossCost(selected, qty), [selected, qty]);
+  const lossCostCents = Math.round(costPreview * 100);
+  const netHalfPreview = Math.round(lossCostCents / 2) / 100;
+  const balanceHalfPreview = (lossCostCents - Math.round(lossCostCents / 2)) / 100;
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 80);
   const totalLost = history.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost) || 0), 0);
 
@@ -117,7 +120,7 @@ export default function LostProductScreen() {
           <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surfaceTertiary, marginTop: 12 }}>
             <Text style={{ color: colors.onSurface, fontWeight: "700" }}>Automatic accounting split</Text>
             <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>The loss value is always split equally: 50% is deducted from Net Profit and 50% from Remaining Balance. This applies even to entries created earlier when accounting was set to None.</Text>
-            <Text style={{ color: colors.onSurface, marginTop: 6 }}>Net Profit: -{money(Math.round((Math.round(costPreview * 100) / 2)) / 100)} · Remaining Balance: -{money(Math.round((Math.round(costPreview * 100) - Math.round((Math.round(costPreview * 100) / 2))) / 100)}</Text>
+            <Text style={{ color: colors.onSurface, marginTop: 6 }}>Net Profit: -{money(netHalfPreview)} · Remaining Balance: -{money(balanceHalfPreview)}</Text>
           </View>
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 12 }}>Loss date (YYYY-MM-DD)</Text>
           <TextInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.muted} style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 6 }} />
