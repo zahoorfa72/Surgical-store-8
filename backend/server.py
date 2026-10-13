@@ -1823,6 +1823,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             "subtotal": round(subtotal, 2),
             "discount": discount,
             "total": total,
+            "credit": bool(body.credit and body.customer_id),
             "cogs": round(cogs, 2),
             "profit": round(total - cogs, 2),
             "note": body.note,
