@@ -1142,6 +1142,14 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     product = await db.products.find_one({"_id": ObjectId(body.product_id), "deleted": {"$ne": True}})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    # Queue replay can retry after a network timeout. A stable client_id makes
+    # lost-product writes idempotent so stock is never deducted twice.
+    if body.client_id:
+        existing_adjustment = await db.inventory_adjustments.find_one({"client_id": body.client_id, "deleted": {"$ne": True}})
+        if existing_adjustment:
+            existing_adjustment["id"] = oid(existing_adjustment["_id"])
+            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "client_id", "user_name", "created_at")},
+                    "product": product_public(product)}
     current = float(product.get("quantity", 0) or 0)
     if -delta > current + 1e-9:
         raise HTTPException(status_code=400, detail="Quantity exceeds available stock")
