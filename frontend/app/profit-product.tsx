@@ -44,7 +44,7 @@ export default function ProfitProductScreen() {
   const [saving, setSaving] = useState(false);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
-  const costPreview = useMemo(() => fifoProfitValue(selected, qty), [selected, qty]);
+  const costPreview = useMemo(() => selected ? Math.max(0, Number(selected.purchase_price) || 0) * Math.max(0, qty) : 0, [selected, qty]);
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 80);
   const totalAdded = history.reduce((sum, row) => sum + Math.max(0, Number(row.profit_value ?? (row as any).loss_cost) || 0), 0);
 
@@ -87,7 +87,7 @@ export default function ProfitProductScreen() {
       queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => [row, ...old.filter((x) => (x.client_id || x.id) !== (row.client_id || row.id))]);
       void queryClient.invalidateQueries({ queryKey: ["report"] });
       setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
-      toast("Profit product recorded. Stock and FIFO cost lots updated.");
+      toast("Profit product recorded. Stock and cost lots increased.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId("");
     } catch (e: any) {
       toast(e?.message || "Could not record profit product");
