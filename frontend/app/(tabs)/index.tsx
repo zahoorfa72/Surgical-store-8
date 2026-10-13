@@ -672,8 +672,8 @@ export default function Dashboard() {
             <PLRow label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
             <PLRow label="Personal expenses" value={"- " + money(data.personal_expenses)} muted />
             <PLRow label="Operating expenses" value={"- " + money(data.operating_expenses)} muted />
-            <PLRow label="Lost product loss" value={"- " + money(data.lost_products_cost ?? 0)} muted />
-            <PLRow label="Profit product value" value={"+ " + money(data.profit_products_value ?? 0)} muted />
+            <PLRow label="Lost stock value (informational only)" value={money(data.lost_products_cost ?? 0)} muted />
+            <PLRow label="Added stock value (informational only)" value={money(data.profit_products_value ?? 0)} muted />
             <View style={styles.plDivider} />
             <PLRow label="Net profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>
