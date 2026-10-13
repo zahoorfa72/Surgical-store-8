@@ -192,7 +192,7 @@ export default function Sell() {
     }
   };
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let active = true;
     const loadKits = async () => {
       const rows = await storage.getItem<ProductKit[]>("ssm.product-kits.v1", []);
@@ -200,7 +200,7 @@ export default function Sell() {
     };
     void loadKits();
     return () => { active = false; };
-  }, []);
+  }, []));
 
   const addKitToCart = (kit: ProductKit) => {
     const components = kit.components.map((component) => ({
