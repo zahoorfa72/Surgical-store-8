@@ -1139,6 +1139,8 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         raise HTTPException(status_code=400, detail="Adjustment quantity cannot be zero")
     if body.adjustment_type == "lost_product" and delta >= 0:
         raise HTTPException(status_code=400, detail="Lost product quantity must reduce stock")
+    if body.adjustment_type == "profit_product" and delta <= 0:
+        raise HTTPException(status_code=400, detail="Profit product quantity must increase stock")
     product = await db.products.find_one({"_id": ObjectId(body.product_id), "deleted": {"$ne": True}})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -2589,7 +2591,7 @@ async def report_inventory_usage(
     sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
-    all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": "lost_product", "deleted": {"$ne": True}}).to_list(20000)
+    all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": {"$in": ["lost_product", "profit_product"]}, "deleted": {"$ne": True}}).to_list(20000)
 
     usage: dict[str, dict[str, Any]] = {}
     for product in products:
@@ -2760,6 +2762,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             opening_period_start = local_today.replace(month=1, day=1)
             opening_period_end = opening_period_start.replace(year=opening_period_start.year + 1)
     lost_products_cost = 0.0
+    profit_products_value = 0.0
     for loss_row in all_lost_adjustments:
         loss_date = str(loss_row.get("date") or loss_row.get("created_at", "")[:10])[:10]
         if len(loss_date) != 10:
@@ -2772,8 +2775,12 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             continue
         if opening_period_end is not None and entry_date >= opening_period_end:
             continue
-        lost_products_cost += max(0.0, float(loss_row.get("loss_cost", 0) or 0))
+        if loss_row.get("adjustment_type") == "profit_product":
+            profit_products_value += max(0.0, float(loss_row.get("loss_cost", 0) or 0))
+        else:
+            lost_products_cost += max(0.0, float(loss_row.get("loss_cost", 0) or 0))
     lost_products_cost = round(lost_products_cost, 2)
+    profit_products_value = round(profit_products_value, 2)
     total_expenses = round(total_expenses + lost_products_cost, 2)
 
     opening_total = 0.0
@@ -2811,7 +2818,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
-    net_profit = round(gross_profit - personal_expenses - operating_expenses - lost_products_cost, 2)
+    net_profit = round(gross_profit - personal_expenses - operating_expenses - lost_products_cost + profit_products_value, 2)
     opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
@@ -2835,6 +2842,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         "gross_profit": gross_profit,
         "operating_expenses": operating_expenses,
         "lost_products_cost": lost_products_cost,
+        "profit_products_value": profit_products_value,
         "total_expenses": total_expenses,
         "supplier_payments": supplier_payments,
         "customer_receipts": customer_receipts,
