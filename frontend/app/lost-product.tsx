@@ -72,7 +72,7 @@ export default function LostProductScreen() {
     if (!selected) { toast("Select a product first"); return; }
     if (!Number.isFinite(qty) || qty <= 0) { toast("Enter a valid lost quantity"); return; }
     if (qty > Number(selected.quantity || 0)) { toast("Lost quantity cannot exceed available stock"); return; }
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(new Date(date+"T00:00:00").getTime())) { toast("Enter date as YYYY-MM-DD"); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(date+"T00:00:00").getTime())) { toast("Enter date as YYYY-MM-DD"); return; }
     if (!reason.trim()) { toast("Enter the reason for loss"); return; }
     setSaving(true);
     const lossCost = Math.round(costPreview * 100) / 100;
