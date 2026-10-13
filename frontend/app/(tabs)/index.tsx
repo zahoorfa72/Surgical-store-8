@@ -419,7 +419,7 @@ export default function Dashboard() {
                 )}
                 {financeDetailsOpen === "net" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Net profit = Gross profit − Personal expenses − Operating expenses − Lost product loss + Profit product value</Text>
+                    <Text style={styles.detailHeader}>Net profit = Gross profit − Personal expenses − Operating expenses ± admin-selected stock adjustments</Text>
                     <PLRow label="Gross profit" value={money(displayFinanceAmount(data.gross_profit, fakeFinanceDisplay))} />
                     <PLRow label="Personal expenses" value={"- " + money(displayFinanceAmount(data.personal_expenses, fakeFinanceDisplay))} muted />
                     <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
