@@ -763,7 +763,11 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         applyDelta(pid, delta, unitCost);
       }
       const row = { ...(previous ?? {}), ...(body ?? {}), id: method === "POST" ? tempId : id, pending: true };
-      queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => method === "POST" ? [row, ...(old ?? []).filter((x: any) => x.id !== row.id)] : (old ?? []).map((x: any) => x.id === id ? row : x));
+      // Online POSTs receive the authoritative adjustment from the server and
+      // the screen inserts it after the request; do not leave a fake "server" row.
+      if (method !== "POST" || tempId !== "server") {
+        queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => method === "POST" ? [row, ...(old ?? []).filter((x: any) => x.id !== row.id)] : (old ?? []).map((x: any) => x.id === id ? row : x));
+      }
     } else if (method === "DELETE" && id) {
       queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => (old ?? []).filter((x: any) => x.id !== id));
     }
