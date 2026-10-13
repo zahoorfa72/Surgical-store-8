@@ -362,6 +362,8 @@ class InventoryAdjustmentIn(BaseModel):
     date: Optional[str] = None
     loss_cost: float = 0
     client_id: Optional[str] = None
+    net_profit_adjustment: float = 0
+    remaining_balance_adjustment: float = 0
 
 
 class StockTransferIn(BaseModel):
@@ -1156,6 +1158,8 @@ async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=
         "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "delta": row.get("delta", 0),
         "reason": row.get("reason", ""), "adjustment_type": row.get("adjustment_type", "adjustment"),
         "date": row.get("date") or row.get("created_at", "")[:10], "loss_cost": row.get("loss_cost", 0),
+        "net_profit_adjustment": row.get("net_profit_adjustment", 0),
+        "remaining_balance_adjustment": row.get("remaining_balance_adjustment", 0),
         "client_id": row.get("client_id"), "user_name": row.get("user_name", ""), "created_at": row.get("created_at", ""),
     } for row in rows]
 
@@ -1180,7 +1184,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         existing_adjustment = await db.inventory_adjustments.find_one({"client_id": body.client_id, "deleted": {"$ne": True}})
         if existing_adjustment:
             existing_adjustment["id"] = oid(existing_adjustment["_id"])
-            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "client_id", "user_name", "created_at")},
+            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "client_id", "user_name", "created_at")},
                     "product": product_public(product)}
     current = float(product.get("quantity", 0) or 0)
     if -delta > current + 1e-9:
@@ -1200,12 +1204,15 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         "product_id": body.product_id, "delta": delta, "reason": body.reason.strip(),
         "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
         "loss_cost": round(loss_cost if delta < 0 else max(0.0, float(body.loss_cost or 0)), 2),
+        # Stock changes affect accounting only when explicitly selected by the admin.
+        "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2),
+        "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2),
         "client_id": body.client_id,
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
     }
     result = await db.inventory_adjustments.insert_one(row)
     row["id"] = oid(result.inserted_id)
-    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "client_id", "user_name", "created_at")},
+    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "client_id", "user_name", "created_at")},
             "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
@@ -2872,7 +2879,11 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             lost_products_cost += max(0.0, float(loss_row.get("loss_cost", 0) or 0))
     lost_products_cost = round(lost_products_cost, 2)
     profit_products_value = round(profit_products_value, 2)
-    total_expenses = round(total_expenses + lost_products_cost, 2)
+    adjustments_in_period = [row for row in all_lost_adjustments
+        if (not opening_period_start or str(row.get("date") or row.get("created_at", "")[:10])[:10] >= opening_period_start.isoformat())
+        and (not opening_period_end or str(row.get("date") or row.get("created_at", "")[:10])[:10] < opening_period_end.isoformat())]
+    net_profit_adjustment = round(sum(float(row.get("net_profit_adjustment", 0) or 0) for row in adjustments_in_period), 2)
+    remaining_balance_adjustment = round(sum(float(row.get("remaining_balance_adjustment", 0) or 0) for row in adjustments_in_period), 2)
 
     opening_total = 0.0
     for opening_row in opening_rows:
@@ -2895,7 +2906,8 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         - supplier_payments
         + supplier_refunds
         + opening_purchase_budget
-        + monthly_expenses_budget,
+        + monthly_expenses_budget
+        + remaining_balance_adjustment,
         2,
     )
 
@@ -2909,7 +2921,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
-    net_profit = round(gross_profit - personal_expenses - operating_expenses - lost_products_cost + profit_products_value, 2)
+    net_profit = round(gross_profit - personal_expenses - operating_expenses + net_profit_adjustment, 2)
     opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
@@ -2934,6 +2946,8 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         "operating_expenses": operating_expenses,
         "lost_products_cost": lost_products_cost,
         "profit_products_value": profit_products_value,
+        "net_profit_adjustment": net_profit_adjustment,
+        "remaining_balance_adjustment": remaining_balance_adjustment,
         "total_expenses": total_expenses,
         "supplier_payments": supplier_payments,
         "customer_receipts": customer_receipts,
