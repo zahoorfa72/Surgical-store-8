@@ -7,7 +7,7 @@ import { useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 import { apiRequest, getConnectionMode } from "@/src/api";
 import { useAuth } from "@/src/auth";
-import { useProducts, useSales, useReport } from "@/src/data";
+import { useProducts, useSales, useReport, useExpenses, useReturns, usePurchases, usePayments, useBudget } from "@/src/data";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, PrimaryButton, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -27,6 +27,11 @@ export default function OfflineTools() {
   const { user } = useAuth();
   const { data: products = [] } = useProducts();
   const { data: sales = [] } = useSales();
+  const { data: reportExpenses = [] } = useExpenses();
+  const { data: reportReturns = [] } = useReturns();
+  const { data: reportPurchases = [] } = usePurchases();
+  const { data: reportPayments = [] } = usePayments();
+  const { data: reportBudget } = useBudget();
   const [tool, setTool] = useState<Tool>("adjust");
   const [analyticsPeriod, setAnalyticsPeriod] = useState<"week" | "month" | "year" | "custom">("month");
   const [analyticsFrom, setAnalyticsFrom] = useState("");
@@ -49,7 +54,8 @@ export default function OfflineTools() {
   const analyticsReportRange = analyticsPeriod === "custom"
     ? (analyticsCustomValid ? `date-range:${analyticsFromValid}:${analyticsToValid}` : "date-range:9999-12-31:9999-12-31")
     : analyticsPeriod;
-  const { data: analyticsReport } = useReport(analyticsReportRange, tool === "analytics");
+  const { data: analyticsReport, refetch: refetchAnalyticsReport } = useReport(analyticsReportRange, tool === "analytics");
+  useEffect(() => { if (tool === "analytics") void refetchAnalyticsReport(); }, [tool, analyticsReportRange, sales.length, reportExpenses.length, reportReturns.length, reportPurchases.length, reportPayments.length, products.length, reportBudget?.monthly_amount, refetchAnalyticsReport]);
   const [productId, setProductId] = useState("");
   const [fromId, setFromId] = useState("");
   const [toId, setToId] = useState("");
