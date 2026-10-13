@@ -43,7 +43,7 @@ export default function ProfitProductScreen() {
   const [quantityText, setQuantityText] = useState("1");
   const [date, setDate] = useState(today());
   const [reason, setReason] = useState("");
-  const [accountingTarget, setAccountingTarget] = useState<"none" | "net_profit" | "remaining_balance" | "both">("none");
+  const [accountingTarget, setAccountingTarget] = useState<"none" | "split_50_50" | "net_profit" | "remaining_balance" | "both">("none");
   const [accountingAmountText, setAccountingAmountText] = useState("0");
   const [history, setHistory] = useState<ProfitRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -84,8 +84,10 @@ export default function ProfitProductScreen() {
     if (!Number.isFinite(accountingAmount) || accountingAmount < 0) { toast("Enter a valid accounting amount"); return; }
     setSaving(true);
     const profitValue = Math.round(costPreview * 100) / 100;
-    const netProfitAdjustment = accountingTarget === "net_profit" || accountingTarget === "both" ? Math.round(accountingAmount * 100) / 100 : 0;
-    const remainingBalanceAdjustment = accountingTarget === "remaining_balance" || accountingTarget === "both" ? Math.round(accountingAmount * 100) / 100 : 0;
+    const amountCents = Math.round(accountingAmount * 100);
+    const halfCents = Math.round(amountCents / 2);
+    const netProfitAdjustment = accountingTarget === "split_50_50" ? halfCents / 100 : accountingTarget === "net_profit" || accountingTarget === "both" ? amountCents / 100 : 0;
+    const remainingBalanceAdjustment = accountingTarget === "split_50_50" ? (amountCents - halfCents) / 100 : accountingTarget === "remaining_balance" || accountingTarget === "both" ? amountCents / 100 : 0;
     const clientId = editingId ? (history.find(row => row.id === editingId)?.client_id || "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)) : "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
     const localRow: ProfitRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: qty, reason: reason.trim(), date, profit_value: profitValue, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, created_at: new Date().toISOString(), adjustment_type: "profit_product" };
     try {
@@ -121,7 +123,7 @@ export default function ProfitProductScreen() {
           <Text style={{ color: colors.onSurface, fontWeight: "700", marginTop: 14 }}>Optional accounting impact (default: none)</Text>
           <Text style={{ color: colors.muted, fontSize: 12, marginTop: 3 }}>Adding stock does not automatically increase accounts. Choose whether to apply an amount.</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 }}>
-            {([{value:"none",label:"None"},{value:"net_profit",label:"Net Profit"},{value:"remaining_balance",label:"Remaining Balance"},{value:"both",label:"Both"}] as const).map(option => <Pressable key={option.value} onPress={() => setAccountingTarget(option.value)} style={{ paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9, backgroundColor: accountingTarget === option.value ? colors.brandPrimary : colors.surfaceTertiary }}><Text style={{ color: accountingTarget === option.value ? colors.onBrandPrimary : colors.onSurface, fontWeight: "600" }}>{option.label}</Text></Pressable>)}
+            {([{value:"none",label:"None"},{value:"split_50_50",label:"Split 50/50"},{value:"net_profit",label:"Net Profit"},{value:"remaining_balance",label:"Remaining Balance"},{value:"both",label:"Both"}] as const).map(option => <Pressable key={option.value} onPress={() => setAccountingTarget(option.value)} style={{ paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9, backgroundColor: accountingTarget === option.value ? colors.brandPrimary : colors.surfaceTertiary }}><Text style={{ color: accountingTarget === option.value ? colors.onBrandPrimary : colors.onSurface, fontWeight: "600" }}>{option.label}</Text></Pressable>)}
           </View>
           <Text style={{ color: colors.onSurface, fontWeight: "600", marginTop: 10 }}>Amount to add (PKR)</Text>
           <TextInput value={accountingAmountText} onChangeText={setAccountingAmountText} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={{ color: colors.onSurface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginTop: 6 }} />
