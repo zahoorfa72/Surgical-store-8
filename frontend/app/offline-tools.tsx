@@ -47,6 +47,13 @@ export default function OfflineTools() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   }, [analyticsPeriod, analyticsFromValid, analyticsCustomValid]);
   const analyticsEnd = useMemo(() => analyticsPeriod === "custom" ? (analyticsCustomValid ? new Date(new Date(analyticsToValid + "T00:00:00").getTime() + 86400000) : new Date("9999-12-31T00:00:00")) : new Date(), [analyticsPeriod, analyticsToValid, analyticsCustomValid]);
+  const periodContains = (value?: string | null) => {
+    if (!value) return false;
+    if (analyticsPeriod === "custom" && !analyticsCustomValid) return false;
+    const raw = String(value);
+    const date = /^\\d{4}-\\d{2}-\\d{2}$/.test(raw) ? new Date(raw + "T00:00:00") : new Date(raw);
+    return !Number.isNaN(date.getTime()) && date >= analyticsStart && date < analyticsEnd;
+  };
   const analyticsSales = useMemo(() => {
     if (analyticsPeriod === "custom" && !analyticsCustomValid) return [];
     return sales.filter((s) => { if (!s.created_at) return false; const d = new Date(s.created_at); return d >= analyticsStart && d < analyticsEnd; });
@@ -104,12 +111,12 @@ export default function OfflineTools() {
     return products.filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.barcode || "").toLowerCase().includes(q)).slice(0, 50);
   }, [products, search]);
 
-  const expiry = useMemo(() => products.filter((p) => p.expiry_date).map((p) => {
+  const expiry = useMemo(() => products.filter((p) => p.expiry_date && periodContains(p.expiry_date)).map((p) => {
     const days = Math.ceil((new Date(String(p.expiry_date)).getTime() - Date.now()) / 86400000);
     return { p, days };
-  }).sort((a, b) => a.days - b.days), [products]);
+  }).sort((a, b) => a.days - b.days), [products, analyticsStart, analyticsEnd, analyticsPeriod, analyticsCustomValid]);
 
-  const fastSlow = useMemo(() => {
+  const visibleAttachments = useMemo(() => attachments.filter((a) => periodContains(a.created_at)), [attachments, analyticsStart, analyticsEnd, analyticsPeriod, analyticsCustomValid]);\n\n  const fastSlow = useMemo(() => {
     const map = new Map<string, number>();
     for (const s of analyticsSales) for (const i of s.items || []) map.set(i.product_id, (map.get(i.product_id) || 0) + Number(i.quantity || 0));
     const rows = products.map((p) => ({ p, sold: map.get(p.id) || 0 }));
@@ -235,6 +242,8 @@ export default function OfflineTools() {
       ))}
     </View>
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 12 }}>
+      {tool !== "analytics" && <Card><Text style={styles.title}>Date filter</Text><Text style={styles.hint}>Weekly, monthly, yearly and From–To filters apply to dated lists such as expiry dates and saved attachments.</Text><View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>{([{key:"week",label:"Weekly"},{key:"month",label:"Monthly"},{key:"year",label:"Yearly"},{key:"custom",label:"From–To"}] as const).map((item) => <Pressable key={item.key} onPress={() => setAnalyticsPeriod(item.key)} style={[styles.tab, { maxWidth: "48%", backgroundColor: analyticsPeriod === item.key ? colors.brandPrimary : colors.surfaceTertiary }]}><Text style={[styles.tabText, { color: analyticsPeriod === item.key ? colors.onBrandPrimary : colors.onSurface }]}>{item.label}</Text></Pressable>)}</View>{analyticsPeriod === "custom" && <><TextInput style={styles.input} value={analyticsFrom} onChangeText={setAnalyticsFrom} placeholder="From date (YYYY-MM-DD)" placeholderTextColor={colors.muted} autoCapitalize="none" /><TextInput style={styles.input} value={analyticsTo} onChangeText={setAnalyticsTo} placeholder="To date (YYYY-MM-DD)" placeholderTextColor={colors.muted} autoCapitalize="none" />{analyticsFromValid && analyticsToValid && analyticsFromValid > analyticsToValid && <Text style={styles.hint}>From date must be on or before To date.</Text>}</>}</Card>}
+
       {tool === "adjust" && <Card><Text style={styles.title}>Stock Adjustment & Damage</Text><Text style={styles.hint}>Changes quantity and cost layers only. No sale, purchase or finance entry is created.</Text><TextInput style={styles.input} placeholder="Search product" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.slice(0, 8).map((p) => <Pressable key={p.id} onPress={() => setProductId(p.id)} style={[styles.row, productId === p.id && { backgroundColor: colors.brandTertiary }]}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} in stock</Text></Pressable>)}<TextInput style={styles.input} keyboardType="decimal-pad" placeholder="+10 or -5" placeholderTextColor={colors.muted} value={delta} onChangeText={setDelta} /><TextInput style={styles.input} placeholder="Reason" placeholderTextColor={colors.muted} value={reason} onChangeText={setReason} /><PrimaryButton label="Save adjustment" onPress={adjust} /></Card>}
 
       {tool === "expiry" && <Card><Text style={styles.title}>Expiry Management</Text>{expiry.map(({ p, days }) => <View key={p.id} style={styles.row}><View style={{ flex: 1 }}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} units · {p.expiry_date}</Text></View><Badge text={days < 0 ? "Expired" : days <= 30 ? String(days) + "d left" : String(days) + "d"} tone={days < 0 ? "error" : days <= 30 ? "warning" : "success"} /></View>)}{!expiry.length && <Text style={styles.empty}>No expiry dates recorded.</Text>}</Card>}
@@ -253,7 +262,7 @@ export default function OfflineTools() {
 
       {tool === "shift" && <Card><Text style={styles.title}>Cash Register / Shift</Text>{!shift || shift.closed_at ? <><TextInput style={styles.input} keyboardType="decimal-pad" placeholder="Opening cash" placeholderTextColor={colors.muted} value={openingCash} onChangeText={setOpeningCash} /><PrimaryButton label="Start shift" onPress={startShift} /></> : <><Text style={styles.name}>Opened {formatDateTime(shift.opened_at)}</Text><Text style={styles.meta}>Opening cash {money(shift.opening_cash)}</Text><TextInput style={styles.input} keyboardType="decimal-pad" placeholder="Closing cash" placeholderTextColor={colors.muted} value={closingCash} onChangeText={setClosingCash} /><PrimaryButton label="Close shift" onPress={closeShift} /></>}</Card>}
 
-      {tool === "attachments" && <Card><Text style={styles.title}>Document Attachment Center</Text><Text style={styles.hint}>Store order/receipt photos locally. No internet is required.</Text><PrimaryButton label="Add photo" onPress={addAttachment} />{attachments.map((a) => <View key={a.id} style={styles.attachment}><Image source={{ uri: a.data_url || a.uri }} style={styles.thumb} /><View style={{ flex: 1 }}><Text style={styles.name}>{a.name}</Text><Text style={styles.meta}>{a.user} · {formatDateTime(a.created_at)}</Text></View></View>)}</Card>}
+      {tool === "attachments" && <Card><Text style={styles.title}>Document Attachment Center</Text><Text style={styles.hint}>Store order/receipt photos locally. No internet is required.</Text><PrimaryButton label="Add photo" onPress={addAttachment} />{visibleAttachments.map((a) => <View key={a.id} style={styles.attachment}><Image source={{ uri: a.data_url || a.uri }} style={styles.thumb} /><View style={{ flex: 1 }}><Text style={styles.name}>{a.name}</Text><Text style={styles.meta}>{a.user} · {formatDateTime(a.created_at)}</Text></View></View>)}</Card>}
 
       {tool === "security" && <Card><Text style={styles.title}>Security Activity Center</Text><Text style={styles.hint}>Local audit events remain available offline; server audit remains available when online.</Text><Text style={styles.name}>{user?.name || "User"}</Text><Text style={styles.meta}>Role: {user?.role || "—"}</Text><Text style={styles.meta}>Business write actions are recorded locally by the app.</Text></Card>}
     </ScrollView>
