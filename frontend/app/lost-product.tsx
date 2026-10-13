@@ -66,11 +66,11 @@ export default function LostProductScreen() {
   }, [products.length]);
 
   const save = async () => {
-    if (!selected) { toast.show("Select a product first"); return; }
-    if (!Number.isFinite(qty) || qty <= 0) { toast.show("Enter a valid lost quantity"); return; }
-    if (qty > Number(selected.quantity || 0)) { toast.show("Lost quantity cannot exceed available stock"); return; }
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(new Date(date+"T00:00:00").getTime())) { toast.show("Enter date as YYYY-MM-DD"); return; }
-    if (!reason.trim()) { toast.show("Enter the reason for loss"); return; }
+    if (!selected) { toast("Select a product first"); return; }
+    if (!Number.isFinite(qty) || qty <= 0) { toast("Enter a valid lost quantity"); return; }
+    if (qty > Number(selected.quantity || 0)) { toast("Lost quantity cannot exceed available stock"); return; }
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(new Date(date+"T00:00:00").getTime())) { toast("Enter date as YYYY-MM-DD"); return; }
+    if (!reason.trim()) { toast("Enter the reason for loss"); return; }
     setSaving(true);
     const lossCost = Math.round(costPreview * 100) / 100;
     const localRow: LossRow = { id: "local-"+Date.now(), product_id: selected.id, product_name: selected.name, delta: -qty, reason: reason.trim(), date, loss_cost: lossCost, created_at: new Date().toISOString(), adjustment_type: "lost_product" };
@@ -81,10 +81,10 @@ export default function LostProductScreen() {
       const dedup = next.filter((r, i, arr) => arr.findIndex(x => [x.product_id,x.date,x.delta,x.reason,Number(x.loss_cost).toFixed(2)].join("|") === [r.product_id,r.date,r.delta,r.reason,Number(r.loss_cost).toFixed(2)].join("|")) === i);
       await storage.setItem(HISTORY_KEY, dedup as any);
       setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => [x.product_id,x.date,x.delta,x.reason,Number(x.loss_cost).toFixed(2)].join("|") === [r.product_id,r.date,r.delta,r.reason,Number(r.loss_cost).toFixed(2)].join("|")) === i));
-      toast.show("Lost product recorded. Stock and FIFO cost lots updated.");
+      toast("Lost product recorded. Stock and FIFO cost lots updated.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId("");
     } catch (e: any) {
-      toast.show(e?.message || "Could not record lost product");
+      toast(e?.message || "Could not record lost product");
     } finally { setSaving(false); }
   };
 
