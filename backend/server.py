@@ -3041,9 +3041,11 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     for adjustment in adjustments_in_period:
         adjustment_type = adjustment.get("adjustment_type")
         if adjustment_type == "lost_product":
-            half_loss = round(max(0.0, float(adjustment.get("loss_cost", 0) or 0)) / 2.0, 2)
-            net_profit_adjustment -= half_loss
-            remaining_balance_adjustment -= half_loss
+            loss_amount = round(max(0.0, float(adjustment.get("loss_cost", 0) or 0)), 2)
+            net_half = round(loss_amount / 2.0, 2)
+            balance_half = round(loss_amount - net_half, 2)
+            net_profit_adjustment -= net_half
+            remaining_balance_adjustment -= balance_half
         else:
             net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
             remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
