@@ -30,6 +30,7 @@ import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number };
 type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean };
+type ProductKit = { id: string; name: string; components: { product_id: string; quantity: number }[] };
 
 export default function Sell() {
   const styles = useStyles();
@@ -47,6 +48,7 @@ export default function Sell() {
 
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [productKits, setProductKits] = useState<ProductKit[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [custPickerOpen, setCustPickerOpen] = useState(false);
   const [customerCreateOpen, setCustomerCreateOpen] = useState(false);
@@ -188,6 +190,43 @@ export default function Sell() {
     } catch (e: any) {
       toast(e?.message || "Could not create customer", "error");
     }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const loadKits = async () => {
+      const rows = await storage.getItem<ProductKit[]>("ssm.product-kits.v1", []);
+      if (active) setProductKits(rows ?? []);
+    };
+    void loadKits();
+    return () => { active = false; };
+  }, []);
+
+  const addKitToCart = (kit: ProductKit) => {
+    const components = kit.components.map((component) => ({
+      component,
+      product: (products ?? []).find((p) => p.id === component.product_id),
+    }));
+    const missing = components.find((row) => !row.product || Number(row.component.quantity) <= 0);
+    if (missing) {
+      toast("This kit has a missing product or invalid quantity. Edit it in More → Product Kits.", "error");
+      return;
+    }
+    setCart((previous) => {
+      let next = [...previous];
+      for (const row of components) {
+        const p = row.product!;
+        const qty = Number(row.component.quantity);
+        const found = next.find((line) => line.id === p.id);
+        if (found) {
+          next = next.map((line) => line.id === p.id ? { ...line, quantity: line.quantity + qty, stock: Number(p.quantity ?? 0) } : line);
+        } else {
+          next.push({ id: p.id, name: p.name, stock: Number(p.quantity ?? 0), quantity: qty, unit_price: p.sale_price, threshold: p.low_stock_threshold });
+        }
+      }
+      return next;
+    });
+    toast(kit.name + " added to cart. Stock will change only after the sale is completed.", "success");
   };
 
   const addToCart = (p: Product) => {
@@ -383,6 +422,17 @@ export default function Sell() {
           <Text style={styles.scanOrderSellText}>Scan order</Text>
         </Pressable>
       </View>
+
+      {productKits.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 2, gap: 8 }}>
+          {productKits.map((kit) => (
+            <Pressable key={kit.id} testID={"add-kit-" + kit.id} onPress={() => addKitToCart(kit)} style={{ backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, minWidth: 120 }}>
+              <Text style={{ color: colors.onSurface, fontWeight: "700" }}>{kit.name}</Text>
+              <Text style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{kit.components.length} components · Add kit</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
 
       <FlatList
         data={filtered}
