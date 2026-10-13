@@ -117,22 +117,26 @@ function partyName(id: string | null | undefined, type: "customer" | "supplier")
 
 async function buildLocalSale(body: any, cashierName: string): Promise<Sale> {
   const prods = products();
+  const workingLayers = new Map<string, any[]>();
   const items = (body.items ?? []).map((it: any) => {
     const p = prods.find((x) => x.id === it.product_id);
-    const purchase_price = p?.purchase_price ?? 0;
-    return {
-      product_id: it.product_id,
-      name: p?.name ?? "Item",
-      quantity: it.quantity,
-      unit_price: it.unit_price,
-      purchase_price,
-      line_total: Math.round(it.quantity * it.unit_price * 100) / 100,
-    };
+    const layers = workingLayers.get(it.product_id) ?? (Array.isArray(p?.cost_layers) ? p!.cost_layers.map((l: any) => ({ ...l, quantity: Number(l.quantity ?? 0) })) : []);
+    let left = Math.max(0, Number(it.quantity) || 0), cogs = 0;
+    for (const layer of layers) {
+      if (left <= 1e-9) break;
+      const take = Math.min(left, Math.max(0, Number(layer.quantity) || 0));
+      cogs += take * Math.max(0, Number(layer.unit_cost) || 0);
+      layer.quantity = Math.max(0, Number(layer.quantity) - take);
+      left -= take;
+    }
+    if (left > 1e-9) cogs += left * Math.max(0, Number(p?.purchase_price) || 0);
+    workingLayers.set(it.product_id, layers);
+    return { product_id: it.product_id, name: p?.name ?? "Item", quantity: it.quantity, unit_price: it.unit_price, purchase_price: Number(it.quantity) > 0 ? cogs / Number(it.quantity) : 0, line_cogs: Math.round(cogs * 100) / 100, line_total: Math.round(it.quantity * it.unit_price * 100) / 100 };
   });
   const subtotal = items.reduce((s: number, i: any) => s + i.line_total, 0);
   const discount = Math.max(0, body.discount ?? 0);
   const total = Math.max(0, subtotal - discount);
-  const cogs = items.reduce((s: number, i: any) => s + i.quantity * i.purchase_price, 0);
+  const cogs = items.reduce((s: number, i: any) => s + Number(i.line_cogs ?? (i.quantity * i.purchase_price)), 0);
   const seq = await nextLocalSeq();
   return {
     id: `local-sale-${seq}`,
