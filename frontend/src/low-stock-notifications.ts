@@ -46,17 +46,9 @@ export async function notifyLowStock(products: Product[]): Promise<void> {
   const first = low.slice(0, 3).map((p) => `${p.name} (${p.quantity} left)`).join(", ");
   const extra = low.length > 3 ? ` + ${low.length - 3} more` : "";
 
-  void addAppNotification(`Low stock: ${low.length} item${low.length === 1 ? "" : "s"}`, first + extra, "low-stock");
+  await addAppNotification(`Low stock: ${low.length} item${low.length === 1 ? "" : "s"}`, first + extra, "low-stock");
 
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: `Low stock: ${low.length} item${low.length === 1 ? "" : "s"}`,
-      body: first + extra,
-      sound: "default",
-      data: { type: "low-stock", count: low.length },
-    },
-    trigger: null,
-  });
+
 
   await storage.setItem(KEY, signature);
 }
