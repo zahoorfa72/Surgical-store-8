@@ -2020,17 +2020,18 @@ async def delete_purchase(purchase_id: str, _: AdminOnly):
         layers = await _ensure_cost_layers(prod)
         if _purchase_lot_quantity(layers, purchase_id) + 1e-9 < required:
             raise HTTPException(status_code=400, detail="Cannot delete purchase safely: its original stock lot has been used or cannot be reconciled. Other lots were left untouched.")
-    # Reverse only this purchase's remaining cost lot.
-    for it in purchase.get("items", []):
-        net_in = float(it["quantity"]) - float(returned.get(it["product_id"], 0))
-        if net_in > 0:
-            prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
-            layers = await _ensure_cost_layers(prod or {})
-            layers = _remove_purchase_lot(layers, net_in, purchase_id)
-            await db.products.update_one(
-                {"_id": ObjectId(it["product_id"])},
-                {"$inc": {"quantity": -net_in}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
-            )
+    # Reverse each product's purchase lot once. Aggregate duplicate lines first:
+    # supplier returns are tracked by product, not by individual duplicate line.
+    for product_id, net_in in required_by_product.items():
+        if net_in <= 0:
+            continue
+        prod = await db.products.find_one({"_id": ObjectId(product_id)})
+        layers = await _ensure_cost_layers(prod or {})
+        layers = _remove_purchase_lot(layers, net_in, purchase_id)
+        await db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$inc": {"quantity": -net_in}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
+        )
     # Cascade: remove this purchase's supplier returns from the books too.
     await db.purchase_returns.update_many({"purchase_id": purchase_id}, {"$set": {"deleted": True}})
     await db.purchases.update_one({"_id": ObjectId(purchase_id)}, {"$set": {"deleted": True}})
@@ -2097,14 +2098,12 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
     supplier = await db.parties.find_one({"_id": ObjectId(body.supplier_id), "deleted": {"$ne": True}})
     supplier_name = supplier.get("name", "—") if supplier else "—"
 
-    # Reverse each old lot and reconcile its remaining layers to stock. This
-    # tolerates legacy drift without blocking a valid purchase edit.
-    for old in purchase.get("items", []):
-        product_id = old["product_id"]
+    # Reverse each product's original lot once. Duplicate lines for the same
+    # product share a purchase_id; removing per line could subtract that lot twice.
+    for product_id, old_qty in required_by_product.items():
         prod = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
         if not prod:
             continue
-        old_qty = float(old.get("quantity", 0) or 0)
         layers = await _ensure_cost_layers(prod)
         layers = _remove_purchase_lot(layers, old_qty, purchase_id)
         next_qty = max(0.0, float(prod.get("quantity", 0) or 0) - old_qty)
