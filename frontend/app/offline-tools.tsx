@@ -51,7 +51,7 @@ export default function OfflineTools() {
     if (!value) return false;
     if (analyticsPeriod === "custom" && !analyticsCustomValid) return false;
     const raw = String(value);
-    const date = /^\\d{4}-\\d{2}-\\d{2}$/.test(raw) ? new Date(raw + "T00:00:00") : new Date(raw);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(raw + "T00:00:00") : new Date(raw);
     return !Number.isNaN(date.getTime()) && date >= analyticsStart && date < analyticsEnd;
   };
   const analyticsSales = useMemo(() => {
@@ -116,7 +116,9 @@ export default function OfflineTools() {
     return { p, days };
   }).sort((a, b) => a.days - b.days), [products, analyticsStart, analyticsEnd, analyticsPeriod, analyticsCustomValid]);
 
-  const visibleAttachments = useMemo(() => attachments.filter((a) => periodContains(a.created_at)), [attachments, analyticsStart, analyticsEnd, analyticsPeriod, analyticsCustomValid]);\n\n  const fastSlow = useMemo(() => {
+  const visibleAttachments = useMemo(() => attachments.filter((a) => periodContains(a.created_at)), [attachments, analyticsStart, analyticsEnd, analyticsPeriod, analyticsCustomValid]);
+
+  const fastSlow = useMemo(() => {
     const map = new Map<string, number>();
     for (const s of analyticsSales) for (const i of s.items || []) map.set(i.product_id, (map.get(i.product_id) || 0) + Number(i.quantity || 0));
     const rows = products.map((p) => ({ p, sold: map.get(p.id) || 0 }));
