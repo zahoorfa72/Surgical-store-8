@@ -2,6 +2,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 import { Product } from "@/src/models";
+import { addAppNotification } from "@/src/notification-center";
 
 const KEY = "ssm.lowStock.notificationSignature";
 
@@ -44,6 +45,8 @@ export async function notifyLowStock(products: Product[]): Promise<void> {
 
   const first = low.slice(0, 3).map((p) => `${p.name} (${p.quantity} left)`).join(", ");
   const extra = low.length > 3 ? ` + ${low.length - 3} more` : "";
+
+  void addAppNotification(`Low stock: ${low.length} item${low.length === 1 ? "" : "s"}`, first + extra, "low-stock");
 
   await Notifications.scheduleNotificationAsync({
     content: {

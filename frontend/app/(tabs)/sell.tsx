@@ -424,9 +424,9 @@ export default function Sell() {
       </View>
 
       {productKits.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 2, gap: 8 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, gap: 10 }} style={{ flexGrow: 0, marginBottom: 4 }}>
           {productKits.map((kit) => (
-            <Pressable key={kit.id} testID={"add-kit-" + kit.id} onPress={() => addKitToCart(kit)} style={{ backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, minWidth: 120 }}>
+            <Pressable key={kit.id} testID={"add-kit-" + kit.id} onPress={() => addKitToCart(kit)} style={{ backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, minWidth: 132, maxWidth: 190 }}>
               <Text style={{ color: colors.onSurface, fontWeight: "700" }}>{kit.name}</Text>
               <Text style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{kit.components.length} components · Add kit</Text>
             </Pressable>

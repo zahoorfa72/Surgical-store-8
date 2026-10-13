@@ -15,6 +15,7 @@ import { Party, Payment } from "@/src/models";
 import { ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { getHiddenSupplierIds, useFakeFinanceDisplay, fakePurchaseNetTotal, fakePaymentAmount, fakeDisplayAmount } from "@/src/utils/finance-display";
+import { addAppNotification } from "@/src/notification-center";
 
 const TABS = [
   { key: "supplier", label: "Suppliers" },
@@ -163,6 +164,8 @@ export default function Payments() {
       }
       await queryClient.invalidateQueries({ queryKey: qk.parties(isSupplier ? "supplier" : "customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      if (!editingPayment) void addAppNotification(isSupplier ? "Supplier payment made" : "Customer payment received", `${active!.name}: ${money(amt)}${note.trim() ? " · " + note.trim() : ""}`, "payment");
+      else void addAppNotification("Payment entry updated", `${active?.name ?? "Party"}: ${money(amt)}`, "payment-updated");
       toast(editingPayment ? "Entry updated" : (isSupplier ? "Payment recorded" : "Receipt recorded"), "success");
       setActive(null); setEditingPayment(null);
     } catch (e: any) {
@@ -204,6 +207,7 @@ export default function Payments() {
       setReceiptPhotos((prev) => { const next = { ...prev }; delete next[id]; return next; });
       await queryClient.invalidateQueries({ queryKey: qk.parties(isSupplier ? "supplier" : "customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      void addAppNotification("Payment entry deleted", "A payment or receipt entry was removed.", "payment-deleted");
       toast("Entry deleted", "success");
     } catch (e: any) {
       toast(e?.message || "Could not delete", "error");
