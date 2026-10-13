@@ -79,9 +79,9 @@ export default function LostProductScreen() {
       const response = await apiRequest<any>("/inventory-adjustments", { method: "POST", body: { product_id: selected.id, delta: -qty, reason: reason.trim(), adjustment_type: "lost_product", date, loss_cost: lossCost, client_id: clientId } });
       const row: LossRow = response?.adjustment ? { ...response.adjustment, client_id: response.adjustment.client_id || clientId, product_name: selected.name } : localRow;
       const next = [row, ...(await storage.getItem<LossRow[]>(HISTORY_KEY, []) ?? [])];
-      const dedup = next.filter((r, i, arr) => arr.findIndex(x => [x.product_id,x.date,x.delta,x.reason,Number(x.loss_cost).toFixed(2)].join("|") === [r.product_id,r.date,r.delta,r.reason,Number(r.loss_cost).toFixed(2)].join("|")) === i);
+      const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
       await storage.setItem(HISTORY_KEY, dedup as any);
-      setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => [x.product_id,x.date,x.delta,x.reason,Number(x.loss_cost).toFixed(2)].join("|") === [r.product_id,r.date,r.delta,r.reason,Number(r.loss_cost).toFixed(2)].join("|")) === i));
+      setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
       toast("Lost product recorded. Stock and FIFO cost lots updated.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId("");
     } catch (e: any) {
