@@ -358,6 +358,9 @@ class InventoryAdjustmentIn(BaseModel):
     product_id: str
     delta: float
     reason: str = ""
+    adjustment_type: str = "adjustment"
+    date: Optional[str] = None
+    loss_cost: float = 0
 
 
 class StockTransferIn(BaseModel):
@@ -1115,6 +1118,17 @@ async def delete_product(product_id: str, _: AdminOnly):
     return {"ok": True}
 
 
+@api.get("/inventory-adjustments")
+async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=1000)):
+    rows = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+    return [{
+        "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "delta": row.get("delta", 0),
+        "reason": row.get("reason", ""), "adjustment_type": row.get("adjustment_type", "adjustment"),
+        "date": row.get("date") or row.get("created_at", "")[:10], "loss_cost": row.get("loss_cost", 0),
+        "user_name": row.get("user_name", ""), "created_at": row.get("created_at", ""),
+    } for row in rows]
+
+
 @api.post("/inventory-adjustments")
 async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     if not ObjectId.is_valid(body.product_id):
@@ -1122,27 +1136,35 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     delta = float(body.delta)
     if abs(delta) < 1e-9:
         raise HTTPException(status_code=400, detail="Adjustment quantity cannot be zero")
+    if body.adjustment_type == "lost_product" and delta >= 0:
+        raise HTTPException(status_code=400, detail="Lost product quantity must reduce stock")
     product = await db.products.find_one({"_id": ObjectId(body.product_id), "deleted": {"$ne": True}})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    layers = await _ensure_cost_layers(product)
     current = float(product.get("quantity", 0) or 0)
+    if -delta > current + 1e-9:
+        raise HTTPException(status_code=400, detail="Quantity exceeds available stock")
+    layers = await _ensure_cost_layers(product)
+    loss_cost = 0.0
     if delta < 0:
-        layers, _ = _consume_cost_layers(layers, -delta, float(product.get("purchase_price", 0) or 0))
+        layers, loss_cost = _consume_cost_layers(layers, -delta, float(product.get("purchase_price", 0) or 0))
     else:
         layers = _append_cost_layer(layers, delta, float(product.get("purchase_price", 0) or 0), None)
     next_qty = current + delta
-    if next_qty < -1e-9:
-        raise HTTPException(status_code=400, detail="Adjustment cannot reduce stock below zero")
     ts = now_iso()
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {
         "quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": ts
     }})
-    await db.inventory_adjustments.insert_one({
+    row = {
         "product_id": body.product_id, "delta": delta, "reason": body.reason.strip(),
+        "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
+        "loss_cost": round(loss_cost if delta < 0 else max(0.0, float(body.loss_cost or 0)), 2),
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
-    })
-    return {"ok": True, "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
+    }
+    result = await db.inventory_adjustments.insert_one(row)
+    row["id"] = oid(result.inserted_id)
+    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "user_name", "created_at")},
+            "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
 @api.post("/stock-transfers")
