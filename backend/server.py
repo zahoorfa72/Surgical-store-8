@@ -1270,7 +1270,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     }
     result = await db.inventory_adjustments.insert_one(row)
     row["id"] = oid(result.inserted_id)
-    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "client_id", "user_name", "created_at")},
+    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
             "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
