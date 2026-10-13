@@ -141,9 +141,18 @@ function now() {
 function ensureCostLayers(product: any): any[] {
   const qty = Number(product?.quantity ?? 0);
   if (qty <= 0) return [];
-  const layers = (Array.isArray(product?.cost_layers) ? product.cost_layers : [])
+  const rawLayers = (Array.isArray(product?.cost_layers) ? product.cost_layers : [])
     .filter((x: any) => Number(x?.quantity ?? 0) > 1e-9)
     .map((x: any) => ({ ...x, quantity: Number(x.quantity ?? 0) }));
+  const layers: any[] = [];
+  for (const layer of rawLayers) {
+    const match = layers.find((x: any) =>
+      String(x?.purchase_id ?? "") === String(layer?.purchase_id ?? "") &&
+      Math.abs(Number(x?.unit_cost ?? 0) - Number(layer?.unit_cost ?? 0)) <= 1e-8
+    );
+    if (match) match.quantity = Number(match.quantity ?? 0) + Number(layer.quantity ?? 0);
+    else layers.push({ ...layer });
+  }
   const total = layers.reduce((sum: number, x: any) => sum + Number(x.quantity ?? 0), 0);
   if (Math.abs(total - qty) <= 1e-9) return layers;
   if (total < qty) {
@@ -159,6 +168,22 @@ function ensureCostLayers(product: any): any[] {
     remaining -= take;
   }
   return result;
+}
+
+function appendCostLayer(layers: any[], quantity: number, unitCost: number, purchaseId: string | null = null): any[] {
+  const qty = Number(quantity), cost = Number(unitCost);
+  if (!Number.isFinite(qty) || qty <= 0) return layers;
+  const wantedId = String(purchaseId ?? "");
+  const index = layers.findIndex((layer: any) =>
+    String(layer?.purchase_id ?? "") === wantedId &&
+    Math.abs(Number(layer?.unit_cost ?? 0) - cost) <= 1e-8
+  );
+  if (index >= 0) {
+    return layers.map((layer: any, i: number) => i === index
+      ? { ...layer, quantity: Number(layer.quantity ?? 0) + qty, unit_cost: cost, purchase_id: purchaseId }
+      : layer);
+  }
+  return [...layers, { quantity: qty, unit_cost: cost, purchase_id: purchaseId }];
 }
 
 function consumeCostLayersMatching(layers: any[], quantity: number, unitCost: number): { layers: any[]; totalCost: number } {
@@ -311,8 +336,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
         const it = items.find((x: any) => x.product_id === p.id);
         if (!it) return p;
-        const layers = ensureCostLayers(p);
-        layers.push({ quantity: Number(it.quantity || 0), unit_cost: Number(it.purchase_price || 0), purchase_id: null });
+        const layers = appendCostLayer(ensureCostLayers(p), Number(it.quantity || 0), Number(it.purchase_price || 0), null);
         return { ...p, quantity: p.quantity + Number(it.quantity || 0), cost_layers: layers };
       }));
     } else if (method === "DELETE" && id) {
@@ -449,25 +473,59 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       const products = queryClient.getQueryData<any[]>(["products"]) ?? [];
       if (oldSale) {
         const oldItems = oldSale.items ?? [];
+        const requestedItems = body.items ?? [];
+        const quantityMap = (items: any[]) => items.reduce((map: Record<string, number>, item: any) => {
+          const pid = String(item.product_id);
+          map[pid] = (map[pid] ?? 0) + Number(item.quantity ?? 0);
+          return map;
+        }, {});
+        const oldQuantities = quantityMap(oldItems);
+        const newQuantities = quantityMap(requestedItems);
+        const allProductIds = new Set([...Object.keys(oldQuantities), ...Object.keys(newQuantities)]);
+        const sameInventory = [...allProductIds].every((pid) =>
+          Math.abs((oldQuantities[pid] ?? 0) - (newQuantities[pid] ?? 0)) <= 1e-9
+        );
         let newItems: any[] = [];
-        queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((p:any) => {
-          const oldForProduct = oldItems.filter((x:any)=>x.product_id===p.id);
-          const newForProduct = (body.items ?? []).filter((x:any)=>x.product_id===p.id);
-          if (!oldForProduct.length && !newForProduct.length) return p;
-          let layers = ensureCostLayers(p);
-          for (const old of oldForProduct) layers.push({ quantity:Number(old.quantity||0), unit_cost:Number(old.purchase_price||0), purchase_id:null });
-          const qty = newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
-          let totalCost = 0;
-          if (qty > 0) {
-            const consumed = consumeCostLayers(layers, qty);
-            layers = consumed.layers; totalCost = consumed.totalCost;
-          }
-          for (const it of newForProduct) {
-            const q=Number(it.quantity||0), price=Number(it.unit_price||0);
-            newItems.push({...it,name:p?.name??"Item",purchase_price:qty>0?totalCost/qty:0,line_cogs:q*(qty>0?totalCost/qty:0),line_total:q*price});
-          }
-          return {...p, quantity:Number(p.quantity??0)+oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0)-qty, cost_layers:layers};
-        }));
+        if (sameInventory) {
+          // A price/discount/customer-only edit must not restore and re-consume
+          // stock or recalculate historic cost layers.
+          const oldCostByProduct = oldItems.reduce((map: Record<string, number>, item: any) => {
+            const pid = String(item.product_id);
+            const qty = Number(item.quantity ?? 0);
+            const cost = Number(item.line_cogs ?? (qty * Number(item.purchase_price ?? 0)));
+            map[pid] = (map[pid] ?? 0) + cost;
+            return map;
+          }, {});
+          newItems = requestedItems.map((it: any) => {
+            const product = products.find((p: any) => p.id === it.product_id);
+            const qty = Number(it.quantity ?? 0);
+            const oldQty = oldQuantities[String(it.product_id)] ?? 0;
+            const unitCost = oldQty > 0 ? Number(oldCostByProduct[String(it.product_id)] ?? 0) / oldQty : 0;
+            const price = Number(it.unit_price ?? 0);
+            return { ...it, name: product?.name ?? "Item", purchase_price: unitCost,
+              line_cogs: Math.round(qty * unitCost * 100) / 100,
+              line_total: Math.round(qty * price * 100) / 100 };
+          });
+        } else {
+          queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((p:any) => {
+            const oldForProduct = oldItems.filter((x:any)=>x.product_id===p.id);
+            const newForProduct = requestedItems.filter((x:any)=>x.product_id===p.id);
+            if (!oldForProduct.length && !newForProduct.length) return p;
+            let layers = ensureCostLayers(p);
+            for (const old of oldForProduct) layers = appendCostLayer(layers, Number(old.quantity || 0), Number(old.purchase_price || 0), null);
+            const qty = newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
+            let totalCost = 0;
+            if (qty > 0) {
+              const consumed = consumeCostLayers(layers, qty);
+              layers = consumed.layers; totalCost = consumed.totalCost;
+            }
+            for (const it of newForProduct) {
+              const q=Number(it.quantity||0), price=Number(it.unit_price||0);
+              newItems.push({...it,name:p?.name??"Item",purchase_price:qty>0?totalCost/qty:0,line_cogs:q*(qty>0?totalCost/qty:0),line_total:q*price});
+            }
+            return {...p, quantity:Number(p.quantity??0)+oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0)-qty, cost_layers:layers};
+          }));
+        }
         const subtotal = newItems.reduce((a:number,x:any)=>a+Number(x.line_total||0),0);
         const discount = Math.max(0,Number(body.discount??0));
         const total = Math.max(0,subtotal-discount);
@@ -491,8 +549,8 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           subtotal,
           discount,
           total,
-          cogs: newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),
-          profit: total-newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),
+          cogs: sameInventory ? Number(oldSale.cogs ?? newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0)) : newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),
+          profit: total-(sameInventory ? Number(oldSale.cogs ?? newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0)) : newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0)),
           credit,
           pending: true,
         };
@@ -548,8 +606,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
         const it = items.find((x: any) => x.product_id === p.id);
         if (!it) return p;
-        const layers = ensureCostLayers(p);
-        layers.push({ quantity: Number(it.quantity ?? 0), unit_cost: Number(it.unit_cost ?? 0), purchase_id: tempId });
+        const layers = appendCostLayer(ensureCostLayers(p), Number(it.quantity ?? 0), Number(it.unit_cost ?? 0), tempId);
         return { ...p, quantity: Number(p.quantity ?? 0) + Number(it.quantity ?? 0),
           purchase_price: Number(it.unit_cost ?? p.purchase_price ?? 0), cost_layers: layers, updated_at: now() };
       }));
@@ -569,7 +626,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           if(!oldForProduct.length && !newForProduct.length) return p;
           let layers=ensureCostLayers(p);
           for(const old of oldForProduct) layers=consumeCostLayersMatching(layers,Number(old.quantity||0),Number(old.unit_cost||0)).layers;
-          for(const ni of newForProduct) layers.push({quantity:Number(ni.quantity||0),unit_cost:Number(ni.unit_cost||0),purchase_id:id});
+          for(const ni of newForProduct) layers = appendCostLayer(layers, Number(ni.quantity || 0), Number(ni.unit_cost || 0), id);
           const newQty=newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           const oldQty=oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           const nextQty = Math.max(0, Number(p.quantity ?? 0) + newQty - oldQty);

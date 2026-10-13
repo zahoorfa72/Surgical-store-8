@@ -377,11 +377,21 @@ async def _ensure_cost_layers(product: dict) -> list:
     qty = float(product.get("quantity", 0) or 0)
     if qty <= 0:
         return []
-    layers = [
-        {**x, "quantity": float(x.get("quantity", 0) or 0)}
-        for x in (product.get("cost_layers") or [])
-        if float(x.get("quantity", 0) or 0) > 1e-9
-    ]
+    layers = []
+    # Normalize duplicate representations of the same lot. Distinct purchase IDs
+    # remain separate, even when the product and unit cost are identical.
+    for raw in (product.get("cost_layers") or []):
+        quantity = float(raw.get("quantity", 0) or 0)
+        if quantity <= 1e-9:
+            continue
+        layer = {**raw, "quantity": quantity}
+        match = next((x for x in layers
+                      if str(x.get("purchase_id") or "") == str(layer.get("purchase_id") or "")
+                      and abs(float(x.get("unit_cost", 0) or 0) - float(layer.get("unit_cost", 0) or 0)) <= 1e-8), None)
+        if match is None:
+            layers.append(layer)
+        else:
+            match["quantity"] = float(match.get("quantity", 0) or 0) + quantity
     total = sum(float(x.get("quantity", 0) or 0) for x in layers)
     if abs(total - qty) <= 1e-9:
         return layers
@@ -430,9 +440,29 @@ def _consume_cost_layers(layers: list, quantity: float, fallback_unit_cost: floa
 
 
 def _append_cost_layer(layers: list, quantity: float, unit_cost: float, purchase_id: Optional[str] = None) -> list:
+    """Add stock to its matching cost lot instead of creating duplicate lots.
+
+    Different purchase IDs remain separate, so genuine separate purchases are
+    still represented as separate lots. Anonymous sale/return reversals at the
+    same unit cost are consolidated to prevent repeated edits multiplying lots.
+    """
+    quantity = float(quantity)
+    unit_cost = float(unit_cost)
     if quantity <= 0:
         return layers
-    return [*layers, {"quantity": float(quantity), "unit_cost": float(unit_cost), "purchase_id": purchase_id}]
+    for index, layer in enumerate(layers):
+        same_purchase = str(layer.get("purchase_id") or "") == str(purchase_id or "")
+        same_cost = abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) <= 1e-8
+        if same_purchase and same_cost:
+            updated = list(layers)
+            updated[index] = {
+                **layer,
+                "quantity": float(layer.get("quantity", 0) or 0) + quantity,
+                "unit_cost": unit_cost,
+                "purchase_id": purchase_id,
+            }
+            return updated
+    return [*layers, {"quantity": quantity, "unit_cost": unit_cost, "purchase_id": purchase_id}]
 
 
 async def _save_cost_layers(product_id: str, layers: list):
@@ -1804,6 +1834,67 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         available_after_restore = float(p.get("quantity", 0) or 0) + old_qty.get(product_id, 0)
         if requested_qty > available_after_restore and not body.allow_negative_stock:
             raise HTTPException(status_code=400, detail=f"Only {available_after_restore:g} of {p['name']} available for this sale")
+
+    # If only price, discount, customer, or note changed, do not touch stock
+    # layers or recalculate the sale's historic COGS. Otherwise every harmless
+    # edit can change FIFO selection and gradually drift the Remaining Balance.
+    same_inventory = set(requested) == set(old_qty) and all(
+        abs(requested.get(pid, 0.0) - old_qty.get(pid, 0.0)) <= 1e-9
+        for pid in set(requested) | set(old_qty)
+    )
+    if same_inventory:
+        old_cost_by_product: dict[str, float] = {}
+        for old in sale.get("items", []):
+            pid = old["product_id"]
+            old_qty_line = float(old.get("quantity", 0) or 0)
+            line_cost = float(old.get("line_cogs", old_qty_line * float(old.get("purchase_price", 0) or 0)) or 0)
+            old_cost_by_product[pid] = old_cost_by_product.get(pid, 0.0) + line_cost
+        items = []
+        subtotal = 0.0
+        for it in body.items:
+            p = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
+            if not p:
+                raise HTTPException(status_code=400, detail="Product not found in cart")
+            line_total = round(float(it.quantity) * float(it.unit_price), 2)
+            product_qty = old_qty.get(it.product_id, 0.0)
+            unit_cost = old_cost_by_product.get(it.product_id, 0.0) / product_qty if product_qty > 0 else 0.0
+            line_cogs = round(float(it.quantity) * unit_cost, 2)
+            subtotal += line_total
+            items.append({
+                "product_id": it.product_id,
+                "name": p["name"],
+                "quantity": it.quantity,
+                "unit_price": it.unit_price,
+                "purchase_price": round(unit_cost, 8),
+                "line_cogs": line_cogs,
+                "line_total": line_total,
+            })
+        discount = max(0.0, body.discount)
+        total = round(max(0.0, subtotal - discount), 2)
+        old_cogs = float(sale.get("cogs", 0) or 0)
+        customer_name = "Walk-in"
+        if body.customer_id and ObjectId.is_valid(body.customer_id):
+            customer = await db.parties.find_one({"_id": ObjectId(body.customer_id), "deleted": {"$ne": True}})
+            if customer:
+                customer_name = customer["name"]
+        await db.sales.update_one(
+            {"_id": ObjectId(sale_id)},
+            {"$set": {
+                "items": items,
+                "customer_id": body.customer_id,
+                "customer_name": customer_name,
+                "subtotal": round(subtotal, 2),
+                "discount": discount,
+                "total": total,
+                "credit": bool(body.credit and body.customer_id),
+                "cogs": old_cogs,
+                "profit": round(total - old_cogs, 2),
+                "note": body.note,
+                "allow_negative_stock": bool(body.allow_negative_stock),
+                "edited_at": now_iso(),
+            }},
+        )
+        return sale_public(await db.sales.find_one({"_id": ObjectId(sale_id)}))
 
     # Put back the old items at their recorded sale cost.
     for it in sale.get("items", []):
