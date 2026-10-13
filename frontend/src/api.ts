@@ -477,7 +477,25 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         const newCustomer = body.customer_id;
         if (oldCredit && oldCustomer) queryClient.setQueryData<any[]>(["parties","customer"], rows => (rows??[]).map((p:any)=>p.id===oldCustomer?{...p,balance:Number(p.balance??0)-Number(oldSale.total??0)}:p));
         if (credit && newCustomer) queryClient.setQueryData<any[]>(["parties","customer"], rows => (rows??[]).map((p:any)=>p.id===newCustomer?{...p,balance:Number(p.balance??0)+total}:p));
-        const updated={...oldSale,...body,items:newItems,subtotal,discount,total,cogs:newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),profit:total-newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),credit,pending:true};
+        // Keep the selected customer's name in the optimistic/offline sale too.
+        // Otherwise the UI can continue showing the previous customer until a server refresh.
+        const selectedCustomer = newCustomer
+          ? (queryClient.getQueryData<any[]>(["parties", "customer"]) ?? []).find((p: any) => p.id === newCustomer)
+          : null;
+        const updated = {
+          ...oldSale,
+          ...body,
+          customer_id: newCustomer ?? null,
+          customer_name: selectedCustomer?.name ?? (newCustomer ? (body.customer_name ?? "Selected customer") : "Walk-in"),
+          items: newItems,
+          subtotal,
+          discount,
+          total,
+          cogs: newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),
+          profit: total-newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),
+          credit,
+          pending: true,
+        };
         queryClient.setQueryData<any[]>(["sales"], rows => (rows??[]).map((x:any)=>x.id===id?updated:x));
         queryClient.setQueryData<any>(["sale",id],updated);
       }
