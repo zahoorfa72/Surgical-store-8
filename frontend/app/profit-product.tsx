@@ -11,7 +11,7 @@ import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
 
-type ProfitRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; profit_value: number; net_profit_adjustment?: number; remaining_balance_adjustment?: number; created_at: string; adjustment_type?: string; user_name?: string };
+type ProfitRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; profit_value: number; net_profit_adjustment?: number; remaining_balance_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.profit-products.v1";
 const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
@@ -89,9 +89,9 @@ export default function ProfitProductScreen() {
     const netProfitAdjustment = accountingTarget === "split_50_50" ? halfCents / 100 : accountingTarget === "net_profit" || accountingTarget === "both" ? amountCents / 100 : 0;
     const remainingBalanceAdjustment = accountingTarget === "split_50_50" ? (amountCents - halfCents) / 100 : accountingTarget === "remaining_balance" || accountingTarget === "both" ? amountCents / 100 : 0;
     const clientId = editingId ? (history.find(row => row.id === editingId)?.client_id || "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)) : "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
-    const localRow: ProfitRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: qty, reason: reason.trim(), date, profit_value: profitValue, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, created_at: new Date().toISOString(), adjustment_type: "profit_product" };
+    const localRow: ProfitRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: qty, reason: reason.trim(), date, profit_value: profitValue, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, accounting_target: accountingTarget, created_at: new Date().toISOString(), adjustment_type: "profit_product" };
     try {
-      const response = await apiRequest<any>(editingId ? `/inventory-adjustments/${editingId}` : "/inventory-adjustments", { method: editingId ? "PUT" : "POST", body: { product_id: selected.id, delta: qty, reason: reason.trim(), adjustment_type: "profit_product", date, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, client_id: editingId ? undefined : clientId } });
+      const response = await apiRequest<any>(editingId ? `/inventory-adjustments/${editingId}` : "/inventory-adjustments", { method: editingId ? "PUT" : "POST", body: { product_id: selected.id, delta: qty, reason: reason.trim(), adjustment_type: "profit_product", date, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, accounting_target: accountingTarget, client_id: editingId ? undefined : clientId } });
       const row: ProfitRow = response?.adjustment ? { ...response.adjustment, client_id: response.adjustment.client_id || clientId, product_name: selected.name } : response?.pending ? { ...localRow, id: response.id || localRow.id } : localRow;
       const next = [row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])];
       const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
