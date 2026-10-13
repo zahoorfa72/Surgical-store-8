@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+import { getAppNotifications } from "@/src/notification-center";
+import { notifyLowStock } from "@/src/low-stock-notifications";
 
 import { useAuth } from "@/src/auth";
 import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget } from "@/src/data";
@@ -172,6 +174,13 @@ export default function Dashboard() {
   const { data: returns = [], refetch: refetchReturns } = useReturns();
   const { data: products = [], refetch: refetchProducts } = useProducts();
   const { data: budget } = useBudget();
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void getAppNotifications().then(rows => { if (active) setUnreadNotifications(rows.filter(row => !row.read).length); });
+    return () => { active = false; };
+  }, []));
+  useEffect(() => { if (products.length) void notifyLowStock(products).catch(() => {}); }, [products]);
   useEffect(() => { void getFinanceDetailDrilldown().then(setFinanceDetailDrilldown); }, []);
 
   const selectedBalanceFrom = balanceFromDate || "";
@@ -310,7 +319,7 @@ export default function Dashboard() {
         title={`Hi, ${user?.name?.split(" ")[0] ?? "there"}`}
         subtitle="Business overview"
         topInset={insets.top}
-        right={<View style={{flexDirection:"row",alignItems:"center",gap:8}}><IconButton name="bell-outline" testID="notifications-button" onPress={() => router.push("/notifications")} /><IconButton name="cog" testID="settings-button" onPress={() => router.push("/settings")} /></View>}
+        right={<View style={{flexDirection:"row",alignItems:"center",gap:8}}><View style={{position:"relative"}}><IconButton name="bell-outline" testID="notifications-button" onPress={() => router.push("/notifications")} />{unreadNotifications > 0 && <View style={{position:"absolute",right:2,top:0,minWidth:17,height:17,paddingHorizontal:4,borderRadius:9,backgroundColor:colors.error,alignItems:"center",justifyContent:"center"}}><Text style={{color:colors.onBrandPrimary,fontSize:10,fontWeight:"800"}}>{unreadNotifications > 99 ? "99+" : unreadNotifications}</Text></View>}</View><IconButton name="cog" testID="settings-button" onPress={() => router.push("/settings")} /></View>}
       />
       <ChipRow options={RANGES as any} value={range} onChange={(value) => { setRange(value); if (value === "day") setDate(isoToDisplay(new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0") + "-" + String(new Date().getDate()).padStart(2, "0"))); }} testIDPrefix="range" />
       {range === "day" && (
