@@ -61,8 +61,24 @@ export default function BusinessIntelligence() {
   const [partyType, setPartyType] = useState<"supplier" | "customer">("supplier");
   const [selectedPartyId, setSelectedPartyId] = useState<string | null>(null);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
+  const [period, setPeriod] = useState<"week" | "month" | "year" | "custom">("month");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const validFrom = /^\d{4}-\d{2}-\d{2}$/.test(fromDate.trim()) ? fromDate.trim() : "";
+  const validTo = /^\d{4}-\d{2}-\d{2}$/.test(toDate.trim()) ? toDate.trim() : "";
+  const customDatesValid = !!validFrom && !!validTo && validFrom <= validTo;
+  const reportRange = period === "custom" ? (customDatesValid ? `date-range:${validFrom}:${validTo}` : "date-range:9999-12-31:9999-12-31") : period;
+  const periodStart = useMemo(() => {
+    if (period === "custom") return customDatesValid ? new Date(validFrom + "T00:00:00") : new Date("9999-12-31T00:00:00");
+    const now = new Date();
+    if (period === "week") { const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; }
+    if (period === "year") return new Date(now.getFullYear(), 0, 1);
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }, [period, validFrom, customDatesValid]);
+  const periodEnd = useMemo(() => period === "custom" ? (customDatesValid ? new Date(new Date(validTo + "T00:00:00").getTime() + 86400000) : new Date("9999-12-31T00:00:00")) : new Date(), [period, validTo, customDatesValid]);
+  const inPeriod = (iso?: string) => { if (!iso || (period === "custom" && !customDatesValid)) return false; const d = new Date(iso); return d >= periodStart && d < periodEnd; };
 
-  const { data: report } = useReport("month");
+  const { data: report } = useReport(reportRange);
   const { data: products = [] } = useProducts();
   const { data: sales = [] } = useSales();
   const { data: purchases = [] } = usePurchases();
@@ -93,16 +109,13 @@ export default function BusinessIntelligence() {
   };
 
   const reorderRows = useMemo(() => {
-    const now = Date.now();
-    const monthStart = new Date();
-    monthStart.setDate(1);
     const usage = new Map<string, number>();
     for (const sale of sales) {
-      if (new Date(sale.created_at).getTime() < monthStart.getTime()) continue;
+      if (!inPeriod(sale.created_at)) continue;
       for (const item of sale.items ?? []) usage.set(item.product_id, (usage.get(item.product_id) ?? 0) + Number(item.quantity ?? 0));
     }
     for (const ret of returns) {
-      if (new Date(ret.created_at).getTime() < monthStart.getTime()) continue;
+      if (!inPeriod(ret.created_at)) continue;
       for (const item of ret.items ?? []) usage.set(item.product_id, Math.max(0, (usage.get(item.product_id) ?? 0) - Number(item.quantity ?? 0)));
     }
     const days = Math.max(1, new Date().getDate());
@@ -117,11 +130,11 @@ export default function BusinessIntelligence() {
       })
       .filter((r) => r.suggested > 0 || Number(r.p.quantity ?? 0) <= Number(r.p.low_stock_threshold ?? 0))
       .sort((a, b) => (a.daysLeft - b.daysLeft));
-  }, [products, sales, returns]);
+  }, [products, sales, returns, periodStart, periodEnd, period, customDatesValid]);
 
   const topSellers = useMemo(() => {
     const map = new Map<string, { name: string; qty: number; revenue: number }>();
-    for (const sale of sales) {
+    for (const sale of sales.filter((s) => inPeriod(s.created_at))) {
       for (const item of sale.items ?? []) {
         const row = map.get(item.product_id) ?? { name: item.name, qty: 0, revenue: 0 };
         row.qty += Number(item.quantity ?? 0);
@@ -129,14 +142,14 @@ export default function BusinessIntelligence() {
         map.set(item.product_id, row);
       }
     }
-    for (const ret of returns) {
+    for (const ret of returns.filter((r) => inPeriod(r.created_at))) {
       for (const item of ret.items ?? []) {
         const row = map.get(item.product_id);
         if (row) row.qty = Math.max(0, row.qty - Number(item.quantity ?? 0));
       }
     }
     return Array.from(map.values()).sort((a, b) => b.qty - a.qty).slice(0, 8);
-  }, [sales, returns]);
+  }, [sales, returns, periodStart, periodEnd, period, customDatesValid]);
 
   const stockMovements = useMemo(() => {
     if (!selectedProduct) return [];
@@ -241,10 +254,26 @@ export default function BusinessIntelligence() {
         {tab === "overview" && (
           <>
             <Card>
+              <Text style={styles.cardTitle}>Report period</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {([{key:"week",label:"Weekly"},{key:"month",label:"Monthly"},{key:"year",label:"Yearly"},{key:"custom",label:"From–To"}] as const).map((item) => (
+                  <Pressable key={item.key} onPress={() => setPeriod(item.key)} style={{ paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: period === item.key ? colors.brandPrimary : colors.surfaceTertiary }}>
+                    <Text style={{ color: period === item.key ? colors.onBrandPrimary : colors.onSurface, fontWeight: "700", fontSize: 12 }}>{item.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {period === "custom" && <>
+                <TextInput value={fromDate} onChangeText={setFromDate} placeholder="From date (YYYY-MM-DD)" placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
+                <TextInput value={toDate} onChangeText={setToDate} placeholder="To date (YYYY-MM-DD)" placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
+                {validFrom && validTo && validFrom > validTo && <Text style={styles.rowSub}>The start date must be on or before the end date.</Text>}
+              </>}
+              <Text style={styles.cardHint}>{period === "custom" ? (customDatesValid ? validFrom + " to " + validTo : "Enter valid dates as YYYY-MM-DD") : period === "week" ? "Current week" : period === "year" ? "Current year" : "Current month"}</Text>
+            </Card>
+            <Card>
               <Text style={styles.cardTitle}>Smart dashboard</Text>
               <Text style={styles.cardHint}>Operational intelligence only — existing finance calculations are read as-is.</Text>
               <View style={styles.stats}>
-                <Stat label="Monthly sales" value={money(Number(report?.revenue ?? 0))} icon="cash" />
+                <Stat label="Sales (selected period)" value={money(Number(report?.revenue ?? 0))} icon="cash" />
                 <Stat label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(report) : Number(report?.gross_profit ?? 0))} icon="chart-line" />
                 <Stat label="Products" value={String(products.length)} icon="package-variant" />
                 <Stat label="Low stock" value={String(reorderRows.length)} icon="alert-circle" />
