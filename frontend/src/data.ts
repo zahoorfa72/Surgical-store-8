@@ -155,7 +155,7 @@ function localReport(range: string): ReportSummary {
     range, revenue, gross_revenue: grossRevenue, returns_total: returnsTotal, returns_count: returns.length,
     cogs_goods: cogsGoods, cogs_expenses: cogsExpenses, cogs_total: cogsGoods + cogsExpenses,
     personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating, lost_products_cost: lostProductsCost,
-    total_expenses: cogsExpenses + operating + personal,
+    total_expenses: cogsExpenses + operating + personal + lostProductsCost,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
     // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
     // Preserve the other agreed balance components and budget attribution.
