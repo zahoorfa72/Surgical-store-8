@@ -32,15 +32,15 @@ export default function ProductKitsScreen() {
   const reset = () => { setName(""); setEditingId(""); setSelected({}); setSearch(""); };
   const save = async () => {
     const components = Object.entries(selected).map(([product_id, value]) => ({ product_id, quantity: Number(value) })).filter((x) => Number.isFinite(x.quantity) && x.quantity > 0);
-    if (!name.trim()) { toast.show("Enter a kit name"); return; }
-    if (!components.length) { toast.show("Select at least one stock product and quantity"); return; }
+    if (!name.trim()) { toast("Enter a kit name"); return; }
+    if (!components.length) { toast("Select at least one stock product and quantity"); return; }
     setSaving(true);
     try {
       const nextKit: ProductKit = { id: editingId || "kit-"+Date.now(), name: name.trim(), components, updated_at: new Date().toISOString() };
       const next = editingId ? kits.map((k) => k.id === editingId ? nextKit : k) : [nextKit, ...kits];
       await storage.setItem(PRODUCT_KITS_KEY, next as any);
-      setKits(next); reset(); toast.show("Kit saved. Stock is not deducted until a sale is completed.");
-    } catch { toast.show("Could not save kit"); }
+      setKits(next); reset(); toast("Kit saved. Stock is not deducted until a sale is completed.");
+    } catch { toast("Could not save kit"); }
     finally { setSaving(false); }
   };
   const edit = (kit: ProductKit) => {
@@ -52,7 +52,7 @@ export default function ProductKitsScreen() {
     const next = kits.filter((k) => k.id !== id);
     await storage.setItem(PRODUCT_KITS_KEY, next as any); setKits(next);
     if (editingId === id) reset();
-    toast.show("Kit deleted");
+    toast("Kit deleted");
   };
 
   return <View style={{ flex: 1, backgroundColor: colors.background }}>
