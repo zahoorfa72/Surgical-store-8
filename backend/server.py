@@ -2007,10 +2007,15 @@ async def delete_purchase(purchase_id: str, _: AdminOnly):
         raise HTTPException(status_code=404, detail="Purchase not found")
     returned = await _purchase_returned_map(purchase_id)  # product_id -> qty returned to supplier
     # Validate stock and this purchase's own remaining lot before changing anything.
-    required_by_product: dict[str, float] = {}
+    original_by_product: dict[str, float] = {}
     for it in purchase.get("items", []):
-        net_in = max(0.0, float(it.get("quantity", 0) or 0) - float(returned.get(it["product_id"], 0) or 0))
-        required_by_product[it["product_id"]] = required_by_product.get(it["product_id"], 0.0) + net_in
+        original_by_product[it["product_id"]] = original_by_product.get(it["product_id"], 0.0) + float(it.get("quantity", 0) or 0)
+    # Returns are totals per product, so subtract them only after aggregating
+    # duplicate purchase lines for that product.
+    required_by_product = {
+        product_id: max(0.0, original_qty - float(returned.get(product_id, 0) or 0))
+        for product_id, original_qty in original_by_product.items()
+    }
     for product_id, required in required_by_product.items():
         if required <= 0:
             continue
