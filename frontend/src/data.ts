@@ -132,8 +132,17 @@ function localReport(range: string): ReportSummary {
   const cogsExpenses = expenses.filter(e => e.bucket === "cogs").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const personal = expenses.filter(e => e.bucket === "personal").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
-  const lostProductsCost = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })).filter((row) => row.adjustment_type === "lost_product")).reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
-  const profitProductsValue = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })).filter((row) => row.adjustment_type === "profit_product")).reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
+  const periodAdjustments = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })));
+  const lostProductsCost = periodAdjustments.filter((row) => row.adjustment_type === "lost_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
+  const profitProductsValue = periodAdjustments.filter((row) => row.adjustment_type === "profit_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
+  // These stock values are informational only. Accounting changes are applied
+  // exclusively from the amounts explicitly chosen by the admin.
+  const selectedAdjustments = periodAdjustments.filter((row) => {
+    const target = String(row.accounting_target ?? "none");
+    return target !== "none" && ["split_50_50", "net_profit", "remaining_balance", "both"].includes(target);
+  });
+  const netProfitAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
+  const remainingBalanceAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
   const revenue = salesRevenue - returnsTotal;
   // Cash movement is the actual amount field only. Adjustment is a
   // non-cash settlement/discount and must not be counted as money in hand.
@@ -156,16 +165,16 @@ function localReport(range: string): ReportSummary {
     range, revenue, gross_revenue: grossRevenue, returns_total: returnsTotal, returns_count: returns.length,
     cogs_goods: cogsGoods, cogs_expenses: cogsExpenses, cogs_total: cogsGoods + cogsExpenses,
     personal_expenses: personal, gross_profit: grossProfit, operating_expenses: operating, lost_products_cost: lostProductsCost, profit_products_value: profitProductsValue,
-    total_expenses: cogsExpenses + operating + personal + lostProductsCost,
+    total_expenses: cogsExpenses + operating + personal,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
     // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
     // Preserve the other agreed balance components and budget attribution.
     remaining_balance:
       revenue - grossProfit - supplierPayments - cogsExpenses + supplierRefunds
-      + openingBudgetForRange + Number(budget.monthly_amount ?? 0),
+      + openingBudgetForRange + Number(budget.monthly_amount ?? 0) + remainingBalanceAdjustment,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
-    net_profit: grossProfit - personal - operating - lostProductsCost + profitProductsValue,
+    net_profit: grossProfit - personal - operating + netProfitAdjustment,
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
     product_count: products.length,
     low_stock: products.filter(p => Number(p.quantity ?? 0) <= Number(p.low_stock_threshold ?? 0)),
