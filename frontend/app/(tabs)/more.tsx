@@ -18,6 +18,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
       { label: "Sales & Receipts", sub: "History and reprint", icon: "receipt", route: "/sales-history", testID: "more-sales" },
       { label: "Returns & refunds", sub: "Return items, adjust stock", icon: "cash-refund", route: "/returns", testID: "more-returns" },
       { label: "Lost Product", sub: "Record lost stock at purchase cost", icon: "package-variant-closed-remove", route: "/lost-product", testID: "more-lost-product" },
+      { label: "Profit Product", sub: "Add stock and record its value", icon: "package-variant-closed-check", route: "/profit-product", testID: "more-profit-product" },
       { label: "Product Kits", sub: "Bundle stock products for one-tap sale", icon: "package-variant-closed", route: "/product-kits", testID: "more-product-kits" },
     ],
   },
