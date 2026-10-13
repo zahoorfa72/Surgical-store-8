@@ -1216,6 +1216,42 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
             "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
+async def _reverse_inventory_adjustment_row(row: dict) -> None:
+    pid = str(row.get("product_id") or "")
+    if not ObjectId.is_valid(pid):
+        raise HTTPException(status_code=400, detail="Invalid product on adjustment")
+    product = await db.products.find_one({"_id": ObjectId(pid), "deleted": {"$ne": True}})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product for this adjustment was not found")
+    delta = float(row.get("delta", 0) or 0)
+    qty = abs(delta)
+    current = float(product.get("quantity", 0) or 0)
+    layers = await _ensure_cost_layers(product)
+    if delta < 0:
+        unit_cost = float(row.get("loss_cost", 0) or 0) / qty if qty > 1e-9 else float(product.get("purchase_price", 0) or 0)
+        layers = _append_cost_layer(layers, qty, unit_cost, None)
+        next_qty = current + qty
+    else:
+        if qty > current + 1e-9:
+            raise HTTPException(status_code=400, detail=f"Cannot reverse: only {current:g} units remain in stock")
+        unit_cost = float(row.get("loss_cost", 0) or 0) / qty if qty > 1e-9 else float(product.get("purchase_price", 0) or 0)
+        layers, _ = await _consume_cost_layers_matching(layers, qty, unit_cost)
+        next_qty = current - qty
+    await db.products.update_one({"_id": ObjectId(pid)}, {"$set": {"quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": now_iso()}})
+
+
+@api.delete("/inventory-adjustments/{adjustment_id}")
+async def reverse_inventory_adjustment(adjustment_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(adjustment_id):
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    row = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id), "deleted": {"$ne": True}})
+    if not row:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    await _reverse_inventory_adjustment_row(row)
+    await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": {"deleted": True, "reversed_at": now_iso(), "reversed_by": _.get("name", "")}})
+    return {"ok": True, "reversed": True}
+
+
 @api.post("/stock-transfers")
 async def create_stock_transfer(body: StockTransferIn, user: Staff):
     if not ObjectId.is_valid(body.from_product_id) or not ObjectId.is_valid(body.to_product_id):
