@@ -49,7 +49,7 @@ export default function LostProductScreen() {
   useEffect(() => {
     let active = true;
     (async () => {
-      const local = await storage.getItem<LossRow[]>(HISTORY_KEY, []);
+      const local = await storage.getItem<any>(HISTORY_KEY, []);
       let remote: LossRow[] = [];
       try { remote = await apiRequest<LossRow[]>("/inventory-adjustments?limit=500"); } catch {}
       if (!active) return;
@@ -78,7 +78,7 @@ export default function LostProductScreen() {
     try {
       const response = await apiRequest<any>("/inventory-adjustments", { method: "POST", body: { product_id: selected.id, delta: -qty, reason: reason.trim(), adjustment_type: "lost_product", date, loss_cost: lossCost, client_id: clientId } });
       const row: LossRow = response?.adjustment ? { ...response.adjustment, client_id: response.adjustment.client_id || clientId, product_name: selected.name } : localRow;
-      const next = [row, ...(await storage.getItem<LossRow[]>(HISTORY_KEY, []) ?? [])];
+      const next = [row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])];
       const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
       await storage.setItem(HISTORY_KEY, dedup as any);
       setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
