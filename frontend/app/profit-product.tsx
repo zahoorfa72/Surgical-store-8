@@ -45,7 +45,7 @@ export default function ProfitProductScreen() {
   const [reason, setReason] = useState("");
   const [accountingTarget, setAccountingTarget] = useState<"none" | "net_profit" | "remaining_balance" | "both">("none");
   const [accountingAmountText, setAccountingAmountText] = useState("0");
-  const [history, setHistory = useState<ProfitRow[]>([]);
+  const [history, setHistory] = useState<ProfitRow[]>([]);
   const [saving, setSaving] = useState(false);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
