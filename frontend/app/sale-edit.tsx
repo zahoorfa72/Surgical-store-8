@@ -267,7 +267,7 @@ export default function SaleEdit() {
             <Pressable
               testID="edit-customer-walkin"
               style={styles.custOption}
-              onPress={() => { setCustomerId(null); setCustPickerOpen(false); }}
+              onPress={() => { setCustomerId(null); setCredit(false); setCustPickerOpen(false); }}
             >
               <Text style={styles.custOptionText}>Walk-in customer</Text>
               {!customerId && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
