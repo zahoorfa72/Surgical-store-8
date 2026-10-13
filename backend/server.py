@@ -1252,6 +1252,44 @@ async def reverse_inventory_adjustment(adjustment_id: str, _: AdminOnly):
     return {"ok": True, "reversed": True}
 
 
+@api.put("/inventory-adjustments/{adjustment_id}")
+async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmentIn, _: AdminOnly):
+    if not ObjectId.is_valid(adjustment_id):
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    old = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id), "deleted": {"$ne": True}})
+    if not old:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    if not ObjectId.is_valid(body.product_id) or abs(float(body.delta)) < 1e-9:
+        raise HTTPException(status_code=400, detail="Select a product and non-zero quantity")
+    if body.adjustment_type == "lost_product" and body.delta >= 0:
+        raise HTTPException(status_code=400, detail="Lost product quantity must reduce stock")
+    if body.adjustment_type == "profit_product" and body.delta <= 0:
+        raise HTTPException(status_code=400, detail="Profit product quantity must increase stock")
+    target = await db.products.find_one({"_id": ObjectId(body.product_id), "deleted": {"$ne": True}})
+    if not target:
+        raise HTTPException(status_code=404, detail="Product not found")
+    await _reverse_inventory_adjustment_row(old)
+    target = await db.products.find_one({"_id": ObjectId(body.product_id), "deleted": {"$ne": True}})
+    current = float(target.get("quantity", 0) or 0)
+    delta = float(body.delta)
+    layers = await _ensure_cost_layers(target)
+    if delta < 0:
+        if -delta > current + 1e-9:
+            raise HTTPException(status_code=400, detail=f"Only {current:g} units available after reversing the old entry")
+        layers, cost = _consume_cost_layers(layers, -delta, float(target.get("purchase_price", 0) or 0))
+    else:
+        cost = max(0.0, float(body.loss_cost or 0))
+        unit_cost = cost / delta if cost > 0 else max(0.0, float(target.get("purchase_price", 0) or 0))
+        layers = _append_cost_layer(layers, delta, unit_cost, None)
+        cost = round(delta * unit_cost, 2)
+    next_qty = current + delta
+    await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {"quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": now_iso()}})
+    update = {"product_id": body.product_id, "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost if delta < 0 else max(0.0, float(body.loss_cost or cost)), 2), "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "edited_at": now_iso(), "edited_by": _.get("name", "")}
+    await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
+    fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
+    return {"ok": True, "adjustment": {"id": oid(fresh["_id"]), "product_id": fresh["product_id"], "delta": fresh["delta"], "reason": fresh["reason"], "adjustment_type": fresh["adjustment_type"], "date": fresh["date"], "loss_cost": fresh["loss_cost"], "net_profit_adjustment": fresh.get("net_profit_adjustment", 0), "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0), "client_id": fresh.get("client_id"), "user_name": fresh.get("user_name", ""), "created_at": fresh.get("created_at", "")}}
+
+
 @api.post("/stock-transfers")
 async def create_stock_transfer(body: StockTransferIn, user: Staff):
     if not ObjectId.is_valid(body.from_product_id) or not ObjectId.is_valid(body.to_product_id):
