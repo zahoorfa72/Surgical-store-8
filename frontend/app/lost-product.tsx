@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useProducts } from "@/src/data";
 import { apiRequest } from "@/src/api";
 import { Product } from "@/src/models";
@@ -31,6 +32,7 @@ export default function LostProductScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { colors } = useTheme();
   const { data: products = [] } = useProducts();
   const [productId, setProductId] = useState("");
@@ -54,6 +56,7 @@ export default function LostProductScreen() {
       try { remote = await apiRequest<LossRow[]>("/inventory-adjustments?limit=500"); } catch {}
       if (!active) return;
       const productName = (id: string) => products.find((p) => p.id === id)?.name ?? "Product";
+      queryClient.setQueryData(["inventory-adjustments"], [...(remote ?? []), ...(local ?? [])]);
       const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "lost_product").map((r) => ({ ...r, product_name: productName(r.product_id) })), ...(local ?? [])];
       const unique = new Map<string, LossRow>();
       for (const row of rows) {
@@ -81,6 +84,7 @@ export default function LostProductScreen() {
       const next = [row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])];
       const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
       await storage.setItem(HISTORY_KEY, dedup as any);
+      queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => [row, ...old.filter((x) => (x.client_id || x.id) !== (row.client_id || row.id))]);
       setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
       toast("Lost product recorded. Stock and FIFO cost lots updated.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId("");
