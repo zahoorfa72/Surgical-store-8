@@ -608,7 +608,7 @@ export default function Sell() {
                   {admin && (
                     <Pressable testID="include-previous-balance-toggle" onPress={() => setIncludePreviousBalance((value) => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
                       <MaterialDesignIcons name={includePreviousBalance ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={includePreviousBalance ? colors.brandPrimary : colors.muted} />
-                      <Text style={styles.creditHint}>Include old balance in displayed due total</Text>
+                      <Text style={styles.creditHint}>Show old balance in combined due (display only — not added twice)</Text>
                     </Pressable>
                   )}
                 </View>
