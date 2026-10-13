@@ -2581,6 +2581,7 @@ async def report_inventory_usage(
     sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
+    all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": "lost_product", "deleted": {"$ne": True}}).to_list(20000)
 
     usage: dict[str, dict[str, Any]] = {}
     for product in products:
@@ -2750,6 +2751,22 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         else:
             opening_period_start = local_today.replace(month=1, day=1)
             opening_period_end = opening_period_start.replace(year=opening_period_start.year + 1)
+    lost_products_cost = 0.0
+    for loss_row in all_lost_adjustments:
+        loss_date = str(loss_row.get("date") or loss_row.get("created_at", "")[:10])[:10]
+        if len(loss_date) != 10:
+            continue
+        try:
+            entry_date = datetime.strptime(loss_date, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if opening_period_start is not None and entry_date < opening_period_start:
+            continue
+        if opening_period_end is not None and entry_date >= opening_period_end:
+            continue
+        lost_products_cost += max(0.0, float(loss_row.get("loss_cost", 0) or 0))
+    lost_products_cost = round(lost_products_cost, 2)
+
     opening_total = 0.0
     for opening_row in opening_rows:
         try:
@@ -2785,7 +2802,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
-    net_profit = round(gross_profit - personal_expenses - operating_expenses, 2)
+    net_profit = round(gross_profit - personal_expenses - operating_expenses - lost_products_cost, 2)
     opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
@@ -2808,6 +2825,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         "personal_expenses": personal_expenses,
         "gross_profit": gross_profit,
         "operating_expenses": operating_expenses,
+        "lost_products_cost": lost_products_cost,
         "total_expenses": total_expenses,
         "supplier_payments": supplier_payments,
         "customer_receipts": customer_receipts,
