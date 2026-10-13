@@ -85,6 +85,7 @@ export default function LostProductScreen() {
       const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
       await storage.setItem(HISTORY_KEY, dedup as any);
       queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => [row, ...old.filter((x) => (x.client_id || x.id) !== (row.client_id || row.id))]);
+      void queryClient.invalidateQueries({ queryKey: ["report"] });
       setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
       toast("Lost product recorded. Stock and FIFO cost lots updated.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId("");
