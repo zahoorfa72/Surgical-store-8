@@ -127,6 +127,7 @@ export type ReportSummary = {
   gross_profit: number;
   operating_expenses: number;
   lost_products_cost?: number;
+  profit_products_value?: number;
   total_expenses: number;
   supplier_payments: number;
   customer_receipts: number;
