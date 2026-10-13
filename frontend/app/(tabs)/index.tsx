@@ -411,20 +411,21 @@ export default function Dashboard() {
                 )}
                 {financeDetailsOpen === "net" && (
                   <Card>
-                    <Text style={styles.detailHeader}>Net profit = Gross profit − Personal expenses</Text>
+                    <Text style={styles.detailHeader}>Net profit = Gross profit − Personal expenses − Operating expenses</Text>
                     <PLRow label="Gross profit" value={money(displayFinanceAmount(data.gross_profit, fakeFinanceDisplay))} />
                     <PLRow label="Personal expenses" value={"- " + money(displayFinanceAmount(data.personal_expenses, fakeFinanceDisplay))} muted />
+                    <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
                     <View style={styles.plDivider} />
-                    <PLRow label="Net profit" value={money(displayFinanceAmount(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0), fakeFinanceDisplay))} bold tone={(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0)) >= 0 ? "success" : "error"} />
+                    <PLRow label="Net profit" value={money(displayFinanceAmount(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0), fakeFinanceDisplay))} bold tone={(Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0)) >= 0 ? "success" : "error"} />
                     {sales.filter((s:any) => inSelectedReport(s.created_at)).map((s:any) => (
                       <View key={s.id} style={styles.detailLine}>
                         <Text style={styles.detailLabel}>{s.invoice_no} · Gross profit</Text>
                         <Text style={styles.detailValue}>{money(displayFinanceAmount(s.profit, fakeFinanceDisplay))}</Text>
                       </View>
                     ))}
-                    {expenses.filter((e:any) => e.bucket === "personal" && inSelectedReport(e.created_at)).map((e:any) => (
+                    {expenses.filter((e:any) => (e.bucket === "personal" || e.bucket === "operating") && inSelectedReport(e.created_at)).map((e:any) => (
                       <View key={e.id} style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>{e.title} · Personal expense</Text>
+                        <Text style={styles.detailLabel}>{e.title} · {e.bucket === "operating" ? "Operating expense" : "Personal expense"}</Text>
                         <Text style={styles.detailOut}>-{money(displayFinanceAmount(e.amount, fakeFinanceDisplay))}</Text>
                       </View>
                     ))}
@@ -661,6 +662,7 @@ export default function Dashboard() {
             <View style={styles.plDivider} />
             <PLRow label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
             <PLRow label="Personal expenses" value={"- " + money(data.personal_expenses)} muted />
+            <PLRow label="Operating expenses" value={"- " + money(data.operating_expenses)} muted />
             <View style={styles.plDivider} />
             <PLRow label="Net profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>
