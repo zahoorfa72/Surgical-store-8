@@ -200,8 +200,8 @@ class PartyType(str, Enum):
 
 
 class ExpenseBucket(str, Enum):
-    cogs = "cogs"            # cash expense -> Remaining Balance only
-    operating = "operating"  # cash expense -> Remaining Balance only
+    cogs = "cogs"            # direct cost expense -> Remaining Balance only
+    operating = "operating"  # operating expense -> Net Profit only
     personal = "personal"    # personal expense -> Net Profit only
 
 
