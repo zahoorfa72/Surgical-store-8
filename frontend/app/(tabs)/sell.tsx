@@ -19,7 +19,7 @@ import { storage } from "@/src/utils/storage";
 import { apiRequest } from "@/src/api";
 
 import { useParties, useProducts, qk } from "@/src/data";
-import { useAuth } from "@/src/auth";
+import { isAdmin, useAuth } from "@/src/auth";
 import { useOffline } from "@/src/offline";
 import { Product } from "@/src/models";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
@@ -39,6 +39,7 @@ export default function Sell() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { user } = useAuth();
+  const admin = isAdmin(user?.role);
   const { createSale } = useOffline();
 
   const { data: products, isLoading } = useProducts();
@@ -55,6 +56,7 @@ export default function Sell() {
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [discount, setDiscount] = useState("0");
   const [credit, setCredit] = useState(false);
+  const [includePreviousBalance, setIncludePreviousBalance] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
@@ -138,8 +140,10 @@ export default function Sell() {
   const resumeHeldSale = (held: HeldSale) => { if (cart.length) { Alert.alert("Current sale", "Hold or complete the current sale before opening another held sale."); return; } const restored = held.cart.map((line) => { const p = (products ?? []).find((x) => x.id === line.id); return { ...line, stock: p?.quantity ?? line.stock, threshold: p?.low_stock_threshold ?? line.threshold }; }).filter((line) => line.stock > 0); if (!restored.length) { toast("Products in this held sale are no longer available", "error"); return; } setCart(restored); setCustomerId(held.customerId); setDiscount(held.discount); setCredit(held.credit); void persistHeldSales(heldSales.filter((x) => x.id !== held.id)); setHeldSearch(""); setHeldOpen(false); setReviewOpen(true); };
   const deleteHeldSale = (held: HeldSale) => Alert.alert("Delete held sale?", "This removes only the held draft.", [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => void persistHeldSales(heldSales.filter((x) => x.id !== held.id)) }]);
 
-  const customerName =
-    customers?.find((c) => c.id === customerId)?.name ?? "Walk-in customer";
+  const selectedCustomer = customers?.find((c) => c.id === customerId);
+  const customerName = selectedCustomer?.name ?? "Walk-in customer";
+  const previousBalance = Math.max(0, Number(selectedCustomer?.balance ?? 0));
+  const displayedDue = total + (admin && includePreviousBalance ? previousBalance : 0);
 
   const createCustomer = async () => {
     const name = newCustomerName.trim();
@@ -596,6 +600,21 @@ export default function Sell() {
               </>
             )}
 
+            {customerId && previousBalance > 0 && (
+              <View testID="customer-credit-notice" style={styles.creditRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.discountLabel}>Previous outstanding balance</Text>
+                  <Text style={styles.creditHint}>{money(previousBalance)} · counted once from earlier credit sales</Text>
+                  {admin && (
+                    <Pressable testID="include-previous-balance-toggle" onPress={() => setIncludePreviousBalance((value) => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+                      <MaterialDesignIcons name={includePreviousBalance ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={includePreviousBalance ? colors.brandPrimary : colors.muted} />
+                      <Text style={styles.creditHint}>Include old balance in displayed due total</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            )}
+
             <Pressable
               testID="credit-toggle"
               style={styles.creditRow}
@@ -622,7 +641,14 @@ export default function Sell() {
               <Row label="Subtotal" value={money(subtotal)} />
               {showSellProfitDiscount && <Row label="Discount" value={"- " + money(discountNum)} />}
               <View style={styles.totalDivider} />
-              <Row label={credit ? "Total (on credit)" : "Total payable"} value={money(total)} bold />
+              <Row label={credit ? "New sale (on credit)" : "New sale total"} value={money(total)} bold />
+              {admin && includePreviousBalance && previousBalance > 0 && (
+                <>
+                  <Row label="Previous balance (display only)" value={money(previousBalance)} />
+                  <View style={styles.totalDivider} />
+                  <Row label="Displayed total due" value={money(displayedDue)} bold />
+                </>
+              )}
             </View>
           </KeyboardAwareScrollView>
 
@@ -773,7 +799,11 @@ export default function Sell() {
                 style={styles.custOption}
                 onPress={() => {
                   setCustomerId(c.id);
+                  setIncludePreviousBalance(false);
                   setCustPickerOpen(false);
+                  if (Number(c.balance ?? 0) > 0) {
+                    Alert.alert("Customer has outstanding credit", c.name + " owes " + money(Number(c.balance)) + ". This is an existing balance, not part of the new sale amount. " + (admin ? "You can choose whether to include it in the displayed amount." : "The existing balance will remain separate from this sale."));
+                  }
                 }}
               >
                 <View>
