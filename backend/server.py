@@ -2766,6 +2766,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             continue
         lost_products_cost += max(0.0, float(loss_row.get("loss_cost", 0) or 0))
     lost_products_cost = round(lost_products_cost, 2)
+    total_expenses = round(total_expenses + lost_products_cost, 2)
 
     opening_total = 0.0
     for opening_row in opening_rows:
