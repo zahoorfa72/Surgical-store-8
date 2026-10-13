@@ -8,6 +8,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 
 import { apiRequest } from "@/src/api";
 import { useParties, useSale, useProducts, qk } from "@/src/data";
+import { isAdmin, useAuth } from "@/src/auth";
 import { Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
@@ -24,11 +25,14 @@ export default function SaleEdit() {
 
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: sale, isLoading } = useSale(id ?? "");
+  const { user } = useAuth();
+  const admin = isAdmin(user?.role);
   const { data: customers } = useParties("customer");
   const { data: products } = useProducts();
 
   const [lines, setLines] = useState<Line[]>([]);
   const [discount, setDiscount] = useState("0");
+  const [credit, setCredit] = useState(false);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [custPickerOpen, setCustPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
@@ -63,6 +67,7 @@ export default function SaleEdit() {
       );
       setDiscount(String(sale.discount ?? 0));
       setCustomerId(sale.customer_id ?? null);
+      setCredit(Boolean(sale.credit && sale.customer_id));
       setPrefilled(true);
     }
   }, [sale, prefilled]);
@@ -84,7 +89,8 @@ export default function SaleEdit() {
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
   const discountNum = Math.max(0, parseFloat(discount) || 0);
   const total = Math.max(0, subtotal - discountNum);
-  const customerName = customers?.find((c) => c.id === customerId)?.name ?? "Walk-in customer";
+  const selectedCustomer = customers?.find((c) => c.id === customerId);
+  const customerName = selectedCustomer?.name ?? (customerId && customerId === sale?.customer_id ? sale?.customer_name : customerId ? "Selected customer" : "Walk-in customer");
 
   const save = async () => {
     if (saleEditLockHours > 0 && sale?.created_at) {
@@ -116,8 +122,8 @@ export default function SaleEdit() {
         body: {
           items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_price: l.unit_price })),
           customer_id: customerId,
-          // Preserve the sale's credit status while changing its customer.
-          credit: Boolean(sale.credit && customerId),
+          // Credit can be explicitly switched on/off while editing.
+          credit: Boolean(credit && customerId),
           discount: discountNum,
         },
       });
@@ -128,6 +134,7 @@ export default function SaleEdit() {
       // them after editing the customer so both the old and new customer update.
       await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      await queryClient.invalidateQueries({ queryKey: qk.customers("all") });
       toast("Sale updated", "success");
       router.back();
     } catch (e: any) {
@@ -147,6 +154,12 @@ export default function SaleEdit() {
           <MaterialDesignIcons name="account" size={20} color={colors.brandPrimary} />
           <Text style={styles.customerText}>{customerName}</Text>
           <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
+        </Pressable>
+
+        <Pressable testID="edit-credit-toggle" style={styles.customerRow} onPress={() => { if (!customerId) { toast("Select a customer before enabling credit", "error"); return; } if (!admin) { toast("Only an admin can change a sale credit status", "error"); return; } setCredit((value) => !value); }}>
+          <MaterialDesignIcons name={credit ? "toggle-switch" : "toggle-switch-off-outline"} size={28} color={credit ? colors.brandPrimary : colors.muted} />
+          <View style={{ flex: 1 }}><Text style={styles.customerText}>Sell on credit</Text><Text style={{ color: colors.muted, fontSize: 12 }}>{credit ? "This sale adds to the customer outstanding balance" : "This sale is not marked as credit"}</Text></View>
+          {!admin && <Text style={{ color: colors.muted, fontSize: 11 }}>Admin only</Text>}
         </Pressable>
 
         {lines.map((l) => (
