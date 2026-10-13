@@ -441,6 +441,55 @@ def _consume_cost_layers(layers: list, quantity: float, fallback_unit_cost: floa
     return next_layers, total_cost
 
 
+
+def _consume_cost_layers_with_breakdown(layers: list, quantity: float, fallback_unit_cost: float = 0.0) -> tuple[list, float, list]:
+    """Consume oldest FIFO lots and retain the exact cost-lot composition for returns."""
+    remaining = float(quantity)
+    total_cost = 0.0
+    next_layers = []
+    used_layers = []
+    for index, layer in enumerate(layers):
+        q = max(0.0, float(layer.get("quantity", 0) or 0))
+        if q <= 0:
+            continue
+        take = min(q, remaining)
+        if take > 1e-9:
+            unit_cost = max(0.0, float(layer.get("unit_cost", 0) or 0))
+            used_layers.append({"quantity": take, "unit_cost": unit_cost, "purchase_id": layer.get("purchase_id")})
+            total_cost += take * unit_cost
+        left = q - take
+        if left > 1e-9:
+            next_layers.append({**layer, "quantity": left})
+        remaining -= take
+        if remaining <= 1e-9:
+            next_layers.extend(layers[index + 1:])
+            break
+    if remaining > 1e-9:
+        repair_cost = max(0.0, float(fallback_unit_cost or 0.0))
+        used_layers.append({"quantity": remaining, "unit_cost": repair_cost, "purchase_id": None})
+        total_cost += remaining * repair_cost
+    return next_layers, total_cost, used_layers
+
+
+def _cost_layer_slice(layers: list, skip_quantity: float, quantity: float) -> list:
+    """Get a sequential slice from a sale's recorded FIFO lot composition."""
+    skip = max(0.0, float(skip_quantity))
+    remaining = max(0.0, float(quantity))
+    result = []
+    for layer in layers:
+        layer_qty = max(0.0, float(layer.get("quantity", 0) or 0))
+        skipped = min(layer_qty, skip)
+        skip -= skipped
+        available = layer_qty - skipped
+        take = min(available, remaining)
+        if take > 1e-9:
+            result.append({"quantity": take, "unit_cost": float(layer.get("unit_cost", 0) or 0), "purchase_id": layer.get("purchase_id")})
+            remaining -= take
+        if remaining <= 1e-9:
+            break
+    return result
+
+
 def _append_cost_layer(layers: list, quantity: float, unit_cost: float, purchase_id: Optional[str] = None) -> list:
     """Add stock to its matching cost lot instead of creating duplicate lots.
 
@@ -1779,9 +1828,9 @@ async def create_sale(body: SaleIn, user: AnyUser):
             layers = await _ensure_cost_layers(p)
         in_stock_qty = min(float(it.quantity), max(0.0, available))
         if in_stock_qty > 0:
-            next_layers, line_cogs = _consume_cost_layers(layers, in_stock_qty, float(p.get("purchase_price", 0) or 0))
+            next_layers, line_cogs, cost_layers_used = _consume_cost_layers_with_breakdown(layers, in_stock_qty, float(p.get("purchase_price", 0) or 0))
         else:
-            next_layers, line_cogs = layers, 0.0
+            next_layers, line_cogs, cost_layers_used = layers, 0.0, []
         working_cost_layers[it.product_id] = next_layers
         unit_cost = round(line_cogs / it.quantity, 8) if it.quantity > 0 else 0.0
         subtotal += line_total
@@ -1793,6 +1842,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
             "unit_price": it.unit_price,
             "purchase_price": unit_cost,
             "line_cogs": round(line_cogs, 2),
+            "cost_layers_used": cost_layers_used,
             "line_total": line_total,
         })
 
@@ -1948,6 +1998,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                 "unit_price": it.unit_price,
                 "purchase_price": round(unit_cost, 8),
                 "line_cogs": line_cogs,
+                "cost_layers_used": next((old.get("cost_layers_used") for old in sale.get("items", []) if old.get("product_id") == it.product_id), []),
                 "line_total": line_total,
             })
         discount = max(0.0, body.discount)
@@ -2444,7 +2495,10 @@ async def create_return(body: ReturnIn, user: Staff):
         if it.quantity > remaining:
             raise HTTPException(status_code=400, detail=f"Only {remaining} of {si['name']} can be returned")
         line_total = round(it.quantity * si["unit_price"], 2)
-        line_cogs = round(it.quantity * si.get("purchase_price", 0), 2)
+        original_layers = si.get("cost_layers_used") or [{"quantity": si["quantity"], "unit_cost": si.get("purchase_price", 0), "purchase_id": None}]
+        return_layers = _cost_layer_slice(original_layers, already.get(it.product_id, 0), it.quantity)
+        line_cogs = round(sum(float(layer.get("quantity", 0) or 0) * float(layer.get("unit_cost", 0) or 0) for layer in return_layers), 2)
+        return_unit_cost = line_cogs / it.quantity if it.quantity > 0 else 0.0
         refund_total += line_total
         refund_cogs += line_cogs
         items.append({
@@ -2452,7 +2506,8 @@ async def create_return(body: ReturnIn, user: Staff):
             "name": si["name"],
             "quantity": it.quantity,
             "unit_price": si["unit_price"],
-            "purchase_price": si.get("purchase_price", 0),
+            "purchase_price": return_unit_cost,
+            "cost_layers_used": return_layers,
             "line_total": line_total,
         })
 
@@ -2482,7 +2537,9 @@ async def create_return(body: ReturnIn, user: Staff):
     for it in items:
         prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
         layers = await _ensure_cost_layers(prod or {})
-        layers = _append_cost_layer(layers, it["quantity"], float(it.get("purchase_price", 0) or 0), None)
+        original_layers = it.get("cost_layers_used") or [{"quantity": it["quantity"], "unit_cost": it.get("purchase_price", 0), "purchase_id": None}]
+        for lot in original_layers:
+            layers = _append_cost_layer(layers, float(lot.get("quantity", 0) or 0), float(lot.get("unit_cost", 0) or 0), lot.get("purchase_id"))
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
             {"$inc": {"quantity": it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
