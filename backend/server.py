@@ -1240,10 +1240,15 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         raise HTTPException(status_code=400, detail="Quantity exceeds available stock")
     layers = await _ensure_cost_layers(product)
     loss_cost = 0.0
+    cost_layers_used = []
     if delta < 0:
-        layers, loss_cost = _consume_cost_layers(layers, -delta, float(product.get("purchase_price", 0) or 0))
+        layers, loss_cost, cost_layers_used = _consume_cost_layers_with_breakdown(
+            layers, -delta, float(product.get("purchase_price", 0) or 0)
+        )
     else:
-        layers = _append_cost_layer(layers, delta, float(product.get("purchase_price", 0) or 0), None)
+        unit_cost = max(0.0, float(body.loss_cost or 0) / delta) if body.loss_cost > 0 else max(0.0, float(product.get("purchase_price", 0) or 0))
+        layers = _append_cost_layer(layers, delta, unit_cost, None)
+        loss_cost = round(delta * unit_cost, 2)
     next_qty = current + delta
     ts = now_iso()
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {
@@ -1252,7 +1257,8 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     row = {
         "product_id": body.product_id, "delta": delta, "reason": body.reason.strip(),
         "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
-        "loss_cost": round(loss_cost if delta < 0 else max(0.0, float(body.loss_cost or 0)), 2),
+        "loss_cost": round(loss_cost, 2),
+        "cost_layers_used": cost_layers_used,
         # Stock changes affect accounting only when explicitly selected by the admin.
         "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2),
         "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2),
@@ -1277,8 +1283,19 @@ async def _reverse_inventory_adjustment_row(row: dict) -> None:
     current = float(product.get("quantity", 0) or 0)
     layers = await _ensure_cost_layers(product)
     if delta < 0:
-        unit_cost = float(row.get("loss_cost", 0) or 0) / qty if qty > 1e-9 else float(product.get("purchase_price", 0) or 0)
-        layers = _append_cost_layer(layers, qty, unit_cost, None)
+        used_layers = row.get("cost_layers_used") or []
+        if used_layers:
+            for used in used_layers:
+                layers = _append_cost_layer(
+                    layers,
+                    float(used.get("quantity", 0) or 0),
+                    float(used.get("unit_cost", 0) or 0),
+                    used.get("purchase_id"),
+                )
+        else:
+            # Backward compatibility for older adjustment records without a lot breakdown.
+            unit_cost = float(row.get("loss_cost", 0) or 0) / qty if qty > 1e-9 else float(product.get("purchase_price", 0) or 0)
+            layers = _append_cost_layer(layers, qty, unit_cost, None)
         next_qty = current + qty
     else:
         if qty > current + 1e-9:
@@ -1322,10 +1339,13 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
     current = float(target.get("quantity", 0) or 0)
     delta = float(body.delta)
     layers = await _ensure_cost_layers(target)
+    cost_layers_used = []
     if delta < 0:
         if -delta > current + 1e-9:
             raise HTTPException(status_code=400, detail=f"Only {current:g} units available after reversing the old entry")
-        layers, cost = _consume_cost_layers(layers, -delta, float(target.get("purchase_price", 0) or 0))
+        layers, cost, cost_layers_used = _consume_cost_layers_with_breakdown(
+            layers, -delta, float(target.get("purchase_price", 0) or 0)
+        )
     else:
         cost = max(0.0, float(body.loss_cost or 0))
         unit_cost = cost / delta if cost > 0 else max(0.0, float(target.get("purchase_price", 0) or 0))
@@ -1333,7 +1353,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         cost = round(delta * unit_cost, 2)
     next_qty = current + delta
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {"quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": now_iso()}})
-    update = {"product_id": body.product_id, "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost if delta < 0 else max(0.0, float(body.loss_cost or cost)), 2), "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "edited_at": now_iso(), "edited_by": _.get("name", "")}
+    update = {"product_id": body.product_id, "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "edited_at": now_iso(), "edited_by": _.get("name", "")}
     await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
     fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
     return {"ok": True, "adjustment": {"id": oid(fresh["_id"]), "product_id": fresh["product_id"], "delta": fresh["delta"], "reason": fresh["reason"], "adjustment_type": fresh["adjustment_type"], "date": fresh["date"], "loss_cost": fresh["loss_cost"], "net_profit_adjustment": fresh.get("net_profit_adjustment", 0), "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0), "client_id": fresh.get("client_id"), "user_name": fresh.get("user_name", ""), "created_at": fresh.get("created_at", "")}}
