@@ -729,19 +729,43 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData(["settings"], { ...old, ...body, pending: true });
     }
   } else if (entity === "inventory-adjustments") {
-    if (method === "POST") {
-      const pid = String(body.product_id ?? "");
-      const delta = Number(body.delta ?? 0);
+    // Apply inventory adjustments optimistically so offline edits/reversals also
+    // update stock and the FIFO layer cache, not just the history list.
+    const records = queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
+    const previous = id ? records.find((row: any) => row.id === id) : undefined;
+    const applyDelta = (pid: string, delta: number, unitCost?: number) => {
       queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((p: any) => {
-        if (p.id !== pid || !Number.isFinite(delta) || delta === 0) return p;
+        if (p.id !== pid || !Number.isFinite(delta) || Math.abs(delta) < 1e-9) return p;
         let layers = ensureCostLayers(p);
-        if (delta > 0) {
-          layers = [...layers, { quantity: delta, unit_cost: Number(p.purchase_price ?? 0), purchase_id: null }];
+        let quantity = Number(p.quantity ?? 0);
+        if (delta < 0) {
+          const take = Math.min(quantity, Math.abs(delta));
+          if (take > 0) layers = consumeCostLayers(layers, take).layers;
+          quantity -= take;
         } else {
-          layers = consumeCostLayers(layers, Math.abs(delta)).layers;
+          layers = appendCostLayer(layers, delta, Math.max(0, Number(unitCost ?? p.purchase_price ?? 0)), null);
+          quantity += delta;
         }
-        return { ...p, quantity: Math.max(0, Number(p.quantity ?? 0) + delta), cost_layers: layers, updated_at: now(), pending: true };
+        return { ...p, quantity: Math.max(0, quantity), cost_layers: layers, updated_at: now(), pending: true };
       }));
+    };
+    if ((method === "PUT" || method === "DELETE") && previous) {
+      const oldDelta = Number(previous.delta ?? 0);
+      const oldCost = Math.max(0, Number(previous.loss_cost ?? 0));
+      applyDelta(String(previous.product_id ?? ""), -oldDelta, Math.abs(oldDelta) > 1e-9 ? oldCost / Math.abs(oldDelta) : undefined);
+    }
+    if (method === "POST" || method === "PUT") {
+      const delta = Number(body?.delta ?? 0);
+      const pid = String(body?.product_id ?? "");
+      if (pid && Number.isFinite(delta) && Math.abs(delta) > 1e-9) {
+        const unitCost = Number(body?.loss_cost ?? 0) > 0 && Math.abs(delta) > 1e-9
+          ? Number(body.loss_cost) / Math.abs(delta) : undefined;
+        applyDelta(pid, delta, unitCost);
+      }
+      const row = { ...(previous ?? {}), ...(body ?? {}), id: method === "POST" ? tempId : id, pending: true };
+      queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => method === "POST" ? [row, ...(old ?? []).filter((x: any) => x.id !== row.id)] : (old ?? []).map((x: any) => x.id === id ? row : x));
+    } else if (method === "DELETE" && id) {
+      queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => (old ?? []).filter((x: any) => x.id !== id));
     }
   } else if (entity === "stock-transfers") {
     if (method === "POST") {
