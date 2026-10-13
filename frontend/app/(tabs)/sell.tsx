@@ -195,7 +195,7 @@ export default function Sell() {
   useFocusEffect(useCallback(() => {
     let active = true;
     const loadKits = async () => {
-      const rows = await storage.getItem<ProductKit[]>("ssm.product-kits.v1", []);
+      const rows = await storage.getItem<any>("ssm.product-kits.v1", []);
       if (active) setProductKits(rows ?? []);
     };
     void loadKits();
