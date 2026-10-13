@@ -28,6 +28,24 @@ export default function OfflineTools() {
   const { data: products = [] } = useProducts();
   const { data: sales = [] } = useSales();
   const [tool, setTool] = useState<Tool>("adjust");
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<"week" | "month" | "year" | "custom">("month");
+  const [analyticsFrom, setAnalyticsFrom] = useState("");
+  const [analyticsTo, setAnalyticsTo] = useState("");
+  const analyticsFromValid = /^\d{4}-\d{2}-\d{2}$/.test(analyticsFrom.trim()) ? analyticsFrom.trim() : "";
+  const analyticsToValid = /^\d{4}-\d{2}-\d{2}$/.test(analyticsTo.trim()) ? analyticsTo.trim() : "";
+  const analyticsCustomValid = !!analyticsFromValid && !!analyticsToValid && analyticsFromValid <= analyticsToValid;
+  const analyticsStart = useMemo(() => {
+    if (analyticsPeriod === "custom") return analyticsCustomValid ? new Date(analyticsFromValid + "T00:00:00") : new Date("9999-12-31T00:00:00");
+    const now = new Date();
+    if (analyticsPeriod === "week") { const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; }
+    if (analyticsPeriod === "year") return new Date(now.getFullYear(), 0, 1);
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }, [analyticsPeriod, analyticsFromValid, analyticsCustomValid]);
+  const analyticsEnd = useMemo(() => analyticsPeriod === "custom" ? (analyticsCustomValid ? new Date(new Date(analyticsToValid + "T00:00:00").getTime() + 86400000) : new Date("9999-12-31T00:00:00")) : new Date(), [analyticsPeriod, analyticsToValid, analyticsCustomValid]);
+  const analyticsSales = useMemo(() => {
+    if (analyticsPeriod === "custom" && !analyticsCustomValid) return [];
+    return sales.filter((s) => { if (!s.created_at) return false; const d = new Date(s.created_at); return d >= analyticsStart && d < analyticsEnd; });
+  }, [sales, analyticsStart, analyticsEnd, analyticsPeriod, analyticsCustomValid]);
   const [productId, setProductId] = useState("");
   const [fromId, setFromId] = useState("");
   const [toId, setToId] = useState("");
@@ -83,10 +101,10 @@ export default function OfflineTools() {
 
   const fastSlow = useMemo(() => {
     const map = new Map<string, number>();
-    for (const s of sales) for (const i of s.items || []) map.set(i.product_id, (map.get(i.product_id) || 0) + Number(i.quantity || 0));
+    for (const s of analyticsSales) for (const i of s.items || []) map.set(i.product_id, (map.get(i.product_id) || 0) + Number(i.quantity || 0));
     const rows = products.map((p) => ({ p, sold: map.get(p.id) || 0 }));
     return { fast: [...rows].sort((a, b) => b.sold - a.sold).slice(0, 8), slow: [...rows].sort((a, b) => a.sold - b.sold).slice(0, 8) };
-  }, [products, sales]);
+  }, [products, analyticsSales]);
 
   const reorder = useMemo(() => products.filter((p) => Number(p.quantity || 0) <= Number(p.low_stock_threshold || 0)), [products]);
   const duplicates = useMemo(() => {
@@ -211,7 +229,7 @@ export default function OfflineTools() {
 
       {tool === "expiry" && <Card><Text style={styles.title}>Expiry Management</Text>{expiry.map(({ p, days }) => <View key={p.id} style={styles.row}><View style={{ flex: 1 }}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} units · {p.expiry_date}</Text></View><Badge text={days < 0 ? "Expired" : days <= 30 ? String(days) + "d left" : String(days) + "d"} tone={days < 0 ? "error" : days <= 30 ? "warning" : "success"} /></View>)}{!expiry.length && <Text style={styles.empty}>No expiry dates recorded.</Text>}</Card>}
 
-      {tool === "analytics" && <><Card><Text style={styles.title}>Fast movers</Text>{fastSlow.fast.map((r) => <View key={r.p.id} style={styles.row}><Text style={styles.name}>{r.p.name}</Text><Text style={styles.value}>{r.sold} sold</Text></View>)}</Card><Card><Text style={styles.title}>Slow movers</Text>{fastSlow.slow.map((r) => <View key={r.p.id} style={styles.row}><Text style={styles.name}>{r.p.name}</Text><Text style={styles.value}>{r.sold} sold</Text></View>)}</Card></>}
+      {tool === "analytics" && <><Card><Text style={styles.title}>Analytics period</Text><View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>{([{key:"week",label:"Weekly"},{key:"month",label:"Monthly"},{key:"year",label:"Yearly"},{key:"custom",label:"From–To"}] as const).map((item) => <Pressable key={item.key} onPress={() => setAnalyticsPeriod(item.key)} style={[styles.tab, { maxWidth: "48%", backgroundColor: analyticsPeriod === item.key ? colors.brandPrimary : colors.surfaceTertiary }]}><Text style={[styles.tabText, { color: analyticsPeriod === item.key ? colors.onBrandPrimary : colors.onSurface }]}>{item.label}</Text></Pressable>)}</View>{analyticsPeriod === "custom" && <><TextInput style={styles.input} value={analyticsFrom} onChangeText={setAnalyticsFrom} placeholder="From date (YYYY-MM-DD)" placeholderTextColor={colors.muted} autoCapitalize="none" /><TextInput style={styles.input} value={analyticsTo} onChangeText={setAnalyticsTo} placeholder="To date (YYYY-MM-DD)" placeholderTextColor={colors.muted} autoCapitalize="none" />{analyticsFromValid && analyticsToValid && analyticsFromValid > analyticsToValid && <Text style={styles.hint}>From date must be on or before To date.</Text>}</>}<Text style={styles.hint}>{analyticsPeriod === "custom" ? (analyticsCustomValid ? analyticsFromValid + " to " + analyticsToValid : "Enter valid dates as YYYY-MM-DD") : analyticsPeriod === "week" ? "Current week" : analyticsPeriod === "year" ? "Current year" : "Current month"} · Offline sales data</Text><Text style={styles.meta}>{analyticsSales.length} sale transactions in this period</Text></Card><Card><Text style={styles.title}>Fast movers</Text>{fastSlow.fast.map((r) => <View key={r.p.id} style={styles.row}><Text style={styles.name}>{r.p.name}</Text><Text style={styles.value}>{r.sold} sold</Text></View>)}</Card><Card><Text style={styles.title}>Slow movers</Text>{fastSlow.slow.map((r) => <View key={r.p.id} style={styles.row}><Text style={styles.name}>{r.p.name}</Text><Text style={styles.value}>{r.sold} sold</Text></View>)}</Card></>}
 
       {tool === "search" && <Card><Text style={styles.title}>Intelligent Stock Search</Text><TextInput style={styles.input} placeholder="Name, barcode or partial text" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.map((p) => <View key={p.id} style={styles.row}><View style={{ flex: 1 }}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.barcode || "No barcode"} · {p.quantity} available</Text></View><Badge text={p.quantity <= p.low_stock_threshold ? "Low" : "OK"} tone={p.quantity <= p.low_stock_threshold ? "warning" : "success"} /></View>)}</Card>}
 
