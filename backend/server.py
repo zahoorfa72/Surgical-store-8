@@ -364,6 +364,7 @@ class InventoryAdjustmentIn(BaseModel):
     client_id: Optional[str] = None
     net_profit_adjustment: float = 0
     remaining_balance_adjustment: float = 0
+    accounting_target: str = "none"
 
 
 class StockTransferIn(BaseModel):
@@ -1209,6 +1210,7 @@ async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=
         "date": row.get("date") or row.get("created_at", "")[:10], "loss_cost": row.get("loss_cost", 0),
         "net_profit_adjustment": row.get("net_profit_adjustment", 0),
         "remaining_balance_adjustment": row.get("remaining_balance_adjustment", 0),
+        "accounting_target": row.get("accounting_target", "none"),
         "client_id": row.get("client_id"), "user_name": row.get("user_name", ""), "created_at": row.get("created_at", ""),
     } for row in rows]
 
@@ -1233,7 +1235,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         existing_adjustment = await db.inventory_adjustments.find_one({"client_id": body.client_id, "deleted": {"$ne": True}})
         if existing_adjustment:
             existing_adjustment["id"] = oid(existing_adjustment["_id"])
-            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "client_id", "user_name", "created_at")},
+            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
                     "product": product_public(product)}
     current = float(product.get("quantity", 0) or 0)
     if -delta > current + 1e-9:
@@ -1262,6 +1264,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         # Stock changes affect accounting only when explicitly selected by the admin.
         "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2),
         "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2),
+        "accounting_target": body.accounting_target if body.accounting_target in ("none", "split_50_50", "net_profit", "remaining_balance", "both") else "none",
         "client_id": body.client_id,
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
     }
@@ -1353,7 +1356,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         cost = round(delta * unit_cost, 2)
     next_qty = current + delta
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {"quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": now_iso()}})
-    update = {"product_id": body.product_id, "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "edited_at": now_iso(), "edited_by": _.get("name", "")}
+    update = {"product_id": body.product_id, "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "accounting_target": body.accounting_target if body.accounting_target in ("none", "split_50_50", "net_profit", "remaining_balance", "both") else "none", "edited_at": now_iso(), "edited_by": _.get("name", "")}
     await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
     fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
     return {"ok": True, "adjustment": {"id": oid(fresh["_id"]), "product_id": fresh["product_id"], "delta": fresh["delta"], "reason": fresh["reason"], "adjustment_type": fresh["adjustment_type"], "date": fresh["date"], "loss_cost": fresh["loss_cost"], "net_profit_adjustment": fresh.get("net_profit_adjustment", 0), "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0), "client_id": fresh.get("client_id"), "user_name": fresh.get("user_name", ""), "created_at": fresh.get("created_at", "")}}
@@ -3038,6 +3041,10 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     net_profit_adjustment = 0.0
     remaining_balance_adjustment = 0.0
     for adjustment in adjustments_in_period:
+        # Only entries with a persisted, explicit admin choice affect finance.
+        # Legacy entries have no accounting_target and therefore default to none.
+        if adjustment.get("accounting_target", "none") == "none":
+            continue
         net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
         remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
     net_profit_adjustment = round(net_profit_adjustment, 2)
