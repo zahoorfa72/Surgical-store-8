@@ -25,7 +25,7 @@ export default function ProductKitsScreen() {
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { void storage.getItem<ProductKit[]>(PRODUCT_KITS_KEY, []).then((rows) => setKits(rows ?? [])); }, []);
+  useEffect(() => { void storage.getItem<any>(PRODUCT_KITS_KEY, []).then((rows) => setKits(rows ?? [])); }, []);
   const selectedCount = Object.values(selected).filter((v) => Number(v) > 0).length;
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.toLowerCase())).slice(0,100);
 
