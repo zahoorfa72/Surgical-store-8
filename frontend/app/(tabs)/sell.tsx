@@ -60,6 +60,7 @@ export default function Sell() {
   const [credit, setCredit] = useState(false);
   const [includePreviousBalance, setIncludePreviousBalance] = useState(false);
   const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
+  const [applyCustomerCredit, setApplyCustomerCredit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
@@ -145,7 +146,7 @@ export default function Sell() {
 
   const selectedCustomer = customers?.find((c) => c.id === customerId);
   const customerName = selectedCustomer?.name ?? "Walk-in customer";
-  const customerCreditAvailable = Math.max(0, -Number(selectedCustomer?.balance ?? 0));
+  const customerCreditAvailable = applyCustomerCredit ? Math.max(0, -Number(selectedCustomer?.balance ?? 0)) : 0;
   const customerCreditApplied = Math.min(total, customerCreditAvailable);
   const amountToCollect = Math.max(0, total - customerCreditApplied);
   const previousBalance = Math.max(0, Number(selectedCustomer?.balance ?? 0));
@@ -381,7 +382,8 @@ export default function Sell() {
           discount: Number(discountNum),
           credit,
           allow_negative_stock: allowNegativeStock,
-        },
+          apply_customer_credit: applyCustomerCredit,
+        } as any,
         user?.name || user?.email || "Staff",
       );
       let balanceAdjustmentApplied = false;
@@ -406,6 +408,7 @@ export default function Sell() {
       await queryClient.invalidateQueries({ queryKey: qk.products });
       await queryClient.invalidateQueries({ queryKey: qk.sales });
       setPendingBalanceAdjustment(0);
+      setApplyCustomerCredit(false);
       setCart([]);
       setDiscount("0");
       setCustomerId(null);
@@ -889,16 +892,24 @@ export default function Sell() {
                   setCustomerId(c.id);
                   setIncludePreviousBalance(false);
                   setPendingBalanceAdjustment(0);
+                  setApplyCustomerCredit(false);
                   setCustPickerOpen(false);
                   const balance = Number(c.balance ?? 0);
-                  if (admin && balance > 0) {
+                  if (admin && balance !== 0) {
                     const amount = Math.abs(balance);
                     const owesText = balance > 0
                       ? c.name + " owes the store " + money(amount) + "."
                       : "The store owes " + c.name + " " + money(amount) + " in customer credit.";
                     Alert.alert("Outstanding balance found", owesText + "\n\nWould you like to apply an adjustment for this existing balance? This will be recorded separately from the new sale total.", [
-                      { text: "No, leave it", style: "cancel", onPress: () => setPendingBalanceAdjustment(0) },
-                      { text: "Yes, adjust balance", onPress: () => setPendingBalanceAdjustment(balance) },
+                      { text: "No, leave it", style: "cancel", onPress: () => { setPendingBalanceAdjustment(0); setApplyCustomerCredit(false); } },
+                      { text: "Yes, adjust balance", onPress: () => {
+                        if (balance < 0) {
+                          setApplyCustomerCredit(true);
+                          setPendingBalanceAdjustment(0);
+                        } else {
+                          setPendingBalanceAdjustment(balance);
+                        }
+                      } },
                     ]);
                   }
                 }}
