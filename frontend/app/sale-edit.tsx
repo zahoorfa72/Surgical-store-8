@@ -42,6 +42,7 @@ export default function SaleEdit() {
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState(0);
   const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
+  const [applyCustomerCredit, setApplyCustomerCredit] = useState(false);
   const [balancePromptedFor, setBalancePromptedFor] = useState<string | null>(null);
 
   useFocusEffect(
@@ -70,6 +71,7 @@ export default function SaleEdit() {
       setDiscount(String(sale.discount ?? 0));
       setCustomerId(sale.customer_id ?? null);
       setCredit(Boolean(sale.credit && sale.customer_id));
+      setApplyCustomerCredit(Number(sale.credit_applied ?? 0) > 0);
       setPrefilled(true);
     }
   }, [sale, prefilled]);
@@ -93,21 +95,36 @@ export default function SaleEdit() {
   const total = Math.max(0, subtotal - discountNum);
   const selectedCustomer = customers?.find((c) => c.id === customerId);
   const customerName = selectedCustomer?.name ?? (customerId && customerId === sale?.customer_id ? sale?.customer_name : customerId ? "Selected customer" : "Walk-in customer");
+  const balanceBeforeEditedSale = selectedCustomer
+    ? Number(selectedCustomer.balance ?? 0) - (customerId === sale?.customer_id
+      ? (sale?.credit ? Number(sale?.total ?? 0) : Number(sale?.credit_applied ?? 0))
+      : 0)
+    : 0;
+  const customerCreditAvailable = Math.max(0, -balanceBeforeEditedSale);
+  const customerCreditApplied = applyCustomerCredit ? Math.min(total, customerCreditAvailable) : 0;
 
   useEffect(() => {
     if (!admin || !prefilled || !customerId || !selectedCustomer || balancePromptedFor === customerId) return;
     setBalancePromptedFor(customerId);
-    const balance = Number(selectedCustomer.balance ?? 0);
-    if (balance <= 0) return;
+    const balance = balanceBeforeEditedSale;
+    if (balance === 0) return;
     const amount = Math.abs(balance);
     const owesText = balance > 0
       ? selectedCustomer.name + " owes the store " + money(amount) + "."
       : "The store owes " + selectedCustomer.name + " " + money(amount) + " in customer credit.";
     Alert.alert("Outstanding balance found", owesText + "\n\nWould you like to apply an adjustment while editing this sale? This will be recorded separately from the sale total.", [
-      { text: "No, leave it", style: "cancel", onPress: () => setPendingBalanceAdjustment(0) },
-      { text: "Yes, adjust balance", onPress: () => setPendingBalanceAdjustment(balance) },
+      { text: "No, leave it", style: "cancel", onPress: () => { setPendingBalanceAdjustment(0); setApplyCustomerCredit(false); } },
+      { text: "Yes, adjust balance", onPress: () => {
+        if (balance < 0) {
+          setApplyCustomerCredit(true);
+          setPendingBalanceAdjustment(0);
+        } else {
+          setApplyCustomerCredit(false);
+          setPendingBalanceAdjustment(balance);
+        }
+      } },
     ]);
-  }, [admin, prefilled, customerId, selectedCustomer, balancePromptedFor]);
+  }, [admin, prefilled, customerId, selectedCustomer, balancePromptedFor, balanceBeforeEditedSale]);
 
   const save = async () => {
     if (saleEditLockHours > 0 && sale?.created_at) {
@@ -142,6 +159,7 @@ export default function SaleEdit() {
           // Credit can be explicitly switched on/off while editing.
           credit: Boolean(credit && customerId),
           discount: discountNum,
+          apply_customer_credit: applyCustomerCredit,
         },
       });
       let balanceAdjustmentApplied = false;
@@ -268,6 +286,18 @@ export default function SaleEdit() {
             <Text style={styles.totalBold}>Total payable</Text>
             <Text style={styles.totalBold}>{money(total)}</Text>
           </View>
+          {customerCreditApplied > 0 && (
+            <>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Existing customer credit approved</Text>
+                <Text style={styles.totalValue}>- {money(customerCreditApplied)}</Text>
+              </View>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalBold}>{credit ? "Remaining credit-sale balance" : "Amount to collect"}</Text>
+                <Text style={styles.totalBold}>{money(Math.max(0, total - customerCreditApplied))}</Text>
+              </View>
+            </>
+          )}
         </View>
       </KeyboardAwareScrollView>
 
@@ -304,7 +334,7 @@ export default function SaleEdit() {
             <Pressable
               testID="edit-customer-walkin"
               style={styles.custOption}
-              onPress={() => { setCustomerId(null); setCredit(false); setCustPickerOpen(false); }}
+              onPress={() => { setCustomerId(null); setCredit(false); setApplyCustomerCredit(false); setPendingBalanceAdjustment(0); setBalancePromptedFor(null); setCustPickerOpen(false); }}
             >
               <Text style={styles.custOptionText}>Walk-in customer</Text>
               {!customerId && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
@@ -314,7 +344,7 @@ export default function SaleEdit() {
                 key={c.id}
                 testID={`edit-customer-${c.id}`}
                 style={styles.custOption}
-                onPress={() => { setCustomerId(c.id); setBalancePromptedFor(null); setPendingBalanceAdjustment(0); setCustPickerOpen(false); }}
+                onPress={() => { setCustomerId(c.id); setBalancePromptedFor(null); setApplyCustomerCredit(false); setPendingBalanceAdjustment(0); setCustPickerOpen(false); }}
               >
                 <Text style={styles.custOptionText}>{c.name}</Text>
                 {customerId === c.id && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
