@@ -71,6 +71,8 @@ export type Sale = {
   subtotal: number;
   discount: number;
   total: number;
+  credit_applied?: number;
+  amount_due?: number;
   cogs: number;
   profit: number;
   note: string;

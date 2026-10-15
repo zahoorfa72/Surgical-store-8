@@ -145,6 +145,9 @@ export default function Sell() {
 
   const selectedCustomer = customers?.find((c) => c.id === customerId);
   const customerName = selectedCustomer?.name ?? "Walk-in customer";
+  const customerCreditAvailable = Math.max(0, -Number(selectedCustomer?.balance ?? 0));
+  const customerCreditApplied = Math.min(total, customerCreditAvailable);
+  const amountToCollect = Math.max(0, total - customerCreditApplied);
   const previousBalance = Math.max(0, Number(selectedCustomer?.balance ?? 0));
   const displayedDue = total + (admin && includePreviousBalance ? previousBalance : 0);
 
@@ -720,6 +723,13 @@ export default function Sell() {
               {showSellProfitDiscount && <Row label="Discount" value={"- " + money(discountNum)} />}
               <View style={styles.totalDivider} />
               <Row label={credit ? "New sale (on credit)" : "New sale total"} value={money(total)} bold />
+              {customerCreditApplied > 0 && (
+                <>
+                  <Row label="Existing customer credit applied" value={"- " + money(customerCreditApplied)} />
+                  <View style={styles.totalDivider} />
+                  <Row label={credit ? "Remaining credit-sale balance" : "Amount to collect now"} value={money(amountToCollect)} bold />
+                </>
+              )}
               {admin && includePreviousBalance && previousBalance > 0 && (
                 <>
                   <Row label="Previous balance (display only)" value={money(previousBalance)} />
@@ -745,7 +755,7 @@ export default function Sell() {
               onPress={checkout}
             >
               <MaterialDesignIcons name="check-bold" size={22} color={colors.onBrandPrimary} />
-              <Text style={styles.checkoutText}>{busy ? "Processing…" : `Complete Sale · ${money(total)}`}</Text>
+              <Text style={styles.checkoutText}>{busy ? "Processing…" : `Complete Sale · ${money(customerCreditApplied > 0 ? amountToCollect : total)}`}</Text>
             </Pressable>
           </View>
         </View>
@@ -881,7 +891,7 @@ export default function Sell() {
                   setPendingBalanceAdjustment(0);
                   setCustPickerOpen(false);
                   const balance = Number(c.balance ?? 0);
-                  if (admin && balance !== 0) {
+                  if (admin && balance > 0) {
                     const amount = Math.abs(balance);
                     const owesText = balance > 0
                       ? c.name + " owes the store " + money(amount) + "."

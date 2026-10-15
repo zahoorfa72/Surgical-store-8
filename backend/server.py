@@ -1464,11 +1464,16 @@ async def _party_balances() -> dict:
         sid = r.get("supplier_id")
         if sid:
             balances[sid] = balances.get(sid, 0.0) - r.get("refund_total", 0)
-    credit_sales = await db.sales.find({"deleted": {"$ne": True}, "credit": True}).to_list(20000)
-    for s in credit_sales:
+    all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    for s in all_sales:
         cid = s.get("customer_id")
-        if cid:
-            balances[cid] = balances.get(cid, 0.0) + s.get("total", 0)
+        if not cid:
+            continue
+        if s.get("credit"):
+            balances[cid] = balances.get(cid, 0.0) + float(s.get("total", 0) or 0)
+        else:
+            # Cash sales consume stored customer credit without inventing a cash receipt.
+            balances[cid] = balances.get(cid, 0.0) + float(s.get("credit_applied", 0) or 0)
     # Customer returns reduce what the customer owes.
     sales_returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
     for r in sales_returns:
@@ -1780,6 +1785,8 @@ def sale_public(d: dict) -> dict:
         "subtotal": d.get("subtotal", 0),
         "discount": d.get("discount", 0),
         "total": d.get("total", 0),
+        "credit_applied": d.get("credit_applied", 0),
+        "amount_due": d.get("amount_due", d.get("total", 0)),
         "cogs": d.get("cogs", 0),
         "profit": d.get("profit", 0),
         "note": d.get("note", ""),
@@ -1885,8 +1892,16 @@ async def create_sale(body: SaleIn, user: AnyUser):
         c = await db.parties.find_one({"_id": ObjectId(body.customer_id)})
         if c:
             customer_name = c["name"]
-    # Credit only makes sense with a named customer (someone to owe the money).
+    # Apply existing customer credit to this bill. On credit sales the ledger
+    # naturally nets the old credit against the new receivable; on cash sales
+    # credit_applied also clears that stored customer-credit liability.
     credit = bool(body.credit and body.customer_id)
+    credit_applied = 0.0
+    if body.customer_id and ObjectId.is_valid(body.customer_id):
+        current_balances = await _party_balances()
+        current_balance = float(current_balances.get(body.customer_id, 0.0) or 0.0)
+        credit_applied = round(min(total, max(0.0, -current_balance)), 2)
+    amount_due = round(max(0.0, total - credit_applied), 2)
 
     seq = await next_seq("sale")
     doc = {
@@ -1898,6 +1913,8 @@ async def create_sale(body: SaleIn, user: AnyUser):
         "subtotal": round(subtotal, 2),
         "discount": discount,
         "total": total,
+        "credit_applied": credit_applied,
+        "amount_due": amount_due,
         "cogs": round(cogs, 2),
         "profit": profit,
         "note": body.note,
@@ -1954,6 +1971,20 @@ async def delete_sale(sale_id: str, _: AdminOnly):
     await db.returns.update_many({"sale_id": sale_id}, {"$set": {"deleted": True}})
     await db.sales.update_one({"_id": ObjectId(sale_id)}, {"$set": {"deleted": True}})
     return {"ok": True}
+
+
+async def _customer_balance_before_edit(sale: dict, customer_id: Optional[str]) -> float:
+    """Return a customer's balance with the sale being edited removed from the ledger."""
+    if not customer_id:
+        return 0.0
+    balances = await _party_balances()
+    balance = float(balances.get(customer_id, 0.0) or 0.0)
+    if str(sale.get("customer_id") or "") == str(customer_id):
+        if sale.get("credit"):
+            balance -= float(sale.get("total", 0) or 0)
+        else:
+            balance -= float(sale.get("credit_applied", 0) or 0)
+    return balance
 
 
 @api.put("/sales/{sale_id}")
@@ -2033,6 +2064,10 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             })
         discount = max(0.0, body.discount)
         total = round(max(0.0, subtotal - discount), 2)
+        credit = bool(body.credit and body.customer_id)
+        prior_customer_balance = await _customer_balance_before_edit(sale, body.customer_id)
+        credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2)
+        amount_due = round(max(0.0, total - credit_applied), 2)
         old_cogs = float(sale.get("cogs", 0) or 0)
         customer_name = "Walk-in"
         if body.customer_id and ObjectId.is_valid(body.customer_id):
@@ -2048,7 +2083,9 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                 "subtotal": round(subtotal, 2),
                 "discount": discount,
                 "total": total,
-                "credit": bool(body.credit and body.customer_id),
+                "credit": credit,
+                "credit_applied": credit_applied,
+                "amount_due": amount_due,
                 "cogs": old_cogs,
                 "profit": round(total - old_cogs, 2),
                 "note": body.note,
@@ -2117,6 +2154,10 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
 
     discount = max(0.0, body.discount)
     total = round(max(0.0, subtotal - discount), 2)
+    credit = bool(body.credit and body.customer_id)
+    prior_customer_balance = await _customer_balance_before_edit(sale, body.customer_id)
+    credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2)
+    amount_due = round(max(0.0, total - credit_applied), 2)
 
     customer_name = "Walk-in"
     if body.customer_id and ObjectId.is_valid(body.customer_id):
@@ -2133,7 +2174,9 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             "subtotal": round(subtotal, 2),
             "discount": discount,
             "total": total,
-            "credit": bool(body.credit and body.customer_id),
+            "credit": credit,
+            "credit_applied": credit_applied,
+            "amount_due": amount_due,
             "cogs": round(cogs, 2),
             "profit": round(total - cogs, 2),
             "note": body.note,

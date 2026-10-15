@@ -98,7 +98,7 @@ export default function SaleEdit() {
     if (!admin || !prefilled || !customerId || !selectedCustomer || balancePromptedFor === customerId) return;
     setBalancePromptedFor(customerId);
     const balance = Number(selectedCustomer.balance ?? 0);
-    if (balance === 0) return;
+    if (balance <= 0) return;
     const amount = Math.abs(balance);
     const owesText = balance > 0
       ? selectedCustomer.name + " owes the store " + money(amount) + "."

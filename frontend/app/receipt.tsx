@@ -88,7 +88,8 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
     <div class="totals">
       <div><span>Subtotal</span><span>Rs ${sale.subtotal.toLocaleString()}</span></div>
       ${showDiscount ? `<div><span>Discount</span><span>- Rs ${sale.discount.toLocaleString()}</span></div>` : ""}
-      <div class="grand"><span>Total</span><span>Rs ${sale.total.toLocaleString()}</span></div>
+      <div class="grand"><span>Total bill</span><span>Rs ${sale.total.toLocaleString()}</span></div>
+      ${Number(sale.credit_applied || 0) > 0 ? `<div><span>Existing customer credit applied</span><span>- Rs ${Number(sale.credit_applied).toLocaleString()}</span></div><div class="grand"><span>${sale.credit ? "Remaining credit balance" : "Amount to collect"}</span><span>Rs ${Number(sale.amount_due ?? Math.max(0, sale.total - sale.credit_applied)).toLocaleString()}</span></div>` : ""}
     </div>
     <div class="thanks">Thank you for your purchase!</div>
   </body></html>`;
@@ -208,6 +209,12 @@ export default function Receipt() {
               <Text style={styles.grandLabel}>Total</Text>
               <Text style={styles.grandValue}>{money(sale.total)}</Text>
             </View>
+            {Number(sale.credit_applied ?? 0) > 0 && (
+              <>
+                <TotalRow label="Existing customer credit applied" value={"- " + money(sale.credit_applied)} />
+                <TotalRow label={sale.credit ? "Remaining credit balance" : "Amount to collect"} value={money(sale.amount_due ?? Math.max(0, sale.total - sale.credit_applied))} />
+              </>
+            )}
             {returnedTotal > 0 && (
               <View style={styles.totalRow}>
                 <Text style={[styles.totalLabel, { color: colors.error }]}>Returned / refunded</Text>
