@@ -339,6 +339,7 @@ class SaleIn(BaseModel):
     note: str = ""
     credit: bool = False  # if true (with a customer), adds to customer's owed balance
     allow_negative_stock: bool = False  # explicit override: permit selling below zero stock
+    apply_customer_credit: bool = True  # legacy clients keep existing behavior; UI asks admin first
 
 
 # ----- Purchase models -----
@@ -1897,7 +1898,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
     # credit_applied also clears that stored customer-credit liability.
     credit = bool(body.credit and body.customer_id)
     credit_applied = 0.0
-    if body.customer_id and ObjectId.is_valid(body.customer_id):
+    if body.apply_customer_credit and body.customer_id and ObjectId.is_valid(body.customer_id):
         current_balances = await _party_balances()
         current_balance = float(current_balances.get(body.customer_id, 0.0) or 0.0)
         credit_applied = round(min(total, max(0.0, -current_balance)), 2)
@@ -2066,7 +2067,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         total = round(max(0.0, subtotal - discount), 2)
         credit = bool(body.credit and body.customer_id)
         prior_customer_balance = await _customer_balance_before_edit(sale, body.customer_id)
-        credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2)
+        credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2) if body.apply_customer_credit else 0.0
         amount_due = round(max(0.0, total - credit_applied), 2)
         old_cogs = float(sale.get("cogs", 0) or 0)
         customer_name = "Walk-in"
