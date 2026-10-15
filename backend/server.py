@@ -2157,7 +2157,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
     total = round(max(0.0, subtotal - discount), 2)
     credit = bool(body.credit and body.customer_id)
     prior_customer_balance = await _customer_balance_before_edit(sale, body.customer_id)
-    credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2)
+    credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2) if body.apply_customer_credit else 0.0
     amount_due = round(max(0.0, total - credit_applied), 2)
 
     customer_name = "Walk-in"
