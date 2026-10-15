@@ -115,12 +115,18 @@ export default function Payments() {
     return result;
   }, [fakeFinanceDisplay, isSupplier, visibleParties, purchases, payments, refundByPurchase]);
 
+  const balanceForParty = (p: Party) =>
+    fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[p.id] ?? 0) : Number(p.balance ?? 0);
+
   const totalOutstanding = useMemo(
-    () => visibleParties.reduce(
-      (s, p) => s + Math.max(0, fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[p.id] ?? 0) : p.balance),
-      0,
-    ),
+    () => visibleParties.reduce((s, p) => s + Math.max(0, balanceForParty(p)), 0),
     [visibleParties, fakeFinanceDisplay, isSupplier, fakeSupplierBalanceById],
+  );
+  const totalCustomerCredit = useMemo(
+    () => !isSupplier
+      ? visibleParties.reduce((sum, p) => sum + Math.max(0, -Number(p.balance ?? 0)), 0)
+      : 0,
+    [visibleParties, isSupplier],
   );
 
   const openFor = (p: Party) => {
@@ -239,6 +245,11 @@ export default function Payments() {
               <Text style={[styles.summaryValue, { color: isSupplier ? colors.error : colors.success }]}>
                 {money(totalOutstanding)}
               </Text>
+              {!isSupplier && totalCustomerCredit > 0 && (
+                <Text style={{ color: colors.error, fontSize: 13, fontWeight: "700", marginTop: 6 }}>
+                  Customer credit (store owes): {money(totalCustomerCredit)}
+                </Text>
+              )}
             </View>
           }
           ListEmptyComponent={
@@ -250,7 +261,7 @@ export default function Payments() {
             />
           }
           renderItem={({ item }) => {
-            const displayBalance = fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[item.id] ?? 0) : item.balance;
+            const displayBalance = balanceForParty(item);
             const owes = displayBalance > 0;
             return (
               <View style={styles.row} testID={`party-balance-${item.id}`}>
@@ -259,7 +270,7 @@ export default function Payments() {
                   <Text style={styles.balanceLabel}>
                     {owes
                       ? isSupplier ? "You owe" : "Owes you"
-                      : displayBalance < 0 ? "Advance / credit" : "Settled"}
+                      : displayBalance < 0 ? (isSupplier ? "Supplier credit" : "You owe customer") : "Settled"}
                   </Text>
                 </View>
                 <Text style={[styles.balance, { color: owes ? (isSupplier ? colors.error : colors.success) : colors.muted }]}>
@@ -401,7 +412,7 @@ export default function Payments() {
               placeholder="0"
               placeholderTextColor={colors.muted}
             />
-            <Text style={styles.hint}>Adjustment also reduces the balance without cash (e.g. discount).</Text>
+            <Text style={styles.hint}>{isSupplier ? "Adjustment also reduces the supplier balance without cash (e.g. discount)." : "Receipts are not capped at the bill amount. Any extra payment becomes customer credit; adjustments also reduce the balance without cash."}</Text>
 
             <View style={styles.photoSection}>
               <Text style={styles.fieldLabel}>Receipt photo — optional</Text>
