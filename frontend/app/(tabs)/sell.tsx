@@ -59,6 +59,7 @@ export default function Sell() {
   const [discount, setDiscount] = useState("0");
   const [credit, setCredit] = useState(false);
   const [includePreviousBalance, setIncludePreviousBalance] = useState(false);
+  const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
@@ -380,16 +381,41 @@ export default function Sell() {
         },
         user?.name || user?.email || "Staff",
       );
+      let balanceAdjustmentApplied = false;
+      let balanceAdjustmentFailed = false;
+      if (!queued && customerId && pendingBalanceAdjustment !== 0 && admin) {
+        try {
+          await apiRequest("/payments", { method: "POST", body: {
+            party_id: customerId, kind: "receive", amount: 0,
+            adjustment: pendingBalanceAdjustment,
+            note: "Customer outstanding/credit balance adjusted from sale " + sale.id,
+          }});
+          balanceAdjustmentApplied = true;
+          await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
+          await queryClient.invalidateQueries({ queryKey: qk.payments() });
+        } catch (adjustError: any) {
+          balanceAdjustmentFailed = true;
+        }
+      } else {
+        await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
+        await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      }
       await queryClient.invalidateQueries({ queryKey: qk.products });
       await queryClient.invalidateQueries({ queryKey: qk.sales });
-      await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
-      await queryClient.invalidateQueries({ queryKey: qk.payments() });
+      setPendingBalanceAdjustment(0);
       setCart([]);
       setDiscount("0");
       setCustomerId(null);
       setCredit(false);
       setReviewOpen(false);
-      toast(queued ? "Saved offline — will sync when online" : "Sale completed", queued ? "info" : "success");
+      toast(
+        queued
+          ? (pendingBalanceAdjustment !== 0 ? "Saved offline — balance adjustment still needs to be applied online" : "Saved offline — will sync when online")
+          : balanceAdjustmentFailed
+            ? "Sale completed, but the balance adjustment was not saved. Please adjust it in Payments."
+            : balanceAdjustmentApplied ? "Sale completed and existing customer balance adjusted" : "Sale completed",
+        queued ? "info" : balanceAdjustmentFailed ? "error" : "success",
+      );
       router.push(`/receipt?id=${sale.id}`);
     } catch (e: any) {
       toast(e?.message || "Could not complete sale", "error");
@@ -852,9 +878,18 @@ export default function Sell() {
                 onPress={() => {
                   setCustomerId(c.id);
                   setIncludePreviousBalance(false);
+                  setPendingBalanceAdjustment(0);
                   setCustPickerOpen(false);
-                  if (Number(c.balance ?? 0) > 0) {
-                    Alert.alert("Customer has outstanding credit", c.name + " owes " + money(Number(c.balance)) + ". This is an existing balance, not part of the new sale amount. " + (admin ? "You can choose whether to include it in the displayed amount." : "The existing balance will remain separate from this sale."));
+                  const balance = Number(c.balance ?? 0);
+                  if (admin && balance !== 0) {
+                    const amount = Math.abs(balance);
+                    const owesText = balance > 0
+                      ? c.name + " owes the store " + money(amount) + "."
+                      : "The store owes " + c.name + " " + money(amount) + " in customer credit.";
+                    Alert.alert("Outstanding balance found", owesText + "\n\nWould you like to apply an adjustment for this existing balance? This will be recorded separately from the new sale total.", [
+                      { text: "No, leave it", style: "cancel", onPress: () => setPendingBalanceAdjustment(0) },
+                      { text: "Yes, adjust balance", onPress: () => setPendingBalanceAdjustment(balance) },
+                    ]);
                   }
                 }}
               >

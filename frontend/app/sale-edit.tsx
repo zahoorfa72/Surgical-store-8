@@ -41,6 +41,8 @@ export default function SaleEdit() {
   const [prefilled, setPrefilled] = useState(false);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState(0);
+  const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
+  const [balancePromptedFor, setBalancePromptedFor] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -92,6 +94,21 @@ export default function SaleEdit() {
   const selectedCustomer = customers?.find((c) => c.id === customerId);
   const customerName = selectedCustomer?.name ?? (customerId && customerId === sale?.customer_id ? sale?.customer_name : customerId ? "Selected customer" : "Walk-in customer");
 
+  useEffect(() => {
+    if (!admin || !prefilled || !customerId || !selectedCustomer || balancePromptedFor === customerId) return;
+    setBalancePromptedFor(customerId);
+    const balance = Number(selectedCustomer.balance ?? 0);
+    if (balance === 0) return;
+    const amount = Math.abs(balance);
+    const owesText = balance > 0
+      ? selectedCustomer.name + " owes the store " + money(amount) + "."
+      : "The store owes " + selectedCustomer.name + " " + money(amount) + " in customer credit.";
+    Alert.alert("Outstanding balance found", owesText + "\n\nWould you like to apply an adjustment while editing this sale? This will be recorded separately from the sale total.", [
+      { text: "No, leave it", style: "cancel", onPress: () => setPendingBalanceAdjustment(0) },
+      { text: "Yes, adjust balance", onPress: () => setPendingBalanceAdjustment(balance) },
+    ]);
+  }, [admin, prefilled, customerId, selectedCustomer, balancePromptedFor]);
+
   const save = async () => {
     if (saleEditLockHours > 0 && sale?.created_at) {
       const ageHours = Math.max(0, (Date.now() - new Date(sale.created_at).getTime()) / 3600000);
@@ -127,6 +144,21 @@ export default function SaleEdit() {
           discount: discountNum,
         },
       });
+      let balanceAdjustmentApplied = false;
+      let balanceAdjustmentFailed = false;
+      if (customerId && pendingBalanceAdjustment !== 0 && admin) {
+        try {
+          await apiRequest("/payments", { method: "POST", body: {
+            party_id: customerId, kind: "receive", amount: 0,
+            adjustment: pendingBalanceAdjustment,
+            note: "Customer outstanding/credit balance adjusted while editing sale " + (sale?.invoice_no ?? id),
+          }});
+          balanceAdjustmentApplied = true;
+          setPendingBalanceAdjustment(0);
+        } catch (adjustError: any) {
+          balanceAdjustmentFailed = true;
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: qk.sales });
       await queryClient.invalidateQueries({ queryKey: qk.products });
       await queryClient.invalidateQueries({ queryKey: qk.sale(id!) });
@@ -135,7 +167,12 @@ export default function SaleEdit() {
       await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
       await queryClient.invalidateQueries({ queryKey: qk.customers("all") });
-      toast("Sale updated", "success");
+      toast(
+        balanceAdjustmentFailed
+          ? "Sale updated, but the balance adjustment was not saved. Please adjust it in Payments."
+          : balanceAdjustmentApplied ? "Sale updated and existing customer balance adjusted" : "Sale updated",
+        balanceAdjustmentFailed ? "error" : "success",
+      );
       router.back();
     } catch (e: any) {
       toast(e?.message || "Could not update sale", "error");
@@ -277,7 +314,7 @@ export default function SaleEdit() {
                 key={c.id}
                 testID={`edit-customer-${c.id}`}
                 style={styles.custOption}
-                onPress={() => { setCustomerId(c.id); setCustPickerOpen(false); }}
+                onPress={() => { setCustomerId(c.id); setBalancePromptedFor(null); setPendingBalanceAdjustment(0); setCustPickerOpen(false); }}
               >
                 <Text style={styles.custOptionText}>{c.name}</Text>
                 {customerId === c.id && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
