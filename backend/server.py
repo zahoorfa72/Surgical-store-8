@@ -309,7 +309,7 @@ class PaymentIn(BaseModel):
     party_id: str
     kind: PaymentKind
     amount: float = Field(ge=0)
-    adjustment: float = Field(default=0.0, ge=0)  # discount/extra settled without cash (reduces balance)
+    adjustment: float = 0.0  # signed non-cash adjustment: positive reduces balance; negative increases it
     note: str = ""
 
 
@@ -1446,10 +1446,11 @@ def party_public(d: dict, balance: float = 0.0) -> PartyOut:
 
 
 async def _party_balances() -> dict:
-    """Compute owed balances per party id.
-    supplier payable = purchases total − payments(pay) settled.
-    customer receivable = credit sales total − payments(receive) settled.
-    (settled = cash amount + adjustment)
+    """Compute each party balance from its ledger, not cached totals.
+    Positive customer balance means the customer owes the store; negative means
+    the store owes the customer. Positive adjustments reduce the balance and
+    negative admin adjustments increase it. Cash receipts/payments are counted
+    once here, separately from the sale total.
     """
     balances: dict = {}
     purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
@@ -1488,7 +1489,8 @@ async def _party_balances() -> dict:
             # A cash refund clears the credit/receivable that a return created
             # (which had pushed the balance negative), moving it back toward 0.
             amt = float(pay.get("amount", 0) or 0)
-            balances[pid] = balances.get(pid, 0.0) + amt
+            adjustment = float(pay.get("adjustment", 0) or 0)
+            balances[pid] = balances.get(pid, 0.0) + amt - adjustment
     return balances
 
 
@@ -1600,7 +1602,12 @@ async def create_payment(body: PaymentIn, user: Staff):
     party = await db.parties.find_one({"_id": ObjectId(body.party_id), "deleted": {"$ne": True}})
     if not party:
         raise HTTPException(status_code=404, detail="Party not found")
-    # PaymentIn enforces non-negative cash and adjustment values.
+    # Cash amounts cannot be negative. Signed non-cash adjustments allow an admin
+    # to correct a bill without inventing a cash receipt/payment.
+    if body.amount < 0:
+        raise HTTPException(status_code=400, detail="Cash amount cannot be negative")
+    if body.adjustment != 0 and user.get("role") != Role.admin.value:
+        raise HTTPException(status_code=403, detail="Only an admin can make non-cash bill adjustments")
     # supplier -> pay, customer -> receive
     if party["type"] == "supplier" and body.kind not in (PaymentKind.pay, PaymentKind.supplier_refund):
         raise HTTPException(status_code=400, detail="Use 'pay' or 'supplier_refund' for a supplier")

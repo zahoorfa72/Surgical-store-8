@@ -382,6 +382,8 @@ export default function Sell() {
       );
       await queryClient.invalidateQueries({ queryKey: qk.products });
       await queryClient.invalidateQueries({ queryKey: qk.sales });
+      await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
+      await queryClient.invalidateQueries({ queryKey: qk.payments() });
       setCart([]);
       setDiscount("0");
       setCustomerId(null);

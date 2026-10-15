@@ -144,12 +144,20 @@ export default function Payments() {
     const enteredAdjustment = parseFloat(adjustment) || 0;
     const amt = fakeFinanceDisplay ? enteredAmount / 0.825 : enteredAmount;
     const adj = fakeFinanceDisplay ? enteredAdjustment / 0.825 : enteredAdjustment;
-    if (amt < 0 || adj < 0) {
-      toast("Amount and adjustment cannot be negative", "error");
+    if (amt < 0) {
+      toast("Cash amount cannot be negative", "error");
       return;
     }
-    if (amt <= 0 && adj <= 0) {
-      toast("Enter an amount", "error");
+    if (adj !== 0 && !admin) {
+      toast("Only an admin can make bill adjustments", "error");
+      return;
+    }
+    if (adj < 0 && (entryKind === "customer_refund" || entryKind === "supplier_refund")) {
+      toast("Use Receive Customer or Pay Supplier for a negative bill adjustment", "error");
+      return;
+    }
+    if (amt <= 0 && adj === 0) {
+      toast("Enter an amount or a non-cash adjustment", "error");
       return;
     }
     setBusy(true);
@@ -402,17 +410,17 @@ export default function Payments() {
               placeholderTextColor={colors.muted}
             />
 
-            <Text style={styles.fieldLabel}>Adjustment (discount / extra) — optional</Text>
+            <Text style={styles.fieldLabel}>Bill adjustment (+ reduces balance; − increases balance) — optional</Text>
             <TextInput
               testID="payment-adjustment-input"
               style={styles.modalInput}
-              keyboardType="numeric"
+              keyboardType="numbers-and-punctuation"
               value={adjustment}
               onChangeText={setAdjustment}
               placeholder="0"
               placeholderTextColor={colors.muted}
             />
-            <Text style={styles.hint}>{isSupplier ? "Adjustment also reduces the supplier balance without cash (e.g. discount)." : "Receipts are not capped at the bill amount. Any extra payment becomes customer credit; adjustments also reduce the balance without cash."}</Text>
+            <Text style={styles.hint}>{isSupplier ? "Positive adjustment reduces what you owe the supplier. Negative adjustments (admin only) increase the balance without cash." : "Receipts are not capped at the bill amount. Overpayment becomes customer credit. Positive adjustment reduces the customer balance; negative adjustment (admin only) increases it without recording cash."}</Text>
 
             <View style={styles.photoSection}>
               <Text style={styles.fieldLabel}>Receipt photo — optional</Text>
