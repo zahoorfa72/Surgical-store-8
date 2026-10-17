@@ -12,8 +12,8 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 type WProduct = { id: string; name: string; sku: string; quantity: number; cost: number; price: number };
 type WParty = { id: string; name: string; phone: string; address: string; type: "customer" | "supplier" };
-type WItem = { productId: string; name: string; quantity: number; cost: number; price: number; lineTotal: number };
-type WSale = { id: string; invoice: string; customer: string; customerPhone: string; items: WItem[]; subtotal: number; discount: number; total: number; profit: number; date: string };
+type WItem = { productId: string; name: string; quantity: number; cost: number; price: number; lineTotal: number; itemDiscountMode?: "amount" | "percentage"; itemDiscountValue?: number };
+type WSale = { id: string; invoice: string; customer: string; customerPhone: string; items: WItem[]; subtotal: number; discount: number; cartDiscountAmount?: number; cartDiscountMode?: "amount" | "percentage"; cartDiscountValue?: number; total: number; profit: number; date: string };
 type WState = { products: WProduct[]; parties: WParty[]; sales: WSale[]; name: string; logo: string | null };
 const KEY = "surgical-store.wholesale.v1";
 const emptyState: WState = { products: [], parties: [], sales: [], name: "Wholesale Store", logo: null };
@@ -42,6 +42,7 @@ export default function WholesaleStore() {
   const [customer, setCustomer] = useState("");
   const [cart, setCart] = useState<WItem[]>([]);
   const [discount, setDiscount] = useState("0");
+  const [discountMode, setDiscountMode] = useState<"amount" | "percentage">("amount");
   const [salePriceOverride, setSalePriceOverride] = useState("");
   const [selectedProduct, setSelectedProduct] = useState("");
   const [editingSale, setEditingSale] = useState<string | null>(null);
@@ -64,10 +65,19 @@ export default function WholesaleStore() {
   }, [state, storeName, loaded]);
 
   const patchState = (patch: Partial<WState>) => setState(prev => ({ ...prev, ...patch }));
-  const total = cart.reduce((s, i) => s + i.lineTotal, 0);
-  const discountValue = Math.min(total, n(discount));
-  const net = Math.max(0, total - discountValue);
-  const profit = cart.reduce((s, i) => s + (i.price - i.cost) * i.quantity, 0) - discountValue;
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const itemDiscountAmount = (item: WItem) => {
+    const base = item.price * item.quantity;
+    const value = Math.max(0, item.itemDiscountValue || 0);
+    const requested = item.itemDiscountMode === "percentage" ? base * Math.min(100, value) / 100 : value * item.quantity;
+    return Math.min(base, requested);
+  };
+  const itemDiscountTotal = cart.reduce((sum, item) => sum + itemDiscountAmount(item), 0);
+  const afterItemDiscounts = Math.max(0, total - itemDiscountTotal);
+  const discountValue = Math.min(afterItemDiscounts, discountMode === "percentage" ? afterItemDiscounts * Math.min(100, n(discount)) / 100 : n(discount));
+  const net = Math.max(0, afterItemDiscounts - discountValue);
+  const totalDiscount = itemDiscountTotal + discountValue;
+  const profit = net - cart.reduce((sum, item) => sum + item.cost * item.quantity, 0);
   const rangeStart = useMemo(() => {
     const d = new Date();
     if (range === "today") d.setHours(0, 0, 0, 0);
@@ -96,7 +106,7 @@ export default function WholesaleStore() {
     const quantity = n(qty) || 1;
     if (quantity > p.quantity) return toast("Not enough wholesale stock available.", "error");
     const unitPrice = salePriceOverride.trim() ? n(salePriceOverride) : p.price;
-    setCart(prev => [...prev, { productId: p.id, name: p.name, quantity, cost: p.cost, price: unitPrice, lineTotal: unitPrice * quantity }]);
+    setCart(prev => [...prev, { productId: p.id, name: p.name, quantity, cost: p.cost, price: unitPrice, lineTotal: unitPrice * quantity, itemDiscountMode: "amount", itemDiscountValue: 0 }]);
     setSelectedProduct(""); setSalePriceOverride(""); setQty("1");
   };
   const saveSale = () => {
@@ -109,18 +119,18 @@ export default function WholesaleStore() {
       if (!product || q > product.quantity + oldQty) return toast("Stock changed. Please check quantities.", "error");
     }
     const sub = total;
-    const disc = Math.min(sub, n(discount));
-    const sale: WSale = { id: editingSale || uid(), invoice: editingSale ? (state.sales.find(s => s.id === editingSale)?.invoice || "W-" + Date.now()) : "W-" + Date.now().toString().slice(-8), customer: customer.trim() || "Walk-in customer", customerPhone: state.parties.find(p => p.name === customer.trim() && p.type === "customer")?.phone || "", items: cart.map(i => ({ ...i })), subtotal: sub, discount: disc, total: sub - disc, profit: cart.reduce((s, i) => s + (i.price - i.cost) * i.quantity, 0) - disc, date: editingSale ? (state.sales.find(s => s.id === editingSale)?.date || new Date().toISOString()) : new Date().toISOString() };
+    const disc = totalDiscount;
+    const sale: WSale = { id: editingSale || uid(), invoice: editingSale ? (state.sales.find(s => s.id === editingSale)?.invoice || "W-" + Date.now()) : "W-" + Date.now().toString().slice(-8), customer: customer.trim() || "Walk-in customer", customerPhone: state.parties.find(p => p.name === customer.trim() && p.type === "customer")?.phone || "", items: cart.map(i => ({ ...i })), subtotal: sub, discount: disc, cartDiscountAmount: discountValue, cartDiscountMode: discountMode, cartDiscountValue: n(discount), total: net, profit, date: editingSale ? (state.sales.find(s => s.id === editingSale)?.date || new Date().toISOString()) : new Date().toISOString() };
     let products = state.products.map(p => {
       const sold = byProduct.get(p.id) || 0;
       const old = editingSale ? (state.sales.find(s => s.id === editingSale)?.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity, 0) || 0) : 0;
       return sold || old ? { ...p, quantity: p.quantity + old - sold } : p;
     });
     const sales = editingSale ? state.sales.map(s => s.id === editingSale ? sale : s) : [sale, ...state.sales];
-    patchState({ products, sales }); setCart([]); setDiscount("0"); setCustomer(""); setEditingSale(null); setTab("history");
+    patchState({ products, sales }); setCart([]); setDiscount("0"); setDiscountMode("amount"); setCustomer(""); setEditingSale(null); setTab("history");
     toast(editingSale ? "Wholesale sale updated; stock and profit recalculated." : "Wholesale sale saved and stock updated.", "success");
   };
-  const editSale = (s: WSale) => { setEditingSale(s.id); setCustomer(s.customer); setCart(s.items.map(i => ({ ...i }))); setDiscount(String(s.discount)); setTab("sale"); };
+  const editSale = (s: WSale) => { setEditingSale(s.id); setCustomer(s.customer); setCart(s.items.map(i => ({ ...i, itemDiscountMode: i.itemDiscountMode || "amount", itemDiscountValue: i.itemDiscountValue || 0 }))); setDiscount(String(s.cartDiscountValue ?? s.cartDiscountAmount ?? s.discount)); setDiscountMode(s.cartDiscountMode || "amount"); setTab("sale"); };
   const deleteSale = (s: WSale) => Alert.alert("Delete wholesale sale?", "The sale will be removed and its quantities returned to wholesale stock.", [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => {
     const products = state.products.map(p => ({ ...p, quantity: p.quantity + s.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity, 0) }));
     patchState({ products, sales: state.sales.filter(x => x.id !== s.id) });
@@ -142,8 +152,10 @@ export default function WholesaleStore() {
   };
   const printSale = async (s: WSale, format: "58" | "75" | "A4") => {
     const width = format === "58" ? 54 : 71;
-    const rows = s.items.map((i, index) => "<tr><td>" + (index + 1) + "</td><td>" + esc(i.name) + "</td><td>" + i.quantity + "</td><td>Rs " + i.price.toLocaleString() + "</td><td>Rs " + i.lineTotal.toLocaleString() + "</td></tr>").join("");
-    const html = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><style>@page{size:" + (format === "A4" ? "A4" : width + "mm auto") + ";margin:3mm}body{font-family:Arial,sans-serif;width:" + (format === "A4" ? "190mm" : width + "mm") + ";font-size:" + (format === "A4" ? "13px" : "10px") + ";margin:auto}h2{text-align:center}img{display:block;max-width:65mm;max-height:30mm;object-fit:contain;margin:auto}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #bbb;padding:4px 2px;text-align:left}.total{font-weight:bold;text-align:right}</style></head><body>" + (state.logo ? "<img src='" + state.logo + "'>" : "") + "<h2>" + esc(storeName) + "</h2><p>Wholesale B2B receipt<br>Invoice: " + s.invoice + "<br>Date: " + new Date(s.date).toLocaleString() + "<br>Customer: " + esc(s.customer) + "</p><table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>" + rows + "</tbody></table><p>Subtotal: Rs " + s.subtotal.toLocaleString() + "<br>Discount: Rs " + s.discount.toLocaleString() + "</p><h3 class='total'>Net total: Rs " + s.total.toLocaleString() + "</h3><p style='text-align:center'>Thank you for your business</p></body></html>";
+    const rows = s.items.map((i, index) => { const base = i.price * i.quantity; const itemDisc = Math.min(base, i.itemDiscountMode === "percentage" ? base * Math.min(100, i.itemDiscountValue || 0) / 100 : Math.max(0, i.itemDiscountValue || 0) * i.quantity); return "<tr><td>" + (index + 1) + "</td><td>" + esc(i.name) + "</td><td>" + i.quantity + "</td><td>Rs " + i.price.toLocaleString() + "</td><td>Rs " + itemDisc.toLocaleString() + "</td><td>Rs " + (base - itemDisc).toLocaleString() + "</td></tr>"; }).join("");
+    const savedItemDiscount = s.items.reduce((sum, i) => { const base = i.price * i.quantity; return sum + Math.min(base, i.itemDiscountMode === "percentage" ? base * Math.min(100, i.itemDiscountValue || 0) / 100 : Math.max(0, i.itemDiscountValue || 0) * i.quantity); }, 0);
+    const savedCartDiscount = s.cartDiscountAmount ?? Math.max(0, s.discount - savedItemDiscount);
+    const html = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><style>@page{size:" + (format === "A4" ? "A4" : width + "mm auto") + ";margin:3mm}body{font-family:Arial,sans-serif;width:" + (format === "A4" ? "190mm" : width + "mm") + ";font-size:" + (format === "A4" ? "13px" : "10px") + ";margin:auto}h2{text-align:center}img{display:block;max-width:65mm;max-height:30mm;object-fit:contain;margin:auto}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #bbb;padding:4px 2px;text-align:left}.total{font-weight:bold;text-align:right}</style></head><body>" + (state.logo ? "<img src='" + state.logo + "'>" : "") + "<h2>" + esc(storeName) + "</h2><p>Wholesale B2B receipt<br>Invoice: " + s.invoice + "<br>Date: " + new Date(s.date).toLocaleString() + "<br>Customer: " + esc(s.customer) + "</p><table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Price</th><th>Item disc.</th><th>Net</th></tr></thead><tbody>" + rows + "</tbody></table><p>Subtotal: Rs " + s.subtotal.toLocaleString() + "<br>Item discounts: Rs " + savedItemDiscount.toLocaleString() + "<br>Cart discount: Rs " + savedCartDiscount.toLocaleString() + "<br>Total discounts: Rs " + s.discount.toLocaleString() + "</p><h3 class='total'>Net total: Rs " + s.total.toLocaleString() + "</h3><p style='text-align:center'>Thank you for your business</p></body></html>";
     try { const file = await Print.printToFileAsync({ html, width: format === "A4" ? undefined : Math.round(width * 3.7795), height: format === "A4" ? undefined : 2000 }); if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: "Wholesale receipt " + s.invoice }); else await Print.printAsync({ html }); }
     catch { try { await Print.printAsync({ html }); } catch { toast("Could not print receipt.", "error"); } }
   };
@@ -175,8 +187,8 @@ export default function WholesaleStore() {
         {state.parties.filter(p => p.type === "customer").length > 0 && <View style={styles.chips}>{state.parties.filter(p => p.type === "customer").map(p => <Pressable key={p.id} onPress={() => setCustomer(p.name)} style={styles.chip}><Text style={{ color: colors.onSurface }}>{p.name}</Text></Pressable>)}</View>}
         <Text style={styles.label}>Choose product</Text>{state.products.filter(p => p.quantity > 0).map(p => <Pressable key={p.id} onPress={() => setSelectedProduct(p.id)} style={[styles.productPick, selectedProduct === p.id && { borderColor: colors.brandPrimary, borderWidth: 2 }]}><Text style={styles.rowTitle}>{p.name}</Text><Text style={styles.muted}>Available {p.quantity} · Default {money(p.price)}</Text></Pressable>)}
         {field("Quantity", qty, setQty, "numeric")}{field("Price per item for this sale (optional)", salePriceOverride, setSalePriceOverride, "numeric")}{button("Add selected item", addCartItem)}
-        <Text style={styles.section}>Sale items</Text>{cart.map((i, idx) => <View key={idx} style={styles.card}><Text style={styles.rowTitle}>{i.name}</Text><Text style={styles.muted}>{i.quantity} × {money(i.price)} (cost {money(i.cost)} each)</Text><Text style={styles.amount}>{money(i.lineTotal)}</Text><Pressable onPress={() => setCart(old => old.filter((_, x) => x !== idx))}><Text style={styles.link}>Remove item</Text></Pressable></View>)}
-        <Text style={styles.muted}>Subtotal: {money(total)}</Text>{field("Sale discount (Rs)", discount, setDiscount, "numeric")}<Text style={styles.bigTotal}>Total: {money(net)}</Text><Text style={styles.muted}>Estimated net profit after discount: {money(profit)}</Text>{button(editingSale ? "Save sale changes" : "Save sale & reduce wholesale stock", saveSale)}{editingSale ? button("Cancel edit", () => { setEditingSale(null); setCart([]); setDiscount("0"); setTab("history"); }, true) : null}
+        <Text style={styles.section}>Sale items — discount each item</Text>{cart.map((i, idx) => <View key={idx} style={styles.card}><Text style={styles.rowTitle}>{i.name}</Text><Text style={styles.muted}>{i.quantity} × {money(i.price)} (cost {money(i.cost)} each)</Text><View style={styles.chips}>{(["amount", "percentage"] as const).map(mode => <Pressable key={mode} onPress={() => setCart(old => old.map((item, x) => x === idx ? { ...item, itemDiscountMode: mode } : item))} style={[styles.chip, (i.itemDiscountMode || "amount") === mode && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: (i.itemDiscountMode || "amount") === mode ? colors.onBrandPrimary : colors.onSurface }}>{mode === "amount" ? "Rs per item" : "% per item"}</Text></Pressable>)}</View><TextInput value={String(i.itemDiscountValue ?? 0)} onChangeText={v => setCart(old => old.map((item, x) => x === idx ? { ...item, itemDiscountValue: n(v) } : item))} keyboardType="numeric" placeholder="Discount per item" placeholderTextColor={colors.muted} style={styles.input} /><Text style={styles.muted}>Item discount: {money(itemDiscountAmount(i))}</Text><Text style={styles.amount}>Net item total: {money(i.price * i.quantity - itemDiscountAmount(i))}</Text><Pressable onPress={() => setCart(old => old.filter((_, x) => x !== idx))}><Text style={styles.link}>Remove item</Text></Pressable></View>)}
+        <Text style={styles.muted}>Subtotal before discounts: {money(total)}</Text><Text style={styles.muted}>Item discounts: {money(itemDiscountTotal)}</Text><Text style={styles.label}>Additional whole-cart discount</Text><View style={styles.chips}>{(["amount", "percentage"] as const).map(mode => <Pressable key={mode} onPress={() => setDiscountMode(mode)} style={[styles.chip, discountMode === mode && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: discountMode === mode ? colors.onBrandPrimary : colors.onSurface }}>{mode === "amount" ? "Fixed Rs amount" : "Percentage %"}</Text></Pressable>)}</View>{field(discountMode === "amount" ? "Cart discount (Rs)" : "Cart discount (%)", discount, setDiscount, "numeric")}<Text style={styles.muted}>Whole-cart discount: {money(discountValue)}</Text><Text style={styles.muted}>Total discounts: {money(totalDiscount)}</Text><Text style={styles.bigTotal}>Total: {money(net)}</Text><Text style={styles.muted}>Estimated net profit after all discounts: {money(profit)}</Text>{button(editingSale ? "Save sale changes" : "Save sale & reduce wholesale stock", saveSale)}{editingSale ? button("Cancel edit", () => { setEditingSale(null); setCart([]); setDiscount("0"); setDiscountMode("amount"); setTab("history"); }, true) : null}
       </>}
       {tab === "parties" && <>
         <Text style={styles.heading}>Wholesale customers & suppliers</Text><View style={styles.chips}>{(["customer", "supplier"] as const).map(t => <Pressable key={t} onPress={() => setPartyType(t)} style={[styles.chip, partyType === t && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: partyType === t ? colors.onBrandPrimary : colors.onSurface }}>{t === "customer" ? "Customer" : "Supplier"}</Text></Pressable>)}</View>{field("Name", partyName, setPartyName)}{field("Phone", partyPhone, setPartyPhone, "phone-pad")}{field("Address", partyAddress, setPartyAddress)}{button("Save " + partyType, saveParty)}{state.parties.map(p => <View key={p.id} style={styles.card}><Text style={styles.rowTitle}>{p.name}</Text><Text style={styles.muted}>{p.type} · {p.phone || "No phone"}{p.address ? " · " + p.address : ""}</Text>{button("Delete", () => Alert.alert("Delete party?", p.name, [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => patchState({ parties: state.parties.filter(x => x.id !== p.id) }) }]), true)}</View>)}
