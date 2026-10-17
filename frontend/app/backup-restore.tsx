@@ -246,7 +246,7 @@ export default function BackupRestore() {
     // business data. This keeps restore usable after a clear-data/re-login flow.
     const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX) || key === WHOLESALE_KEY);
     const currentPairs = await AsyncStorage.multiGet(currentKeys);
-    const preserved = currentPairs.filter(([key, value]) => SESSION_KEYS.has(key) && value !== null) as [string, string][];
+    const preserved = currentPairs.filter(([key, value]) => (SESSION_KEYS.has(key) || (key === WHOLESALE_KEY && !Object.prototype.hasOwnProperty.call(payload.storage, WHOLESALE_KEY))) && value !== null) as [string, string][];
     try {
       if (currentKeys.length) await AsyncStorage.multiRemove(currentKeys);
       await AsyncStorage.multiSet([...entries, ...preserved]);
