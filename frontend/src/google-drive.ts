@@ -350,69 +350,33 @@ async function deleteOldBackupFiles(keepId: string): Promise<void> {
   } catch {}
 }
 
-function utf8ByteLength(value: string): number {
-  let bytes = 0;
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < value.length) {
-      const next = value.charCodeAt(i + 1);
-      if (next >= 0xDC00 && next <= 0xDFFF) { bytes += 4; i++; }
-      else bytes += 3;
-    } else bytes += 3;
-  }
-  return bytes;
-}
-
 export async function uploadBackupToGoogleDrive(json: string, filename: string): Promise<string> {
   const folderId = await getOrCreateBackupFolder();
   const existingId = await findAutoBackupFile(folderId);
-  const totalBytes = utf8ByteLength(json);
-  if (totalBytes <= 0) throw new Error("The backup is empty; nothing was uploaded.");
+  const boundary = `surgical_store_${Date.now()}`;
+  const body =
+    `--${boundary}\r\n` +
+    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+    JSON.stringify({ name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json" }) +
+    `\r\n--${boundary}\r\n` +
+    "Content-Type: application/json\r\n\r\n" +
+    json +
+    `\r\n--${boundary}--`;
 
-  // Use a resumable session with the JSON string directly as the request body.
-  // The old multipart path concatenated the entire backup into a second giant
-  // string, doubling peak memory and causing hangs/OOM on photo-heavy stores.
-  const sessionUrl = existingId
-    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=resumable&fields=id,name,size,mimeType,modifiedTime`
-    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,mimeType,modifiedTime";
-  const init = await driveFetch(sessionUrl, {
+  const url = existingId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=multipart&fields=id,name,webViewLink`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink";
+  const res = await driveFetch(url, {
     method: existingId ? "PATCH" : "POST",
-    headers: {
-      "Content-Type": "application/json; charset=UTF-8",
-      "X-Upload-Content-Type": "application/json",
-      "X-Upload-Content-Length": String(totalBytes),
-    },
-    body: JSON.stringify(existingId ? { name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json" } : { name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json", parents: [folderId] }),
-  });
-  if (!init.ok) {
-    const detail = await init.text().catch(() => "");
-    throw new Error(`Google Drive could not start backup upload (${init.status})${detail ? `: ${detail.slice(0, 220)}` : ""}`);
-  }
-  const location = init.headers.get("Location");
-  if (!location) throw new Error("Google Drive did not provide a resumable upload session.");
-
-  const res = await driveFetch(location, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json; charset=UTF-8",
-      "Content-Range": `bytes 0-${totalBytes - 1}/${totalBytes}`,
-    },
-    body: json,
+    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    body,
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Google Drive backup upload failed (${res.status})${detail ? `: ${detail.slice(0, 220)}` : ""}. Local data is unchanged; retry when connected.`);
+    throw new Error(`Google Drive backup upload failed (${res.status})${detail ? `: ${detail.slice(0, 220)}` : ""}`);
   }
   const result = await res.json();
   if (!result?.id) throw new Error("Google Drive did not confirm the backup upload.");
-  const verify = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(String(result.id))}?fields=id,name,size,mimeType,trashed`);
-  if (!verify.ok) throw new Error("Google Drive upload response could not be verified. Local data is unchanged.");
-  const saved = await verify.json();
-  if (!saved?.id || saved.trashed || saved.name !== AUTO_BACKUP_FILE_NAME || Number(saved.size) !== totalBytes) {
-    throw new Error("Google Drive reported an incomplete backup file. Local data is unchanged; retry when connected.");
-  }
   await SecureStore.setItemAsync(AUTO_BACKUP_FILE_KEY, String(result.id));
   await deleteOldBackupFiles(String(result.id));
   return result.id as string;
