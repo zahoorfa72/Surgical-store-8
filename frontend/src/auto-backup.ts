@@ -81,11 +81,8 @@ async function buildBackupJson(): Promise<string> {
 }
 
 let driveTimer: ReturnType<typeof setTimeout> | null = null;
-let driveRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let driveUploading = false;
 let driveDirty = false;
-let driveChangeVersion = 0;
-let dailyBackupInFlight = false;
 const statusListeners = new Set<(status: AutoBackupStatus) => void>();
 
 function publishStatus(status: AutoBackupStatus) {
@@ -111,47 +108,31 @@ export async function getAutomaticBackupStatus(): Promise<{ status: AutoBackupSt
 }
 
 async function uploadLatestToDrive() {
-  if (driveUploading) { driveDirty = true; return; }
+  if (driveUploading) return;
   driveUploading = true;
-  const uploadVersion = driveChangeVersion;
   publishStatus("uploading");
   try {
-    if (!(await hasGoogleDriveConnection())) { driveDirty = true; publishStatus("pending"); return; }
+    if (!(await hasGoogleDriveConnection())) { publishStatus("pending"); return; }
     const json = await buildBackupJson();
     await uploadBackupToGoogleDrive(json, "SurgicalStore-Auto-Backup.json");
-    if (driveChangeVersion === uploadVersion) {
-      driveDirty = false;
-      pendingChangeCount = 0;
-      void AsyncStorage.setItem(CHANGE_COUNT_KEY, "0");
-      publishStatus("backed_up");
-    } else {
-      driveDirty = true;
-      publishStatus("pending");
-    }
-  } catch (error) {
+    driveDirty = false;
+    pendingChangeCount = 0;
+    void AsyncStorage.setItem(CHANGE_COUNT_KEY, "0");
+    publishStatus("backed_up");
+  } catch {
     driveDirty = true;
-    console.warn("[backup] Google Drive auto-upload failed:", error instanceof Error ? error.message : String(error));
     publishStatus("pending");
   } finally {
     driveUploading = false;
-    if (driveDirty && !driveTimer) {
-      if (driveRetryTimer) clearTimeout(driveRetryTimer);
-      driveRetryTimer = setTimeout(() => {
-        driveRetryTimer = null;
-        void uploadLatestToDrive();
-      }, 30000);
-    }
   }
 }
 
 export function scheduleAutomaticGoogleDriveBackup(delayMs = 7000) {
   driveDirty = true;
-  driveChangeVersion += 1;
   pendingChangeCount += 1;
   void AsyncStorage.setItem(CHANGE_COUNT_KEY, String(pendingChangeCount));
   publishStatus("pending");
   if (driveTimer) clearTimeout(driveTimer);
-  if (driveRetryTimer) { clearTimeout(driveRetryTimer); driveRetryTimer = null; }
   driveTimer = setTimeout(() => {
     driveTimer = null;
     void uploadLatestToDrive();
@@ -163,8 +144,6 @@ export function retryAutomaticGoogleDriveBackup() {
 }
 
 export async function runDailyAutoBackup() {
-  if (dailyBackupInFlight) return;
-  dailyBackupInFlight = true;
   try {
     const now = new Date();
     if (now.getHours() < 6) return;
@@ -172,10 +151,8 @@ export async function runDailyAutoBackup() {
     const last = await AsyncStorage.getItem(LAST_AUTO);
     if (last === today) return;
     await writeAutoBackup();
-  } catch (error) {
-    console.warn("[backup] scheduled local backup failed:", error instanceof Error ? error.message : String(error));
-  } finally {
-    dailyBackupInFlight = false;
+  } catch {
+    // Automatic backup must never block or crash the app.
   }
 }
 
