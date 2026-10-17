@@ -6,6 +6,7 @@ import { hasGoogleDriveConnection, uploadBackupToGoogleDrive } from "@/src/googl
 import { queryClient } from "@/src/query-client";
 
 const PREFIX = "ssm.";
+const WHOLESALE_KEY = "surgical-store.wholesale.v1";
 const LAST_AUTO = "ssm.autoBackup.last";
 const AUTO_DIR_KEY = "ssm.auto-backup-dir";
 const AUTO_DIR = FileSystem.documentDirectory ? FileSystem.documentDirectory + "auto-backups/" : null;
@@ -25,14 +26,14 @@ async function writeAutoBackup() {
     const liveCache = dehydrate(queryClient, { shouldDehydrateQuery: (q) => q.state.status === "success" });
     await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
   } catch {}
-  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(PREFIX) && !SESSION_KEYS.has(k));
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => (k.startsWith(PREFIX) && !SESSION_KEYS.has(k)) || k === WHOLESALE_KEY);
   const pairs = await AsyncStorage.multiGet(keys);
-  const storage: Record<string,string> = {};
-  for (const [k,v] of pairs) if (v !== null) storage[k] = v;
+  const saved: Record<string,string> = {};
+  for (const [k,v] of pairs) if (v !== null) saved[k] = v;
   const d = new Date();
   const pad=(n:number)=>String(n).padStart(2,"0");
   const stamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-06-00`;
-  const json = JSON.stringify({app:"surgical-store",backup_version:3,created_at:new Date().toISOString(),storage}, null, 2);
+  const json = JSON.stringify({app:"surgical-store",backup_version:3,created_at:new Date().toISOString(),storage: saved}, null, 2);
   const selectedDir = await storage.getItem<string | null>(AUTO_DIR_KEY, null);
   if (selectedDir) {
     try {
@@ -66,7 +67,7 @@ async function buildBackupJson(): Promise<string> {
   });
   await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
   const keys = (await AsyncStorage.getAllKeys()).filter(
-    (k) => k.startsWith(PREFIX) && !SESSION_KEYS.has(k),
+    (k) => (k.startsWith(PREFIX) && !SESSION_KEYS.has(k)) || k === WHOLESALE_KEY,
   );
   const pairs = await AsyncStorage.multiGet(keys);
   const saved: Record<string, string> = {};

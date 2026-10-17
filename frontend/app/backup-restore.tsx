@@ -22,7 +22,8 @@ import { scheduleAutomaticGoogleDriveBackup, subscribeAutomaticBackupStatus, get
 
 WebBrowser.maybeCompleteAuthSession();
 
-const PREFIX = "ssm."
+const PREFIX = "ssm.";
+const WHOLESALE_KEY = "surgical-store.wholesale.v1"
 const BACKUP_VERSION = 3;
 const MIN_SUPPORTED_BACKUP_VERSION = 2;
 
@@ -47,7 +48,7 @@ async function makeBackup(): Promise<string> {
   });
   await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
 
-  const keys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX) && !SESSION_KEYS.has(key));
+  const keys = (await AsyncStorage.getAllKeys()).filter((key) => (key.startsWith(PREFIX) && !SESSION_KEYS.has(key)) || key === WHOLESALE_KEY);
   const pairs = await AsyncStorage.multiGet(keys);
   const storage: Record<string, string> = {};
   for (const [key, value] of pairs) {
@@ -238,12 +239,12 @@ export default function BackupRestore() {
   };
 
   const applyBackupPayload = async (payload: BackupPayload) => {
-    const entries = Object.entries(payload.storage).filter(([key]) => key.startsWith(PREFIX) && !SESSION_KEYS.has(key));
+    const entries = Object.entries(payload.storage).filter(([key]) => (key.startsWith(PREFIX) && !SESSION_KEYS.has(key)) || key === WHOLESALE_KEY);
     if (!entries.length) throw new Error("The backup contains no Surgical Store data.");
 
     // Preserve the current installation's login/session while replacing only
     // business data. This keeps restore usable after a clear-data/re-login flow.
-    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+    const currentKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX) || key === WHOLESALE_KEY);
     const currentPairs = await AsyncStorage.multiGet(currentKeys);
     const preserved = currentPairs.filter(([key, value]) => SESSION_KEYS.has(key) && value !== null) as [string, string][];
     try {

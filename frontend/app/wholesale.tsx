@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -9,6 +9,7 @@ import * as ImagePicker from "expo-image-picker";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 import { ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
 
 type WProduct = { id: string; name: string; sku: string; quantity: number; cost: number; price: number };
 type WParty = { id: string; name: string; phone: string; address: string; type: "customer" | "supplier" };
@@ -28,6 +29,7 @@ export default function WholesaleStore() {
   const toast = useToast();
   const [state, setState] = useState<WState>(emptyState);
   const [loaded, setLoaded] = useState(false);
+  const firstPersist = useRef(true);
   const [tab, setTab] = useState<"dashboard" | "products" | "sale" | "parties" | "history" | "settings">("dashboard");
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
@@ -45,6 +47,7 @@ export default function WholesaleStore() {
   const [discountMode, setDiscountMode] = useState<"amount" | "percentage">("amount");
   const [salePriceOverride, setSalePriceOverride] = useState("");
   const [selectedProduct, setSelectedProduct] = useState("");
+  const [restockAmounts, setRestockAmounts] = useState<Record<string, string>>({});
   const [editingSale, setEditingSale] = useState<string | null>(null);
   const [range, setRange] = useState<"today" | "week" | "month" | "year" | "all">("today");
   const [storeName, setStoreName] = useState("Wholesale Store");
@@ -61,7 +64,13 @@ export default function WholesaleStore() {
 
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ ...state, name: storeName })).catch(() => toast("Could not save wholesale data on this device.", "error"));
+    AsyncStorage.setItem(KEY, JSON.stringify({ ...state, name: storeName }))
+      .then(() => {
+        // Skip the initial hydration write; only actual wholesale edits schedule a backup.
+        if (firstPersist.current) { firstPersist.current = false; return; }
+        scheduleAutomaticGoogleDriveBackup(7000);
+      })
+      .catch(() => toast("Could not save wholesale data on this device.", "error"));
   }, [state, storeName, loaded]);
 
   const patchState = (patch: Partial<WState>) => setState(prev => ({ ...prev, ...patch }));
@@ -104,19 +113,27 @@ export default function WholesaleStore() {
     const p = state.products.find(x => x.id === selectedProduct);
     if (!p) return toast("Select a wholesale product.", "error");
     const quantity = n(qty) || 1;
-    if (quantity > p.quantity) return toast("Not enough wholesale stock available.", "error");
+    // Wholesale B2B orders may be entered against incoming stock; shortages are visible as negative stock.
     const unitPrice = salePriceOverride.trim() ? n(salePriceOverride) : p.price;
     setCart(prev => [...prev, { productId: p.id, name: p.name, quantity, cost: p.cost, price: unitPrice, lineTotal: unitPrice * quantity, itemDiscountMode: "amount", itemDiscountValue: 0 }]);
     setSelectedProduct(""); setSalePriceOverride(""); setQty("1");
+  };
+
+  const restockProduct = (productId: string) => {
+    const amount = n(restockAmounts[productId] || "");
+    if (amount <= 0) return toast("Enter a restock quantity greater than zero.", "error");
+    const product = state.products.find(p => p.id === productId);
+    if (!product) return toast("Wholesale product not found.", "error");
+    patchState({ products: state.products.map(p => p.id === productId ? { ...p, quantity: p.quantity + amount } : p) });
+    setRestockAmounts(prev => ({ ...prev, [productId]: "" }));
+    toast("Wholesale stock increased. Continue with the sale.", "success");
   };
   const saveSale = () => {
     if (!cart.length) return toast("Add at least one item.", "error");
     const byProduct = new Map<string, number>();
     cart.forEach(i => byProduct.set(i.productId, (byProduct.get(i.productId) || 0) + i.quantity));
-    for (const [id, q] of byProduct) {
-      const product = state.products.find(p => p.id === id);
-      const oldQty = editingSale ? (state.sales.find(s => s.id === editingSale)?.items.filter(i => i.productId === id).reduce((a, i) => a + i.quantity, 0) || 0) : 0;
-      if (!product || q > product.quantity + oldQty) return toast("Stock changed. Please check quantities.", "error");
+    for (const id of byProduct.keys()) {
+      if (!state.products.some(p => p.id === id)) return toast("A product in this cart no longer exists. Remove it and try again.", "error");
     }
     const sub = total;
     const disc = totalDiscount;
@@ -185,10 +202,10 @@ export default function WholesaleStore() {
       {tab === "sale" && <>
         <Text style={styles.heading}>{editingSale ? "Edit wholesale sale" : "New B2B sale"}</Text>{field("Customer name", customer, setCustomer)}
         {state.parties.filter(p => p.type === "customer").length > 0 && <View style={styles.chips}>{state.parties.filter(p => p.type === "customer").map(p => <Pressable key={p.id} onPress={() => setCustomer(p.name)} style={styles.chip}><Text style={{ color: colors.onSurface }}>{p.name}</Text></Pressable>)}</View>}
-        <Text style={styles.label}>Choose product</Text>{state.products.filter(p => p.quantity > 0).map(p => <Pressable key={p.id} onPress={() => setSelectedProduct(p.id)} style={[styles.productPick, selectedProduct === p.id && { borderColor: colors.brandPrimary, borderWidth: 2 }]}><Text style={styles.rowTitle}>{p.name}</Text><Text style={styles.muted}>Available {p.quantity} · Default {money(p.price)}</Text></Pressable>)}
+        <Text style={styles.label}>Choose product</Text>{state.products.map(p => <View key={p.id} style={[styles.productPick, selectedProduct === p.id && { borderColor: colors.brandPrimary, borderWidth: 2 }]}><Pressable onPress={() => setSelectedProduct(p.id)}><Text style={styles.rowTitle}>{p.name}</Text><Text style={styles.muted}>Available {p.quantity} · Default {money(p.price)}{p.quantity < 0 ? " · SHORTAGE" : ""}</Text><Text style={styles.link}>{selectedProduct === p.id ? "Selected for cart" : "Tap to select"}</Text></Pressable><Text style={styles.label}>Restock now (units)</Text><TextInput value={restockAmounts[p.id] || ""} onChangeText={v => setRestockAmounts(prev => ({ ...prev, [p.id]: v }))} keyboardType="numeric" placeholder="Quantity to add" placeholderTextColor={colors.muted} style={styles.input} /><Pressable onPress={() => restockProduct(p.id)} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Restock this item</Text></Pressable></View>)}
         {field("Quantity", qty, setQty, "numeric")}{field("Price per item for this sale (optional)", salePriceOverride, setSalePriceOverride, "numeric")}{button("Add selected item", addCartItem)}
         <Text style={styles.section}>Sale items — discount each item</Text>{cart.map((i, idx) => <View key={idx} style={styles.card}><Text style={styles.rowTitle}>{i.name}</Text><Text style={styles.muted}>{i.quantity} × {money(i.price)} (cost {money(i.cost)} each)</Text><View style={styles.chips}>{(["amount", "percentage"] as const).map(mode => <Pressable key={mode} onPress={() => setCart(old => old.map((item, x) => x === idx ? { ...item, itemDiscountMode: mode } : item))} style={[styles.chip, (i.itemDiscountMode || "amount") === mode && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: (i.itemDiscountMode || "amount") === mode ? colors.onBrandPrimary : colors.onSurface }}>{mode === "amount" ? "Rs per item" : "% per item"}</Text></Pressable>)}</View><TextInput value={String(i.itemDiscountValue ?? 0)} onChangeText={v => setCart(old => old.map((item, x) => x === idx ? { ...item, itemDiscountValue: n(v) } : item))} keyboardType="numeric" placeholder="Discount per item" placeholderTextColor={colors.muted} style={styles.input} /><Text style={styles.muted}>Item discount: {money(itemDiscountAmount(i))}</Text><Text style={styles.amount}>Net item total: {money(i.price * i.quantity - itemDiscountAmount(i))}</Text><Pressable onPress={() => setCart(old => old.filter((_, x) => x !== idx))}><Text style={styles.link}>Remove item</Text></Pressable></View>)}
-        <Text style={styles.muted}>Subtotal before discounts: {money(total)}</Text><Text style={styles.muted}>Item discounts: {money(itemDiscountTotal)}</Text><Text style={styles.label}>Additional whole-cart discount</Text><View style={styles.chips}>{(["amount", "percentage"] as const).map(mode => <Pressable key={mode} onPress={() => setDiscountMode(mode)} style={[styles.chip, discountMode === mode && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: discountMode === mode ? colors.onBrandPrimary : colors.onSurface }}>{mode === "amount" ? "Fixed Rs amount" : "Percentage %"}</Text></Pressable>)}</View>{field(discountMode === "amount" ? "Cart discount (Rs)" : "Cart discount (%)", discount, setDiscount, "numeric")}<Text style={styles.muted}>Whole-cart discount: {money(discountValue)}</Text><Text style={styles.muted}>Total discounts: {money(totalDiscount)}</Text><Text style={styles.bigTotal}>Total: {money(net)}</Text><Text style={styles.muted}>Estimated net profit after all discounts: {money(profit)}</Text>{button(editingSale ? "Save sale changes" : "Save sale & reduce wholesale stock", saveSale)}{editingSale ? button("Cancel edit", () => { setEditingSale(null); setCart([]); setDiscount("0"); setDiscountMode("amount"); setTab("history"); }, true) : null}
+        <Text style={styles.muted}>Multiple products can be added to this cart. Sales are allowed when stock is zero or insufficient; stock may become negative until restocked.</Text><Text style={styles.muted}>Subtotal before discounts: {money(total)}</Text><Text style={styles.muted}>Item discounts: {money(itemDiscountTotal)}</Text><Text style={styles.label}>Additional whole-cart discount</Text><View style={styles.chips}>{(["amount", "percentage"] as const).map(mode => <Pressable key={mode} onPress={() => setDiscountMode(mode)} style={[styles.chip, discountMode === mode && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: discountMode === mode ? colors.onBrandPrimary : colors.onSurface }}>{mode === "amount" ? "Fixed Rs amount" : "Percentage %"}</Text></Pressable>)}</View>{field(discountMode === "amount" ? "Cart discount (Rs)" : "Cart discount (%)", discount, setDiscount, "numeric")}<Text style={styles.muted}>Whole-cart discount: {money(discountValue)}</Text><Text style={styles.muted}>Total discounts: {money(totalDiscount)}</Text><Text style={styles.bigTotal}>Total: {money(net)}</Text><Text style={styles.muted}>Estimated net profit after all discounts: {money(profit)}</Text>{button(editingSale ? "Save sale changes" : "Save sale & reduce wholesale stock", saveSale)}{editingSale ? button("Cancel edit", () => { setEditingSale(null); setCart([]); setDiscount("0"); setDiscountMode("amount"); setTab("history"); }, true) : null}
       </>}
       {tab === "parties" && <>
         <Text style={styles.heading}>Wholesale customers & suppliers</Text><View style={styles.chips}>{(["customer", "supplier"] as const).map(t => <Pressable key={t} onPress={() => setPartyType(t)} style={[styles.chip, partyType === t && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: partyType === t ? colors.onBrandPrimary : colors.onSurface }}>{t === "customer" ? "Customer" : "Supplier"}</Text></Pressable>)}</View>{field("Name", partyName, setPartyName)}{field("Phone", partyPhone, setPartyPhone, "phone-pad")}{field("Address", partyAddress, setPartyAddress)}{button("Save " + partyType, saveParty)}{state.parties.map(p => <View key={p.id} style={styles.card}><Text style={styles.rowTitle}>{p.name}</Text><Text style={styles.muted}>{p.type} · {p.phone || "No phone"}{p.address ? " · " + p.address : ""}</Text>{button("Delete", () => Alert.alert("Delete party?", p.name, [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => patchState({ parties: state.parties.filter(x => x.id !== p.id) }) }]), true)}</View>)}
@@ -217,7 +234,9 @@ const useStyles = makeStyles(colors => ({
   label: { color: colors.onSurface, fontWeight: "700", fontSize: 12, marginBottom: 5 },
   field: { flex: 1, gap: 4, marginBottom: 8 },
   input: { color: colors.onSurface, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, minHeight: 44 },
-  two: { flexDirection: "row", gap: 10 },
+  two: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  secondaryAction: { alignSelf: "stretch", borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center" },
+  secondaryActionText: { color: colors.brandPrimary, fontSize: 12, fontWeight: "800" },
   button: { backgroundColor: colors.brandPrimary, paddingVertical: 11, paddingHorizontal: 14, borderRadius: 10, alignItems: "center", justifyContent: "center", flex: 1, marginVertical: 3 },
   buttonText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 12 },
   card: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, gap: 6, backgroundColor: colors.surface },
