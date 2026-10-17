@@ -20,6 +20,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
       { label: "Lost Product", sub: "Record lost stock at purchase cost", icon: "package-variant-closed-remove", route: "/lost-product", testID: "more-lost-product" },
       { label: "Profit Product", sub: "Add stock and record its value", icon: "package-variant-closed-check", route: "/profit-product", testID: "more-profit-product" },
       { label: "Product Kits", sub: "Bundle stock products for one-tap sale", icon: "package-variant-closed", route: "/product-kits", testID: "more-product-kits" },
+      { label: "Wholesale Store", sub: "Separate B2B stock, sales, customers and profit", icon: "storefront-outline", route: "/wholesale", testID: "more-wholesale" },
     ],
   },
   {
