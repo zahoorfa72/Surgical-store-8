@@ -384,7 +384,7 @@ export async function uploadBackupToGoogleDrive(json: string, filename: string):
       "X-Upload-Content-Type": "application/json",
       "X-Upload-Content-Length": String(totalBytes),
     },
-    body: JSON.stringify({ name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json", parents: [folderId] }),
+    body: JSON.stringify(existingId ? { name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json" } : { name: AUTO_BACKUP_FILE_NAME, mimeType: "application/json", parents: [folderId] }),
   });
   if (!init.ok) {
     const detail = await init.text().catch(() => "");
