@@ -137,6 +137,13 @@ async function buildLocalSale(body: any, cashierName: string): Promise<Sale> {
   const discount = Math.max(0, body.discount ?? 0);
   const total = Math.max(0, subtotal - discount);
   const cogs = items.reduce((s: number, i: any) => s + Number(i.line_cogs ?? (i.quantity * i.purchase_price)), 0);
+  const customerBalanceSnapshot = Number(body.previous_balance ?? 0) || 0;
+  const previousBalance = (body.include_previous_balance && customerBalanceSnapshot > 0) ||
+    (body.apply_customer_credit && customerBalanceSnapshot < 0) ? customerBalanceSnapshot : 0;
+  const creditApplied = body.apply_customer_credit && customerBalanceSnapshot < 0
+    ? Math.round(Math.min(total, Math.abs(customerBalanceSnapshot)) * 100) / 100 : 0;
+  const amountDue = Math.max(0, Math.round((total - creditApplied) * 100) / 100);
+  const combinedDue = previousBalance ? Math.max(0, Math.round((total + previousBalance) * 100) / 100) : amountDue;
   const seq = await nextLocalSeq();
   return {
     id: `local-sale-${seq}`,
@@ -147,10 +154,10 @@ async function buildLocalSale(body: any, cashierName: string): Promise<Sale> {
     subtotal: Math.round(subtotal * 100) / 100,
     discount,
     total: Math.round(total * 100) / 100,
-    credit_applied: 0,
-    amount_due: Math.round(total * 100) / 100,
-    previous_balance: body.include_previous_balance ? Math.max(0, Number(body.previous_balance) || 0) : 0,
-    combined_due: Math.round((total + (body.include_previous_balance ? Math.max(0, Number(body.previous_balance) || 0) : 0)) * 100) / 100,
+    credit_applied: creditApplied,
+    amount_due: amountDue,
+    previous_balance: previousBalance,
+    combined_due: combinedDue,
     cogs: Math.round(cogs * 100) / 100,
     profit: Math.round((total - cogs) * 100) / 100,
     note: body.note ?? "",
