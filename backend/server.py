@@ -1900,17 +1900,21 @@ async def create_sale(body: SaleIn, user: AnyUser):
     # Showing it on this receipt must not create a second ledger charge.
     current_balances = await _party_balances() if body.customer_id and ObjectId.is_valid(body.customer_id) else {}
     current_balance = float(current_balances.get(body.customer_id, 0.0) or 0.0) if body.customer_id else 0.0
-    previous_balance = round(max(0.0, current_balance), 2) if body.include_previous_balance else 0.0
-
-    # Apply existing customer credit to this bill. On credit sales the ledger
-    # naturally nets the old credit against the new receivable; on cash sales
-    # credit_applied also clears that stored customer-credit liability.
+    # Snapshot the signed opening balance only when the user chose to include
+    # it on the receipt or apply existing customer credit. This is receipt metadata,
+    # not a second ledger entry: the customer ledger already includes old balances.
     credit = bool(body.credit and body.customer_id)
     credit_applied = 0.0
     if body.apply_customer_credit and body.customer_id and current_balance < 0:
         credit_applied = round(min(total, max(0.0, -current_balance)), 2)
+    if body.include_previous_balance and current_balance > 0:
+        previous_balance = round(current_balance, 2)
+    elif body.apply_customer_credit and current_balance < 0:
+        previous_balance = round(current_balance, 2)
+    else:
+        previous_balance = 0.0
     amount_due = round(max(0.0, total - credit_applied), 2)
-    combined_due = round(previous_balance + amount_due, 2)
+    combined_due = round(max(0.0, previous_balance + total), 2) if previous_balance else amount_due
 
     seq = await next_seq("sale")
     doc = {
@@ -2078,7 +2082,12 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         credit = bool(body.credit and body.customer_id)
         prior_customer_balance = await _customer_balance_before_edit(sale, body.customer_id)
         credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2) if body.apply_customer_credit else 0.0
+        previous_balance = round(prior_customer_balance, 2) if (
+            (body.include_previous_balance and prior_customer_balance > 0) or
+            (body.apply_customer_credit and prior_customer_balance < 0)
+        ) else 0.0
         amount_due = round(max(0.0, total - credit_applied), 2)
+        combined_due = round(max(0.0, previous_balance + total), 2) if previous_balance else amount_due
         old_cogs = float(sale.get("cogs", 0) or 0)
         customer_name = "Walk-in"
         if body.customer_id and ObjectId.is_valid(body.customer_id):
@@ -2097,6 +2106,8 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                 "credit": credit,
                 "credit_applied": credit_applied,
                 "amount_due": amount_due,
+                "previous_balance": previous_balance,
+                "combined_due": combined_due,
                 "cogs": old_cogs,
                 "profit": round(total - old_cogs, 2),
                 "note": body.note,
@@ -2168,7 +2179,12 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
     credit = bool(body.credit and body.customer_id)
     prior_customer_balance = await _customer_balance_before_edit(sale, body.customer_id)
     credit_applied = round(min(total, max(0.0, -prior_customer_balance)), 2) if body.apply_customer_credit else 0.0
+    previous_balance = round(prior_customer_balance, 2) if (
+        (body.include_previous_balance and prior_customer_balance > 0) or
+        (body.apply_customer_credit and prior_customer_balance < 0)
+    ) else 0.0
     amount_due = round(max(0.0, total - credit_applied), 2)
+    combined_due = round(max(0.0, previous_balance + total), 2) if previous_balance else amount_due
 
     customer_name = "Walk-in"
     if body.customer_id and ObjectId.is_valid(body.customer_id):
@@ -2188,6 +2204,8 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             "credit": credit,
             "credit_applied": credit_applied,
             "amount_due": amount_due,
+            "previous_balance": previous_balance,
+            "combined_due": combined_due,
             "cogs": round(cogs, 2),
             "profit": round(total - cogs, 2),
             "note": body.note,
