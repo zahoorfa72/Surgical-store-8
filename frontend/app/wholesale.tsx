@@ -15,9 +15,10 @@ type WProduct = { id: string; name: string; sku: string; quantity: number; cost:
 type WParty = { id: string; name: string; phone: string; address: string; type: "customer" | "supplier" };
 type WItem = { productId: string; name: string; quantity: number; cost: number; price: number; lineTotal: number; itemDiscountMode?: "amount" | "percentage"; itemDiscountValue?: number };
 type WSale = { id: string; invoice: string; customer: string; customerPhone: string; items: WItem[]; subtotal: number; discount: number; cartDiscountAmount?: number; cartDiscountMode?: "amount" | "percentage"; cartDiscountValue?: number; total: number; profit: number; date: string };
-type WState = { products: WProduct[]; parties: WParty[]; sales: WSale[]; name: string; logo: string | null };
+type WExpense = { id: string; title: string; amount: number; note: string; date: string };
+type WState = { products: WProduct[]; parties: WParty[]; sales: WSale[]; expenses: WExpense[]; name: string; logo: string | null };
 const KEY = "surgical-store.wholesale.v1";
-const emptyState: WState = { products: [], parties: [], sales: [], name: "Wholesale Store", logo: null };
+const emptyState: WState = { products: [], parties: [], sales: [], expenses: [], name: "Wholesale Store", logo: null };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const n = (v: string) => Math.max(0, Number(v) || 0);
 
@@ -30,7 +31,7 @@ export default function WholesaleStore() {
   const [state, setState] = useState<WState>(emptyState);
   const [loaded, setLoaded] = useState(false);
   const firstPersist = useRef(true);
-  const [tab, setTab] = useState<"dashboard" | "products" | "sale" | "parties" | "history" | "settings">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "products" | "sale" | "parties" | "history" | "expenses" | "settings">("dashboard");
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [qty, setQty] = useState("1");
@@ -52,6 +53,11 @@ export default function WholesaleStore() {
   const [editingSale, setEditingSale] = useState<string | null>(null);
   const [range, setRange] = useState<"today" | "week" | "month" | "year" | "all">("today");
   const [storeName, setStoreName] = useState("Wholesale Store");
+  const [expenseTitle, setExpenseTitle] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseNote, setExpenseNote] = useState("");
+  const [customFrom, setCustomFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [customTo, setCustomTo] = useState(new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     AsyncStorage.getItem(KEY).then(raw => {
@@ -97,9 +103,32 @@ export default function WholesaleStore() {
     if (range === "year") { d.setMonth(0, 1); d.setHours(0, 0, 0, 0); }
     return range === "all" ? 0 : d.getTime();
   }, [range]);
-  const salesInRange = state.sales.filter(s => new Date(s.date).getTime() >= rangeStart);
+  const matchesRange = (iso: string) => {
+    const time = new Date(iso).getTime();
+    if (range === "custom") return iso.slice(0, 10) >= customFrom && iso.slice(0, 10) <= customTo;
+    return time >= rangeStart;
+  };
+  const salesInRange = state.sales.filter(s => matchesRange(s.date));
+  const expensesInRange = (state.expenses || []).filter(e => matchesRange(e.date));
   const revenue = salesInRange.reduce((s, r) => s + r.total, 0);
-  const netProfit = salesInRange.reduce((s, r) => s + r.profit, 0);
+  const grossProfit = salesInRange.reduce((s, r) => s + r.profit, 0);
+  const goodsSoldAmount = revenue - grossProfit;
+  const expenseTotal = expensesInRange.reduce((s, e) => s + e.amount, 0);
+  const netProfit = grossProfit - expenseTotal;
+  const inventoryValue = state.products.reduce((sum, p) => sum + Math.max(0, p.quantity) * Math.max(0, p.cost), 0);
+  const saveExpense = () => {
+    const amount = n(expenseAmount);
+    if (!expenseTitle.trim()) return toast("Enter an expense title.", "error");
+    if (!(amount > 0)) return toast("Enter an expense amount greater than zero.", "error");
+    const expense: WExpense = { id: uid(), title: expenseTitle.trim(), amount, note: expenseNote.trim(), date: new Date().toISOString() };
+    patchState({ expenses: [expense, ...(state.expenses || [])] });
+    setExpenseTitle(""); setExpenseAmount(""); setExpenseNote("");
+    toast("Wholesale expense saved and deducted from gross profit.", "success");
+  };
+  const deleteExpense = (expense: WExpense) => Alert.alert("Delete wholesale expense?", expense.title, [
+    { text: "Cancel", style: "cancel" },
+    { text: "Delete", style: "destructive", onPress: () => patchState({ expenses: (state.expenses || []).filter(e => e.id !== expense.id) }) },
+  ]);
 
   const saveProduct = () => {
     if (!name.trim()) return toast("Enter a product name.", "error");
@@ -190,13 +219,15 @@ export default function WholesaleStore() {
 
   return <View style={styles.root}>
     <ScreenHeader title="Wholesale Store" subtitle="Inside this app · independent wholesale business" topInset={insets.top} onBack={() => router.back()} />
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>{nav("dashboard", "Overview", "view-dashboard")}{nav("products", "Stock", "package-variant")}{nav("sale", "New sale", "cart-plus")}{nav("parties", "Parties", "account-group")}{nav("history", "Sales", "receipt")}{nav("settings", "Branding", "store-cog")}</ScrollView>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>{nav("dashboard", "Overview", "view-dashboard")}{nav("products", "Stock", "package-variant")}{nav("sale", "New sale", "cart-plus")}{nav("parties", "Parties", "account-group")}{nav("history", "Sales", "receipt")}{nav("expenses", "Expenses", "cash-minus")}{nav("settings", "Branding", "store-cog")}</ScrollView>
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {tab === "dashboard" && <>
         <Text style={styles.heading}>{storeName}</Text>
         <Text style={styles.muted}>This Wholesale Store is inside the Surgical Store app, but its stock, sales, customers, revenue, discounts and net profit are kept separate from retail features and retail reports.</Text>
-        <View style={styles.grid}><View style={styles.stat}><Text style={styles.muted}>Revenue</Text><Text style={styles.statValue}>{money(revenue)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Net profit</Text><Text style={styles.statValue}>{money(netProfit)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Products</Text><Text style={styles.statValue}>{state.products.length}</Text></View><View style={styles.stat}><Text style={styles.muted}>Sales</Text><Text style={styles.statValue}>{salesInRange.length}</Text></View></View>
-        <Text style={styles.label}>Reporting period</Text><View style={styles.chips}>{(["today", "week", "month", "year", "all"] as const).map(r => <Pressable key={r} onPress={() => setRange(r)} style={[styles.chip, range === r && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: range === r ? colors.onBrandPrimary : colors.onSurface }}>{r === "all" ? "All time" : r[0].toUpperCase() + r.slice(1)}</Text></Pressable>)}</View>
+        <View style={styles.grid}><View style={styles.stat}><Text style={styles.muted}>Net sales</Text><Text style={styles.statValue}>{money(revenue)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Gross profit</Text><Text style={styles.statValue}>{money(grossProfit)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Goods sold (cost)</Text><Text style={styles.statValue}>{money(goodsSoldAmount)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Expenses</Text><Text style={styles.statValue}>{money(expenseTotal)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Net profit after expenses</Text><Text style={styles.statValue}>{money(netProfit)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Inventory value (cost)</Text><Text style={styles.statValue}>{money(inventoryValue)}</Text></View><View style={styles.stat}><Text style={styles.muted}>Products</Text><Text style={styles.statValue}>{state.products.length}</Text></View><View style={styles.stat}><Text style={styles.muted}>Sales</Text><Text style={styles.statValue}>{salesInRange.length}</Text></View></View>
+        <Text style={styles.label}>Reporting period</Text><View style={styles.chips}>{(["today", "week", "month", "year", "all", "custom"] as const).map(r => <Pressable key={r} onPress={() => setRange(r)} style={[styles.chip, range === r && { backgroundColor: colors.brandPrimary }]}><Text style={{ color: range === r ? colors.onBrandPrimary : colors.onSurface }}>{r === "all" ? "All time" : r === "custom" ? "By date" : r[0].toUpperCase() + r.slice(1)}</Text></Pressable>)}</View>
+        {range === "custom" && <View style={styles.two}>{field("From date (YYYY-MM-DD)", customFrom, setCustomFrom)}{field("To date (YYYY-MM-DD)", customTo, setCustomTo)}</View>}
+        <Text style={styles.muted}>Calculation: goods sold cost = net sales − gross profit. Net profit = gross profit − wholesale expenses.</Text>
         <Text style={styles.section}>Revenue vs net profit</Text><View style={styles.card}><View style={styles.graphRow}><Text style={styles.graphLabel}>Revenue</Text><View style={styles.graphTrack}><View style={[styles.graphBar, { width: (revenue > 0 ? 100 : 0) + "%", backgroundColor: colors.brandPrimary }]} /></View><Text style={styles.graphValue}>{money(revenue)}</Text></View><View style={styles.graphRow}><Text style={styles.graphLabel}>Net profit</Text><View style={styles.graphTrack}><View style={[styles.graphBar, { width: (revenue > 0 ? Math.min(100, Math.max(0, netProfit / revenue * 100)) : 0) + "%", backgroundColor: colors.success }]} /></View><Text style={styles.graphValue}>{money(netProfit)}</Text></View><Text style={styles.muted}>Bars compare wholesale revenue and profit for the selected period.</Text></View>
         <Text style={styles.section}>Recent wholesale sales</Text>{state.sales.slice(0, 5).map(s => <View key={s.id} style={styles.card}><Text style={styles.rowTitle}>{s.invoice} · {s.customer}</Text><Text style={styles.muted}>{new Date(s.date).toLocaleDateString()} · Profit {money(s.profit)}</Text><Text style={styles.amount}>{money(s.total)}</Text></View>)}
       </>}
@@ -219,7 +250,17 @@ export default function WholesaleStore() {
       </>}
       {tab === "history" && <>
         <Text style={styles.heading}>Wholesale sales history</Text>{state.sales.length === 0 && <Text style={styles.muted}>No wholesale sales saved yet.</Text>}
-        {state.sales.map(s => <View key={s.id} style={styles.card}><Text style={styles.rowTitle}>{s.invoice} · {s.customer}</Text><Text style={styles.muted}>{new Date(s.date).toLocaleString()}</Text><Text style={styles.amount}>{money(s.total)}</Text><Text style={styles.muted}>Discount {money(s.discount)} · Net profit {money(s.profit)}</Text><View style={styles.actions}>{button("Edit", () => editSale(s), true)}{button("Delete", () => deleteSale(s), true)}</View><Text style={styles.label}>Receipt size</Text><View style={styles.actions}>{button("58 mm PDF", () => printSale(s, "58"), true)}{button("75 mm PDF", () => printSale(s, "75"), true)}{button("A4 PDF", () => printSale(s, "A4"), true)}</View></View>)}
+        {state.sales.filter(s => matchesRange(s.date)).map(s => <View key={s.id} style={styles.card}><Text style={styles.rowTitle}>{s.invoice} · {s.customer}</Text><Text style={styles.muted}>{new Date(s.date).toLocaleString()}</Text><Text style={styles.amount}>{money(s.total)}</Text><Text style={styles.muted}>Discount {money(s.discount)} · Net profit {money(s.profit)}</Text><View style={styles.actions}>{button("Edit", () => editSale(s), true)}{button("Delete", () => deleteSale(s), true)}</View><Text style={styles.label}>Receipt size</Text><View style={styles.actions}>{button("58 mm PDF", () => printSale(s, "58"), true)}{button("75 mm PDF", () => printSale(s, "75"), true)}{button("A4 PDF", () => printSale(s, "A4"), true)}</View></View>)}
+      </>}
+      {tab === "expenses" && <>
+        <Text style={styles.heading}>Wholesale expenses</Text>
+        <Text style={styles.muted}>These expenses belong only to the Wholesale Store. They reduce wholesale gross profit to calculate net profit and never change retail accounts.</Text>
+        {field("Expense title", expenseTitle, setExpenseTitle)}
+        {field("Amount (Rs)", expenseAmount, setExpenseAmount, "numeric")}
+        {field("Note (optional)", expenseNote, setExpenseNote)}
+        {button("Save wholesale expense", saveExpense)}
+        <Text style={styles.section}>Expenses for selected period · {money(expenseTotal)}</Text>
+        {(state.expenses || []).filter(e => matchesRange(e.date)).map(e => <View key={e.id} style={styles.card}><Text style={styles.rowTitle}>{e.title}</Text><Text style={styles.muted}>{new Date(e.date).toLocaleString()}{e.note ? " · " + e.note : ""}</Text><Text style={styles.amount}>{money(e.amount)}</Text>{button("Delete expense", () => deleteExpense(e), true)}</View>)}
       </>}
       {tab === "settings" && <>
         <Text style={styles.heading}>Wholesale branding</Text><Text style={styles.muted}>This name and logo appear only on wholesale receipts. Retail branding remains unchanged.</Text>{field("Wholesale business name", storeName, setStoreName)}{button("Choose wholesale logo", pickLogo, true)}{state.logo ? <Image source={{ uri: state.logo }} style={{ width: 140, height: 90, resizeMode: "contain", alignSelf: "center" }} /> : <Text style={styles.muted}>No separate wholesale logo set.</Text>}{button("Save branding", () => { patchState({ name: storeName }); toast("Wholesale branding saved.", "success"); })}
