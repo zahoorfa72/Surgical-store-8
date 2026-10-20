@@ -51,7 +51,7 @@ export default function WholesaleStore() {
   const [saleQtyByProduct, setSaleQtyByProduct] = useState<Record<string, string>>({});
   const [restockAmounts, setRestockAmounts] = useState<Record<string, string>>({});
   const [editingSale, setEditingSale] = useState<string | null>(null);
-  const [range, setRange] = useState<"today" | "week" | "month" | "year" | "all">("today");
+  const [range, setRange] = useState<"today" | "week" | "month" | "year" | "all" | "custom">("today");
   const [storeName, setStoreName] = useState("Wholesale Store");
   const [expenseTitle, setExpenseTitle] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
@@ -219,7 +219,7 @@ export default function WholesaleStore() {
 
   return <View style={styles.root}>
     <ScreenHeader title="Wholesale Store" subtitle="Inside this app · independent wholesale business" topInset={insets.top} onBack={() => router.back()} />
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>{nav("dashboard", "Overview", "view-dashboard")}{nav("products", "Stock", "package-variant")}{nav("sale", "New sale", "cart-plus")}{nav("parties", "Parties", "account-group")}{nav("history", "Sales", "receipt")}{nav("expenses", "Expenses", "cash-minus")}{nav("settings", "Branding", "store-cog")}</ScrollView>
+    <ScrollView horizontal style={styles.navScroller} showsHorizontalScrollIndicator={true} contentContainerStyle={styles.nav}>{nav("dashboard", "Overview", "view-dashboard")}{nav("products", "Stock", "package-variant")}{nav("sale", "New sale", "cart-plus")}{nav("parties", "Parties", "account-group")}{nav("history", "Sales", "receipt")}{nav("expenses", "Expenses", "cash-minus")}{nav("settings", "Branding", "store-cog")}</ScrollView>
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {tab === "dashboard" && <>
         <Text style={styles.heading}>{storeName}</Text>
@@ -272,9 +272,10 @@ export default function WholesaleStore() {
 
 const useStyles = makeStyles(colors => ({
   root: { flex: 1, backgroundColor: colors.surface },
-  nav: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
-  navButton: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.surfaceTertiary },
-  navText: { fontSize: 12, fontWeight: "700" },
+  navScroller: { flexGrow: 0, flexShrink: 0, maxHeight: 64 },
+  nav: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: "center" },
+  navButton: { flexDirection: "row", flexShrink: 0, alignItems: "center", justifyContent: "center", gap: 6, minHeight: 44, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10, backgroundColor: colors.surfaceTertiary },
+  navText: { fontSize: 12, fontWeight: "700", flexShrink: 0 },
   content: { padding: 16, paddingBottom: 40, gap: 12 },
   heading: { fontSize: 22, fontWeight: "800", color: colors.onSurface },
   section: { fontSize: 16, fontWeight: "800", color: colors.onSurface, marginTop: 12 },
