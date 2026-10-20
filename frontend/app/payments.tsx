@@ -115,8 +115,15 @@ export default function Payments() {
     return result;
   }, [fakeFinanceDisplay, isSupplier, visibleParties, purchases, payments, refundByPurchase]);
 
-  const balanceForParty = (p: Party) =>
-    fakeFinanceDisplay && isSupplier ? (fakeSupplierBalanceById[p.id] ?? 0) : Number(p.balance ?? 0);
+  const balanceForParty = (p: Party) => {
+    const balance = Number(p.balance ?? 0);
+    if (!fakeFinanceDisplay) return balance;
+    if (isSupplier) return fakeSupplierBalanceById[p.id] ?? 0;
+    // Keep customer receivables AND customer credit signed while masking display values.
+    // Previously the form prefilled a masked amount but the screen showed the real balance,
+    // causing the entered receipt to be converted back to a different real amount.
+    return Math.round(balance * 0.825 * 100) / 100;
+  };
 
   const totalOutstanding = useMemo(
     () => visibleParties.reduce((s, p) => s + Math.max(0, balanceForParty(p)), 0),
@@ -124,14 +131,15 @@ export default function Payments() {
   );
   const totalCustomerCredit = useMemo(
     () => !isSupplier
-      ? visibleParties.reduce((sum, p) => sum + Math.max(0, -Number(p.balance ?? 0)), 0)
+      ? visibleParties.reduce((sum, p) => sum + Math.max(0, -balanceForParty(p)), 0)
       : 0,
     [visibleParties, isSupplier],
   );
 
   const openFor = (p: Party) => {
     setActive(p);
-    setAmount(p.balance > 0 ? String(fakeFinanceDisplay ? fakeDisplayAmount(p.balance) : p.balance) : "");
+    const displayedBalance = balanceForParty(p);
+    setAmount(displayedBalance > 0 ? String(displayedBalance) : "");
     setAdjustment("");
     setNote("");
     setReceiptPhoto(receiptPhotos[p.id] ?? null);
@@ -421,6 +429,9 @@ export default function Payments() {
               placeholderTextColor={colors.muted}
             />
             <Text style={styles.hint}>{isSupplier ? "Positive adjustment reduces what you owe the supplier. Negative adjustments (admin only) increase the balance without cash." : "Receipts are not capped at the bill amount. Overpayment becomes customer credit. Positive adjustment reduces the customer balance; negative adjustment (admin only) increases it without recording cash."}</Text>
+            {active && <Text style={styles.hint}>
+              Balance preview: {money(balanceForParty(active))} {Number(balanceForParty(active)) >= 0 ? "outstanding" : "customer credit"} → {money(balanceForParty(active) + ((entryKind === "receive" || entryKind === "pay") ? -(Number.parseFloat(amount) || 0) - (Number.parseFloat(adjustment) || 0) : (Number.parseFloat(amount) || 0) - (Number.parseFloat(adjustment) || 0)))} after this entry. Cash received/paid and non-cash adjustment are calculated separately.
+            </Text>}
 
             <View style={styles.photoSection}>
               <Text style={styles.fieldLabel}>Receipt photo — optional</Text>
