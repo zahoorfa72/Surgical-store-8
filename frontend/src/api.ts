@@ -674,7 +674,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     //   customer_refund       (balance was negative)     => balance increases
     const balanceEffect = (kind: string, amount: number, adjustment: number) => {
       if (kind === "pay" || kind === "receive") return -(Number(amount || 0) + Number(adjustment || 0));
-      if (kind === "supplier_refund" || kind === "customer_refund") return Number(amount || 0);
+      if (kind === "supplier_refund" || kind === "customer_refund") return Number(amount || 0) - Number(adjustment || 0);
       return 0;
     };
     const applyBalance = (type: string, partyId: string, delta: number) => {
