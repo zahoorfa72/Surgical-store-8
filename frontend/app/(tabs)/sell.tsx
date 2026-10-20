@@ -384,6 +384,7 @@ export default function Sell() {
           allow_negative_stock: allowNegativeStock,
           apply_customer_credit: applyCustomerCredit,
           include_previous_balance: includePreviousBalance,
+          previous_balance: includePreviousBalance ? previousBalance : 0,
         } as any,
         user?.name || user?.email || "Staff",
       );
