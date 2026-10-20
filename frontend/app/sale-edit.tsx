@@ -42,6 +42,7 @@ export default function SaleEdit() {
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState(0);
   const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
+  const [includePreviousBalance, setIncludePreviousBalance] = useState(false);
   const [applyCustomerCredit, setApplyCustomerCredit] = useState(false);
   const [balancePromptedFor, setBalancePromptedFor] = useState<string | null>(null);
 
@@ -112,15 +113,19 @@ export default function SaleEdit() {
     const owesText = balance > 0
       ? selectedCustomer.name + " owes the store " + money(amount) + "."
       : "The store owes " + selectedCustomer.name + " " + money(amount) + " in customer credit.";
-    Alert.alert("Outstanding balance found", owesText + "\n\nWould you like to apply an adjustment while editing this sale? This will be recorded separately from the sale total.", [
-      { text: "No, leave it", style: "cancel", onPress: () => { setPendingBalanceAdjustment(0); setApplyCustomerCredit(false); } },
-      { text: "Yes, adjust balance", onPress: () => {
+    Alert.alert("Outstanding balance found", owesText + (balance > 0
+      ? "\n\nInclude this existing outstanding balance on the edited sale receipt? It will be shown once without creating a second charge or payment."
+      : "\n\nApply this existing customer credit to the edited sale?"), [
+      { text: "No, leave it", style: "cancel", onPress: () => { setIncludePreviousBalance(false); setPendingBalanceAdjustment(0); setApplyCustomerCredit(false); } },
+      { text: balance > 0 ? "Include on receipt" : "Apply customer credit", onPress: () => {
         if (balance < 0) {
           setApplyCustomerCredit(true);
+          setIncludePreviousBalance(false);
           setPendingBalanceAdjustment(0);
         } else {
           setApplyCustomerCredit(false);
-          setPendingBalanceAdjustment(balance);
+          setIncludePreviousBalance(true);
+          setPendingBalanceAdjustment(0);
         }
       } },
     ]);
@@ -160,6 +165,7 @@ export default function SaleEdit() {
           credit: Boolean(credit && customerId),
           discount: discountNum,
           apply_customer_credit: applyCustomerCredit,
+          include_previous_balance: includePreviousBalance,
         },
       });
       let balanceAdjustmentApplied = false;
@@ -344,7 +350,7 @@ export default function SaleEdit() {
                 key={c.id}
                 testID={`edit-customer-${c.id}`}
                 style={styles.custOption}
-                onPress={() => { setCustomerId(c.id); setBalancePromptedFor(null); setApplyCustomerCredit(false); setPendingBalanceAdjustment(0); setCustPickerOpen(false); }}
+                onPress={() => { setCustomerId(c.id); setBalancePromptedFor(null); setIncludePreviousBalance(false); setApplyCustomerCredit(false); setPendingBalanceAdjustment(0); setCustPickerOpen(false); }}
               >
                 <Text style={styles.custOptionText}>{c.name}</Text>
                 {customerId === c.id && <MaterialDesignIcons name="check" size={20} color={colors.brandPrimary} />}
