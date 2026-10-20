@@ -89,8 +89,8 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
       <div><span>Subtotal</span><span>Rs ${sale.subtotal.toLocaleString()}</span></div>
       ${showDiscount ? `<div><span>Discount</span><span>- Rs ${sale.discount.toLocaleString()}</span></div>` : ""}
       <div class="grand"><span>Total bill</span><span>Rs ${sale.total.toLocaleString()}</span></div>
-      ${Number(sale.previous_balance || 0) > 0 ? `<div><span>Previous outstanding balance</span><span>Rs ${Number(sale.previous_balance).toLocaleString()}</span></div><div class="grand"><span>Combined amount due</span><span>Rs ${Number(sale.combined_due ?? (sale.previous_balance + sale.total)).toLocaleString()}</span></div>` : ""}
-      ${Number(sale.credit_applied || 0) > 0 ? `<div><span>Existing customer credit applied</span><span>- Rs ${Number(sale.credit_applied).toLocaleString()}</span></div><div class="grand"><span>${sale.credit ? "Remaining credit balance" : "Amount to collect"}</span><span>Rs ${Number(sale.amount_due ?? Math.max(0, sale.total - sale.credit_applied)).toLocaleString()}</span></div>` : ""}
+      ${Number(sale.previous_balance || 0) !== 0 ? `<div><span>${Number(sale.previous_balance) > 0 ? "Previous outstanding balance" : "Previous customer credit"}</span><span>${Number(sale.previous_balance) > 0 ? "Rs " + Number(sale.previous_balance).toLocaleString() : "- Rs " + Math.abs(Number(sale.previous_balance)).toLocaleString()}</span></div><div class="grand"><span>Combined amount due</span><span>Rs ${Number(sale.combined_due ?? Math.max(0, sale.previous_balance + sale.total)).toLocaleString()}</span></div>` : ""}
+      ${Number(sale.credit_applied || 0) > 0 ? `<div><span>Existing customer credit applied</span><span>- Rs ${Number(sale.credit_applied).toLocaleString()}</span></div><div class="grand"><span>Amount due after credit</span><span>Rs ${Number(sale.amount_due ?? Math.max(0, sale.total - sale.credit_applied)).toLocaleString()}</span></div>` : ""}
     </div>
     <div class="thanks">Thank you for your purchase!</div>
   </body></html>`;
@@ -210,19 +210,19 @@ export default function Receipt() {
               <Text style={styles.grandLabel}>Total</Text>
               <Text style={styles.grandValue}>{money(sale.total)}</Text>
             </View>
-            {Number(sale.previous_balance ?? 0) > 0 && (
+            {Number(sale.previous_balance ?? 0) !== 0 && (
               <>
-                <TotalRow label="Previous outstanding balance" value={money(sale.previous_balance)} />
+                <TotalRow label={Number(sale.previous_balance) > 0 ? "Previous outstanding balance" : "Previous customer credit"} value={Number(sale.previous_balance) > 0 ? money(sale.previous_balance) : "- " + money(Math.abs(Number(sale.previous_balance)))} />
                 <View style={styles.grandRow}>
                   <Text style={styles.grandLabel}>Combined amount due</Text>
-                  <Text style={styles.grandValue}>{money(sale.combined_due ?? (sale.previous_balance + sale.total))}</Text>
+                  <Text style={styles.grandValue}>{money(sale.combined_due ?? Math.max(0, sale.previous_balance + sale.total))}</Text>
                 </View>
               </>
             )}
             {Number(sale.credit_applied ?? 0) > 0 && (
               <>
                 <TotalRow label="Existing customer credit applied" value={"- " + money(sale.credit_applied)} />
-                <TotalRow label={sale.credit ? "Remaining credit balance" : "Amount to collect"} value={money(sale.amount_due ?? Math.max(0, sale.total - sale.credit_applied))} />
+                <TotalRow label="Amount due after credit" value={money(sale.amount_due ?? Math.max(0, sale.total - sale.credit_applied))} />
               </>
             )}
             {returnedTotal > 0 && (
