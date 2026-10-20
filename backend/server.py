@@ -340,6 +340,7 @@ class SaleIn(BaseModel):
     credit: bool = False  # if true (with a customer), adds to customer's owed balance
     allow_negative_stock: bool = False  # explicit override: permit selling below zero stock
     apply_customer_credit: bool = True  # legacy clients keep existing behavior; UI asks admin first
+    include_previous_balance: bool = False  # snapshot an existing positive customer balance onto the receipt
 
 
 # ----- Purchase models -----
@@ -1893,16 +1894,21 @@ async def create_sale(body: SaleIn, user: AnyUser):
         c = await db.parties.find_one({"_id": ObjectId(body.customer_id)})
         if c:
             customer_name = c["name"]
+    # Snapshot the customer's existing positive balance before inserting this sale.
+    # Showing it on this receipt must not create a second ledger charge.
+    current_balances = await _party_balances() if body.customer_id and ObjectId.is_valid(body.customer_id) else {}
+    current_balance = float(current_balances.get(body.customer_id, 0.0) or 0.0) if body.customer_id else 0.0
+    previous_balance = round(max(0.0, current_balance), 2) if body.include_previous_balance else 0.0
+
     # Apply existing customer credit to this bill. On credit sales the ledger
     # naturally nets the old credit against the new receivable; on cash sales
     # credit_applied also clears that stored customer-credit liability.
     credit = bool(body.credit and body.customer_id)
     credit_applied = 0.0
-    if body.apply_customer_credit and body.customer_id and ObjectId.is_valid(body.customer_id):
-        current_balances = await _party_balances()
-        current_balance = float(current_balances.get(body.customer_id, 0.0) or 0.0)
+    if body.apply_customer_credit and body.customer_id and current_balance < 0:
         credit_applied = round(min(total, max(0.0, -current_balance)), 2)
     amount_due = round(max(0.0, total - credit_applied), 2)
+    combined_due = round(previous_balance + amount_due, 2)
 
     seq = await next_seq("sale")
     doc = {
@@ -1916,6 +1922,8 @@ async def create_sale(body: SaleIn, user: AnyUser):
         "total": total,
         "credit_applied": credit_applied,
         "amount_due": amount_due,
+        "previous_balance": previous_balance,
+        "combined_due": combined_due,
         "cogs": round(cogs, 2),
         "profit": profit,
         "note": body.note,
