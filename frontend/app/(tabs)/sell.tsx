@@ -383,6 +383,7 @@ export default function Sell() {
           credit,
           allow_negative_stock: allowNegativeStock,
           apply_customer_credit: applyCustomerCredit,
+          include_previous_balance: includePreviousBalance,
         } as any,
         user?.name || user?.email || "Staff",
       );
@@ -900,14 +901,18 @@ export default function Sell() {
                     const owesText = balance > 0
                       ? c.name + " owes the store " + money(amount) + "."
                       : "The store owes " + c.name + " " + money(amount) + " in customer credit.";
-                    Alert.alert("Outstanding balance found", owesText + "\n\nWould you like to apply an adjustment for this existing balance? This will be recorded separately from the new sale total.", [
-                      { text: "No, leave it", style: "cancel", onPress: () => { setPendingBalanceAdjustment(0); setApplyCustomerCredit(false); } },
-                      { text: "Yes, adjust balance", onPress: () => {
+                    Alert.alert("Outstanding balance found", owesText + (balance > 0
+                      ? "\n\nAdd this existing outstanding balance to the next sale receipt as a combined amount due? It will be shown on the receipt without charging the customer twice."
+                      : "\n\nApply the customer's existing credit to this new bill?"), [
+                      { text: "No, leave it", style: "cancel", onPress: () => { setIncludePreviousBalance(false); setPendingBalanceAdjustment(0); setApplyCustomerCredit(false); } },
+                      { text: balance > 0 ? "Yes, add to receipt" : "Yes, apply credit", onPress: () => {
                         if (balance < 0) {
                           setApplyCustomerCredit(true);
+                          setIncludePreviousBalance(false);
                           setPendingBalanceAdjustment(0);
                         } else {
-                          setPendingBalanceAdjustment(balance);
+                          setIncludePreviousBalance(true);
+                          setPendingBalanceAdjustment(0);
                         }
                       } },
                     ]);
