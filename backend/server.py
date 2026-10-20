@@ -1789,6 +1789,8 @@ def sale_public(d: dict) -> dict:
         "total": d.get("total", 0),
         "credit_applied": d.get("credit_applied", 0),
         "amount_due": d.get("amount_due", d.get("total", 0)),
+        "previous_balance": d.get("previous_balance", 0),
+        "combined_due": d.get("combined_due", d.get("amount_due", d.get("total", 0))),
         "cogs": d.get("cogs", 0),
         "profit": d.get("profit", 0),
         "note": d.get("note", ""),
