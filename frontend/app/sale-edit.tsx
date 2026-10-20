@@ -292,6 +292,18 @@ export default function SaleEdit() {
             <Text style={styles.totalBold}>Total payable</Text>
             <Text style={styles.totalBold}>{money(total)}</Text>
           </View>
+          {includePreviousBalance && balanceBeforeEditedSale > 0 && (
+            <>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Previous outstanding balance</Text>
+                <Text style={styles.totalValue}>{money(balanceBeforeEditedSale)}</Text>
+              </View>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalBold}>Combined amount due</Text>
+                <Text style={styles.totalBold}>{money(balanceBeforeEditedSale + total)}</Text>
+              </View>
+            </>
+          )}
           {customerCreditApplied > 0 && (
             <>
               <View style={styles.totalRow}>
