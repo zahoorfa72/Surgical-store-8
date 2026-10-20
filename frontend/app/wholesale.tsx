@@ -83,7 +83,8 @@ export default function WholesaleStore() {
   };
   const itemDiscountTotal = cart.reduce((sum, item) => sum + itemDiscountAmount(item), 0);
   const afterItemDiscounts = Math.max(0, total - itemDiscountTotal);
-  const discountValue = Math.min(afterItemDiscounts, discountMode === "percentage" ? afterItemDiscounts * Math.min(100, n(discount)) / 100 : n(discount));
+  const requestedCartDiscount = Math.max(0, n(discount));
+  const discountValue = Math.min(afterItemDiscounts, discountMode === "percentage" ? afterItemDiscounts * Math.min(100, requestedCartDiscount) / 100 : requestedCartDiscount);
   const net = Math.max(0, afterItemDiscounts - discountValue);
   const totalDiscount = itemDiscountTotal + discountValue;
   const profit = net - cart.reduce((sum, item) => sum + item.cost * item.quantity, 0);
