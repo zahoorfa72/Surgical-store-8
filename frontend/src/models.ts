@@ -73,6 +73,8 @@ export type Sale = {
   total: number;
   credit_applied?: number;
   amount_due?: number;
+  previous_balance?: number;
+  combined_due?: number;
   cogs: number;
   profit: number;
   note: string;
