@@ -48,6 +48,12 @@ def _eq(a,b):
 
 def _matches(doc,q):
     for k,want in (q or {}).items():
+        if k=="$or":
+            if not isinstance(want,list) or not any(_matches(doc,part) for part in want): return False
+            continue
+        if k=="$and":
+            if not isinstance(want,list) or not all(_matches(doc,part) for part in want): return False
+            continue
         got=doc.get(k)
         if isinstance(want,dict) and any(str(x).startswith("$") for x in want):
             for op,val in want.items():
@@ -57,6 +63,7 @@ def _matches(doc,q):
                 if op=="$lt" and (got is None or _cmp(got)>=_cmp(val)): return False
                 if op=="$lte" and (got is None or _cmp(got)>_cmp(val)): return False
                 if op=="$in" and not any(_eq(got,x) for x in val): return False
+                if op=="$exists" and ((k in doc) != bool(val)): return False
         elif not _eq(got,want): return False
     return True
 
