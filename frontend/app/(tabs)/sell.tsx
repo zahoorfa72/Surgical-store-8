@@ -24,8 +24,8 @@ import { useOffline } from "@/src/offline";
 import { Product } from "@/src/models";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { OrderImageScannerModal } from "@/src/components/order-image-scanner";
-import { EmptyState, Loader, ScreenHeader, TransactionDateField, money, todayIsoDate, useToast } from "@/src/ui";
-import { DateCalendar } from "@/src/components/date-calendar";
+import { EmptyState, Loader, ScreenHeader, money, todayIsoDate, useToast } from "@/src/ui";
+import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
