@@ -17,7 +17,7 @@ export function TransactionDateField({ value, onChange, label = "Transaction dat
         onPress={() => setOpen(true)}
         style={{ minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10 }}
       >
-        <MaterialDesignIcons name="calendar-month-outline" size={20} color={colors.brandPrimary} />
+        <MaterialDesignIcons name="calendar" size={20} color={colors.brandPrimary} />
         <Text style={{ flex: 1, color: colors.onSurface, fontSize: 15, fontWeight: "700" }}>{formatDate(value + "T12:00:00")}</Text>
         <MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
       </Pressable>
