@@ -28,7 +28,7 @@ import { qk } from "@/src/data";
 import { Product, Purchase, Sale } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
-import { money } from "@/src/format";
+import { money, todayIsoDate } from "@/src/format";
 import { makeStyles, useTheme } from "@/src/theme";
 import { scheduleAutomaticGoogleDriveBackup, retryAutomaticGoogleDriveBackup, subscribeAutomaticBackupStatus, getAutomaticBackupStatus, AutoBackupStatus } from "@/src/auto-backup";
 
@@ -163,6 +163,7 @@ async function buildLocalSale(body: any, cashierName: string): Promise<Sale> {
     note: body.note ?? "",
     cashier_name: cashierName,
     credit: !!body.credit,
+    transaction_date: body.transaction_date || todayIsoDate(),
     created_at: new Date().toISOString(),
     pending: true,
   } as Sale;
@@ -191,6 +192,7 @@ async function buildLocalPurchase(body: any, userName: string): Promise<Purchase
     total: Math.round(total * 100) / 100,
     note: body.note ?? "",
     user_name: userName,
+    transaction_date: body.transaction_date || todayIsoDate(),
     created_at: new Date().toISOString(),
     pending: true,
   } as Purchase;
