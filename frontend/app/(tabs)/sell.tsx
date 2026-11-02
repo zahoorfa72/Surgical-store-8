@@ -24,7 +24,8 @@ import { useOffline } from "@/src/offline";
 import { Product } from "@/src/models";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { OrderImageScannerModal } from "@/src/components/order-image-scanner";
-import { EmptyState, Loader, ScreenHeader, money, useToast } from "@/src/ui";
+import { EmptyState, Loader, ScreenHeader, TransactionDateField, money, todayIsoDate, useToast } from "@/src/ui";
+import { DateCalendar } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
@@ -48,6 +49,7 @@ export default function Sell() {
 
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [transactionDate, setTransactionDate] = useState(todayIsoDate());
   const [productKits, setProductKits] = useState<ProductKit[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [custPickerOpen, setCustPickerOpen] = useState(false);
@@ -377,6 +379,7 @@ export default function Sell() {
     try {
       const { sale, queued } = await createSale(
         {
+          transaction_date: transactionDate,
           items: lines.map((c) => ({ product_id: c.id, quantity: Math.floor(c.quantity), unit_price: Number(c.unit_price) })),
           customer_id: customerId,
           discount: Number(discountNum),
@@ -412,6 +415,7 @@ export default function Sell() {
       setPendingBalanceAdjustment(0);
       setApplyCustomerCredit(false);
       setCart([]);
+      setTransactionDate(todayIsoDate());
       setDiscount("0");
       setCustomerId(null);
       setCredit(false);
@@ -583,6 +587,8 @@ export default function Sell() {
                 <Text style={styles.forceStockHint}>All products can be added above. Checkout is blocked if any line exceeds stock until this box is checked.</Text>
               </View>
             </Pressable>
+
+            <TransactionDateField label="Sale date" value={transactionDate} onChange={setTransactionDate} testID="sale-date-input" />
 
             <Pressable
               testID="select-customer-button"
