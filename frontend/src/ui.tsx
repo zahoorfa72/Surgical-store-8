@@ -26,7 +26,7 @@ import { useIsOnline } from "@/src/use-online";
 import { getConnectionMode, setConnectionMode } from "@/src/api";
 import type { ConnectionMode } from "@/src/api";
 
-export { money, num, formatDate, formatDateTime, CURRENCY } from "@/src/format";
+export { money, num, formatDate, formatDateTime, formatTransactionDate, formatTransactionDateTime, localDateIso, todayIsoDate, transactionDateIso, CURRENCY } from "@/src/format";
 
 // ---------------------------------------------------------------------------
 // Manual connection mode
