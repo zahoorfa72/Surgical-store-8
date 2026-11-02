@@ -82,6 +82,7 @@ export type Sale = {
   cashier_name: string;
   credit?: boolean; // sold on credit -> adds to customer's owed balance
   created_at: string;
+  transaction_date?: string;
   pending?: boolean; // true while a locally-created sale is waiting to sync
 };
 
@@ -103,6 +104,7 @@ export type Purchase = {
   note: string;
   user_name: string;
   created_at: string;
+  transaction_date?: string;
   pending?: boolean; // true while a locally-created purchase is waiting to sync
 };
 
@@ -116,6 +118,7 @@ export type Expense = {
   note: string;
   user_name: string;
   created_at: string;
+  transaction_date?: string;
 };
 
 export type ReportSummary = {
