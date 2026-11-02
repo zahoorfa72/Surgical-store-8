@@ -10,8 +10,8 @@ import { apiRequest } from "@/src/api";
 import { useParties, useProducts, usePurchase, qk } from "@/src/data";
 import { useAuth } from "@/src/auth";
 import { useOffline } from "@/src/offline";
-import { EmptyState, ScreenHeader, TransactionDateField, money, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
-import { DateCalendar } from "@/src/components/date-calendar";
+import { EmptyState, ScreenHeader, money, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
+import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
