@@ -220,6 +220,44 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def normalize_transaction_date(value: Optional[str], fallback: Optional[str] = None) -> str:
+    """Return a validated YYYY-MM-DD business date without changing the record timestamp."""
+    raw = str(value or fallback or now_iso()).strip()[:10]
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date().isoformat()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid transaction date. Use YYYY-MM-DD.")
+
+
+def _transaction_date_matches(row: dict, start: Optional[datetime], end: Optional[datetime], tz_offset_minutes: int = 0) -> bool:
+    """Filter by business date, falling back to created_at for older records."""
+    raw_date = row.get("transaction_date")
+    if raw_date:
+        try:
+            business_day = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            business_day = None
+        if business_day is not None:
+            local_start = (start - timedelta(minutes=tz_offset_minutes)).date() if start else None
+            local_end = (end - timedelta(minutes=tz_offset_minutes)).date() if end else None
+            return (local_start is None or business_day >= local_start) and (local_end is None or business_day < local_end)
+    raw_created = row.get("created_at")
+    if not raw_created:
+        return start is None and end is None
+    try:
+        created = raw_created if isinstance(raw_created, datetime) else datetime.fromisoformat(str(raw_created).replace("Z", "+00:00"))
+        created = created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    return (start is None or created >= start) and (end is None or created < end)
+
+
+def _filter_transaction_dates(rows: list[dict], start: Optional[datetime], end: Optional[datetime], tz_offset_minutes: int = 0) -> list[dict]:
+    if start is None and end is None:
+        return rows
+    return [row for row in rows if _transaction_date_matches(row, start, end, tz_offset_minutes)]
+
+
 # ----- Auth models -----
 class UserCreate(BaseModel):
     email: EmailStr
@@ -334,6 +372,7 @@ class SaleItemIn(BaseModel):
 
 class SaleIn(BaseModel):
     items: List[SaleItemIn]
+    transaction_date: Optional[str] = None
     customer_id: Optional[str] = None
     discount: float = 0
     note: str = ""
@@ -352,6 +391,7 @@ class PurchaseItemIn(BaseModel):
 
 class PurchaseIn(BaseModel):
     items: List[PurchaseItemIn]
+    transaction_date: Optional[str] = None
     supplier_id: Optional[str] = None
     note: str = ""
 
@@ -660,6 +700,7 @@ class ExpenseIn(BaseModel):
     bucket: ExpenseBucket = ExpenseBucket.operating
     amount: float
     note: str = ""
+    transaction_date: Optional[str] = None
 
 
 # ----- Return / refund models -----
@@ -1756,9 +1797,10 @@ async def get_budget(_: Staff):
     opening_transactions = await list_opening_budget_transactions(_)
     opening = round(sum(float(row.get("amount", 0) or 0) for row in opening_transactions), 2)
     start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    month_expenses = await db.expenses.find(
-        {"deleted": {"$ne": True}, "created_at": {"$gte": start.isoformat()}}
-    ).to_list(10000)
+    month_expenses = _filter_transaction_dates(
+        await db.expenses.find({"deleted": {"$ne": True}}).to_list(10000),
+        start, None, 0,
+    )
     spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
     purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
     purchase_spent = round(sum(p.get("total", 0) for p in purchase_docs), 2)
@@ -1798,6 +1840,7 @@ def sale_public(d: dict) -> dict:
         "cashier_name": d.get("cashier_name", ""),
         "credit": d.get("credit", False),
         "created_at": d.get("created_at"),
+        "transaction_date": str(d.get("transaction_date") or d.get("created_at") or "")[:10],
     }
 
 
@@ -1917,6 +1960,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
     combined_due = round(max(0.0, previous_balance + total), 2) if previous_balance else amount_due
 
     seq = await next_seq("sale")
+    created_at = now_iso()
     doc = {
         "invoice_no": f"INV-{seq:05d}",
         "serial_no": seq,
@@ -1938,7 +1982,8 @@ async def create_sale(body: SaleIn, user: AnyUser):
         "credit": credit,
         "allow_negative_stock": bool(body.allow_negative_stock),
         "deleted": False,
-        "created_at": now_iso(),
+        "transaction_date": normalize_transaction_date(body.transaction_date, created_at),
+        "created_at": created_at,
     }
     res = await db.sales.insert_one(doc)
     doc["_id"] = res.inserted_id
@@ -2009,6 +2054,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
     sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
     if not sale or sale.get("deleted"):
         raise HTTPException(status_code=404, detail="Sale not found")
+    transaction_date = normalize_transaction_date(body.transaction_date, sale.get("transaction_date") or sale.get("created_at"))
     if user["role"] == Role.cashier.value and sale.get("cashier_id") != oid(user["_id"]):
         raise HTTPException(status_code=403, detail="Cashiers can edit only their own sales")
     if not body.items:
@@ -2112,6 +2158,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                 "profit": round(total - old_cogs, 2),
                 "note": body.note,
                 "allow_negative_stock": bool(body.allow_negative_stock),
+                "transaction_date": transaction_date,
                 "edited_at": now_iso(),
             }},
         )
@@ -2210,6 +2257,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             "profit": round(total - cogs, 2),
             "note": body.note,
             "allow_negative_stock": bool(body.allow_negative_stock),
+            "transaction_date": transaction_date,
             "edited_at": now_iso(),
         }},
     )
@@ -2238,6 +2286,7 @@ def purchase_public(d: dict) -> dict:
         "note": d.get("note", ""),
         "user_name": d.get("user_name", ""),
         "created_at": d.get("created_at"),
+        "transaction_date": str(d.get("transaction_date") or d.get("created_at") or "")[:10],
     }
 
 
@@ -2298,6 +2347,7 @@ async def create_purchase(body: PurchaseIn, user: Staff):
             supplier_name = s["name"]
 
     seq = await next_seq("purchase")
+    created_at = now_iso()
     doc = {
         "ref_no": f"PO-{seq:05d}",
         "items": items,
@@ -2307,7 +2357,8 @@ async def create_purchase(body: PurchaseIn, user: Staff):
         "note": body.note,
         "user_name": user.get("name", user["email"]),
         "deleted": False,
-        "created_at": now_iso(),
+        "transaction_date": normalize_transaction_date(body.transaction_date, created_at),
+        "created_at": created_at,
     }
     res = await db.purchases.insert_one(doc)
     doc["_id"] = res.inserted_id
@@ -2389,6 +2440,7 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
     purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
     if not purchase or purchase.get("deleted"):
         raise HTTPException(status_code=404, detail="Purchase not found")
+    transaction_date = normalize_transaction_date(body.transaction_date, purchase.get("transaction_date") or purchase.get("created_at"))
     if not body.items:
         raise HTTPException(status_code=400, detail="Purchase must have at least one item")
 
@@ -2463,6 +2515,7 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             "supplier_name": supplier_name,
             "total": round(total, 2),
             "note": body.note,
+            "transaction_date": transaction_date,
             "edited_at": now_iso(),
         }},
     )
@@ -2496,6 +2549,7 @@ def expense_public(d: dict) -> dict:
         "note": d.get("note", ""),
         "user_name": d.get("user_name", ""),
         "created_at": d.get("created_at"),
+        "transaction_date": str(d.get("transaction_date") or d.get("created_at") or "")[:10],
     }
 
 
@@ -2512,7 +2566,9 @@ async def list_expenses(_: Staff, bucket: Optional[ExpenseBucket] = None):
 async def create_expense(body: ExpenseIn, user: Staff):
     doc = body.model_dump()
     doc["bucket"] = body.bucket.value
-    doc.update({"deleted": False, "user_name": user.get("name", user["email"]), "created_at": now_iso()})
+    created_at = now_iso()
+    doc["transaction_date"] = normalize_transaction_date(body.transaction_date, created_at)
+    doc.update({"deleted": False, "user_name": user.get("name", user["email"]), "created_at": created_at})
     res = await db.expenses.insert_one(doc)
     doc["_id"] = res.inserted_id
     return expense_public(doc)
@@ -2529,7 +2585,9 @@ async def edit_expense(expense_id: str, body: ExpenseIn, _: AdminOnly):
     if not ObjectId.is_valid(expense_id): raise HTTPException(status_code=404, detail="Expense not found")
     existing = await db.expenses.find_one({"_id": ObjectId(expense_id), "deleted": {"$ne": True}})
     if not existing: raise HTTPException(status_code=404, detail="Expense not found")
-    update = body.model_dump(); update["bucket"] = body.bucket.value; update["edited_at"] = now_iso()
+    update = body.model_dump(); update["bucket"] = body.bucket.value
+    update["transaction_date"] = normalize_transaction_date(body.transaction_date, existing.get("transaction_date") or existing.get("created_at"))
+    update["edited_at"] = now_iso()
     await db.expenses.update_one({"_id": ObjectId(expense_id)}, {"$set": update})
     return expense_public(await db.expenses.find_one({"_id": ObjectId(expense_id)}))
 
@@ -2919,7 +2977,10 @@ async def report_inventory_usage(
         time_q["created_at"]["$gte"] = start.isoformat()
     if end:
         time_q["created_at"]["$lt"] = end.isoformat()
-    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    sales = _filter_transaction_dates(
+        await db.sales.find({"deleted": {"$ne": True}}).to_list(20000),
+        start, end, tz_offset_minutes,
+    )
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
     all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": {"$in": ["lost_product", "profit_product"]}, "deleted": {"$ne": True}}).to_list(20000)
@@ -3014,10 +3075,19 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # therefore be filtered independently from the original sale/purchase;
     # otherwise a return made today against an older invoice disappears from
     # today's cash report.
-    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    sales = _filter_transaction_dates(
+        await db.sales.find({"deleted": {"$ne": True}}).to_list(10000),
+        start, end, tz_offset_minutes,
+    )
     all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
-    expenses = await db.expenses.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
-    purchases = await db.purchases.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
+    expenses = _filter_transaction_dates(
+        await db.expenses.find({"deleted": {"$ne": True}}).to_list(10000),
+        start, end, tz_offset_minutes,
+    )
+    purchases = _filter_transaction_dates(
+        await db.purchases.find({"deleted": {"$ne": True}}).to_list(10000),
+        start, end, tz_offset_minutes,
+    )
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
@@ -3220,7 +3290,10 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
 async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
-    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    sales = _filter_transaction_dates(
+        await db.sales.find({"deleted": {"$ne": True}}).to_list(20000),
+        start, None, tz_offset_minutes,
+    )
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     agg: dict = {}
     for s in sales:
@@ -3247,7 +3320,10 @@ async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int 
 async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
-    sales = await db.sales.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    sales = _filter_transaction_dates(
+        await db.sales.find({"deleted": {"$ne": True}}).to_list(20000),
+        start, None, tz_offset_minutes,
+    )
 
     def summarize(rows):
         gross = round(sum(s.get("total", 0) for s in rows), 2)
