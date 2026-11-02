@@ -10,7 +10,8 @@ import { apiRequest } from "@/src/api";
 import { useParties, useProducts, usePurchase, qk } from "@/src/data";
 import { useAuth } from "@/src/auth";
 import { useOffline } from "@/src/offline";
-import { EmptyState, ScreenHeader, money, useToast } from "@/src/ui";
+import { EmptyState, ScreenHeader, TransactionDateField, money, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
+import { DateCalendar } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
@@ -51,6 +52,7 @@ export default function Purchase() {
   const [newSupplierPhone, setNewSupplierPhone] = useState("");
   const [newSupplierAddress, setNewSupplierAddress] = useState("");
   const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [transactionDate, setTransactionDate] = useState(todayIsoDate());
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
 
@@ -67,6 +69,7 @@ export default function Purchase() {
       );
       setCostText(Object.fromEntries(editing.items.map((it) => [String(it.product_id), String(it.unit_cost ?? 0)])));
       setSupplierId(editing.supplier_id ?? null);
+      setTransactionDate(transactionDateIso(editing.transaction_date, editing.created_at));
       setPrefilled(true);
     }
   }, [isEdit, editing, prefilled]);
@@ -195,6 +198,7 @@ export default function Purchase() {
     setBusy(true);
     const body = {
       supplier_id: supplierId,
+      transaction_date: transactionDate,
       items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_cost: l.unit_cost })),
     };
     try {
@@ -228,6 +232,7 @@ export default function Purchase() {
           <Text style={styles.supplierText}>{supplierName}</Text>
           <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
         </Pressable>
+        <TransactionDateField label="Purchase date" value={transactionDate} onChange={setTransactionDate} testID="purchase-date-input" />
 
         {lines.length === 0 ? (
           <EmptyState icon="truck-plus" title="No products added" message="Tap the button below to add products to purchase." testID="purchase-empty" />
