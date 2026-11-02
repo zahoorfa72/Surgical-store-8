@@ -9,8 +9,8 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { useExpenses, qk } from "@/src/data";
 import { EXPENSE_CATEGORIES, ExpenseBucket } from "@/src/models";
-import { Field, PrimaryButton, ScreenHeader, TransactionDateField, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
-import { DateCalendar } from "@/src/components/date-calendar";
+import { Field, PrimaryButton, ScreenHeader, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
+import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 
 export default function ExpenseForm() {
