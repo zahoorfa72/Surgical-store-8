@@ -12,7 +12,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { useSale, useSettings } from "@/src/data";
 import { Sale } from "@/src/models";
 import { canManageStore, useAuth } from "@/src/auth";
-import { Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
+import { Loader, ScreenHeader, formatTransactionDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
 const STORE_NAME = "Surgical Store";
@@ -175,7 +175,7 @@ export default function Receipt() {
           <View style={styles.metaBox}>
             <Meta label="Serial No." value={String(sale.serial_no ?? (sale.invoice_no || "").replace(/^INV-/, ""))} />
             <Meta label="Invoice" value={sale.invoice_no} />
-            <Meta label="Date" value={formatDateTime(sale.created_at)} />
+            <Meta label="Date" value={formatTransactionDateTime(sale.transaction_date, sale.created_at)} />
             <Meta label="Customer" value={sale.customer_name} />
             <Meta label="Served by" value={sale.cashier_name} />
           </View>
