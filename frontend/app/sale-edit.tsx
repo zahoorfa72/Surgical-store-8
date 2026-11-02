@@ -9,7 +9,8 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { useParties, useSale, useProducts, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
-import { Loader, ScreenHeader, money, useToast } from "@/src/ui";
+import { Loader, ScreenHeader, TransactionDateField, money, transactionDateIso, useToast } from "@/src/ui";
+import { DateCalendar } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 
@@ -31,6 +32,7 @@ export default function SaleEdit() {
   const { data: products } = useProducts();
 
   const [lines, setLines] = useState<Line[]>([]);
+  const [transactionDate, setTransactionDate] = useState("");
   const [discount, setDiscount] = useState("0");
   const [credit, setCredit] = useState(false);
   const [customerId, setCustomerId] = useState<string | null>(null);
@@ -70,6 +72,7 @@ export default function SaleEdit() {
         })),
       );
       setDiscount(String(sale.discount ?? 0));
+      setTransactionDate(transactionDateIso(sale.transaction_date, sale.created_at));
       setCustomerId(sale.customer_id ?? null);
       setCredit(Boolean(sale.credit && sale.customer_id));
       setApplyCustomerCredit(Number(sale.credit_applied ?? 0) > 0);
@@ -160,6 +163,7 @@ export default function SaleEdit() {
         method: "PUT",
         body: {
           items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_price: l.unit_price })),
+          transaction_date: transactionDate,
           customer_id: customerId,
           // Credit can be explicitly switched on/off while editing.
           credit: Boolean(credit && customerId),
@@ -211,6 +215,7 @@ export default function SaleEdit() {
     <View style={styles.root}>
       <ScreenHeader title={`Edit ${sale.invoice_no}`} subtitle={saleEditLockHours > 0 ? `Edit policy: ${saleEditLockHours}h` : (showSellProfitDiscount ? "Adjust items, price & discount" : "Adjust items & price")} topInset={insets.top} onBack={() => router.back()} />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 12 }} bottomOffset={20}>
+        <TransactionDateField label="Sale date" value={transactionDate || transactionDateIso(sale.transaction_date, sale.created_at)} onChange={setTransactionDate} testID="edit-sale-date-input" />
         <Pressable testID="edit-select-customer-button" style={styles.customerRow} onPress={() => setCustPickerOpen(true)}>
           <MaterialDesignIcons name="account" size={20} color={colors.brandPrimary} />
           <Text style={styles.customerText}>{customerName}</Text>
