@@ -9,7 +9,8 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { useExpenses, qk } from "@/src/data";
 import { EXPENSE_CATEGORIES, ExpenseBucket } from "@/src/models";
-import { Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
+import { Field, PrimaryButton, ScreenHeader, TransactionDateField, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
+import { DateCalendar } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 
 export default function ExpenseForm() {
@@ -28,12 +29,16 @@ export default function ExpenseForm() {
   const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
   const [bucket, setBucket] = useState<ExpenseBucket>("operating");
   const [note, setNote] = useState("");
+  const [transactionDate, setTransactionDate] = useState(todayIsoDate());
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (editing && expenses) {
       const e = expenses.find(x => x.id === id);
-      if (e) { setTitle(e.title); setAmount(String(e.amount)); setCategory(e.category); setBucket(e.bucket); setNote(e.note); }
+      if (e) {
+        setTitle(e.title); setAmount(String(e.amount)); setCategory(e.category); setBucket(e.bucket); setNote(e.note);
+        setTransactionDate(transactionDateIso(e.transaction_date, e.created_at));
+      }
     }
   }, [editing, id, expenses]);
 
@@ -44,7 +49,7 @@ export default function ExpenseForm() {
     try {
       await apiRequest(editing ? `/expenses/${id}` : "/expenses", {
         method: editing ? "PUT" : "POST",
-        body: { title: title.trim(), category, bucket, amount: parseFloat(amount), note: note.trim() },
+        body: { title: title.trim(), category, bucket, amount: parseFloat(amount), note: note.trim(), transaction_date: transactionDate },
       });
       await queryClient.invalidateQueries({ queryKey: qk.expenses(undefined) });
       await queryClient.invalidateQueries({ queryKey: qk.expenses(bucket) });
@@ -63,6 +68,7 @@ export default function ExpenseForm() {
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 18 }} bottomOffset={20}>
         <Field label="Title" testID="expense-title-input" value={title} onChangeText={setTitle} placeholder="e.g. Monthly rent" />
         <Field label="Amount" testID="expense-amount-input" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0" />
+        <TransactionDateField label="Expense date" value={transactionDate} onChange={setTransactionDate} testID="expense-date-input" />
 
         <View style={{ gap: 8 }}>
           <Text style={styles.label}>Expense type</Text>
