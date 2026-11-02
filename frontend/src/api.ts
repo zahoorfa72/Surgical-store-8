@@ -12,6 +12,7 @@ import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 import { queryClient } from "@/src/query-client";
 import { addToTrash } from "@/src/trash";
+import { todayIsoDate } from "@/src/format";
 
 const RAW_BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -265,7 +266,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
   } else if (entity === "expenses") {
     const keys = [["expenses", "all"], ["expenses", "cogs"], ["expenses", "operating"], ["expenses", "personal"]];
     if (method === "POST") {
-      const rec = { id: tempId, title: body.title, category: body.category ?? "Other", bucket: body.bucket ?? "operating", amount: body.amount ?? 0, note: body.note ?? "", user_name: "", created_at: now(), pending: true };
+      const rec = { id: tempId, title: body.title, category: body.category ?? "Other", bucket: body.bucket ?? "operating", amount: body.amount ?? 0, note: body.note ?? "", user_name: "", transaction_date: body.transaction_date || todayIsoDate(), created_at: now(), pending: true };
       queryClient.setQueryData<any[]>(["expenses", "all"], (old) => [rec, ...(old ?? [])]);
       queryClient.setQueryData<any[]>(["expenses", rec.bucket], (old) => [rec, ...(old ?? [])]);
     } else if (method === "PUT" && id) {
@@ -455,7 +456,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       const rec = { id: tempId, invoice_no: `OFFLINE-INV-${tempId.split("-").pop()}`, items,
         customer_id: body.customer_id ?? null, customer_name: customer?.name ?? "Walk-in",
         subtotal, discount, total, cogs, profit: total - cogs, note: body.note ?? "",
-        credit: !!(body.credit && body.customer_id), cashier_name: "", created_at: now(), pending: true };
+        credit: !!(body.credit && body.customer_id), cashier_name: "", transaction_date: body.transaction_date || todayIsoDate(), created_at: now(), pending: true };
       queryClient.setQueryData<any[]>(["sales"], (old) => [rec, ...(old ?? [])]);
       queryClient.setQueryData<any>(["sale", tempId], rec);
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
