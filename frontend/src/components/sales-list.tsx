@@ -9,7 +9,7 @@ import { apiRequest } from "@/src/api";
 import { useSales, useReturns, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Sale } from "@/src/models";
-import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
+import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatTransactionDateTime, money, transactionDateIso, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeSaleProfit } from "@/src/utils/finance-display";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
@@ -59,14 +59,13 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
     const q = search.trim().toLowerCase();
     const d = date.trim();
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
-    const localDate = (iso: string) => { const x = new Date(iso); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
     const searchFiltered = fuzzyFilter(
       sales ?? [],
       q,
       [(s) => s.invoice_no, (s) => s.customer_name],
     );
     return searchFiltered.filter((s) => {
-      const matchesDate = !validDate || localDate(String(s.created_at ?? "")) === d;
+      const matchesDate = !validDate || transactionDateIso(s.transaction_date, s.created_at) === d;
       return matchesDate;
     });
   }, [sales, search, date]);
@@ -174,7 +173,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                     )}
                   </View>
                   <Text style={styles.meta}>
-                    {item.customer_name} · {formatDateTime(item.created_at)}
+                    {item.customer_name} · {formatTransactionDateTime(item.transaction_date, item.created_at)}
                   </Text>
                   <Text style={styles.sub}>
                     {item.items.length} item(s) · by {item.cashier_name}
