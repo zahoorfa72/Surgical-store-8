@@ -9,7 +9,7 @@ import { apiRequest } from "@/src/api";
 import { usePurchases, usePurchaseReturns, useProducts, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Purchase } from "@/src/models";
-import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
+import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatTransactionDateTime, money, transactionDateIso, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { DateCalendar } from "@/src/components/date-calendar";
 import { getHiddenSupplierIds } from "@/src/utils/finance-display";
@@ -54,14 +54,13 @@ export default function PurchasesHistory() {
     const q = search.trim().toLowerCase();
     const d = date.trim();
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
-    const localDate = (iso: string) => { const x = new Date(iso); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; };
     const searchFiltered = fuzzyFilter(
       (purchases ?? []).filter((p) => !(p.supplier_id && hiddenSupplierIds.includes(p.supplier_id))),
       q,
       [(p) => p.ref_no, (p) => p.supplier_name],
     );
     return searchFiltered.filter((p) => {
-      const matchesDate = !validDate || localDate(String(p.created_at ?? "")) === d;
+      const matchesDate = !validDate || transactionDateIso(p.transaction_date, p.created_at) === d;
       return matchesDate;
     });
   }, [purchases, search, date, hiddenSupplierIds]);
@@ -214,7 +213,7 @@ export default function PurchasesHistory() {
                     )}
                   </View>
                   <Text style={styles.meta}>
-                    {item.supplier_name} · {formatDateTime(item.created_at)}
+                    {item.supplier_name} · {formatTransactionDateTime(item.transaction_date, item.created_at)}
                   </Text>
                   <Text style={styles.sub}>{item.items.length} item(s) · by {item.user_name}</Text>
                 </View>
