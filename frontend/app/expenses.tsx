@@ -9,7 +9,7 @@ import { apiRequest } from "@/src/api";
 import { isAdmin, useAuth } from "@/src/auth";
 import { useBudget, useExpenses, qk } from "@/src/data";
 import { Expense, ExpenseBucket } from "@/src/models";
-import { Badge, ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, money, useToast } from "@/src/ui";
+import { Badge, ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatTransactionDate, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
 const FILTERS = [
@@ -150,7 +150,7 @@ export default function Expenses() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.title}>{item.title}</Text>
-                  <Text style={styles.meta}>{item.category} · {formatDate(item.created_at)}</Text>
+                  <Text style={styles.meta}>{item.category} · {formatTransactionDate(item.transaction_date, item.created_at)}</Text>
                   <View style={{ marginTop: 4, flexDirection: "row" }}>
                     <Badge text={b.text} tone={b.tone} />
                   </View>
