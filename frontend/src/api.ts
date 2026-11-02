@@ -601,7 +601,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       const supplier = supplierId ? (queryClient.getQueryData<any[]>(["parties", "supplier"]) ?? []).find((p: any) => p.id === supplierId) : null;
       const rec = { id: tempId, ref_no: `OFFLINE-PO-${tempId.split("-").pop()}`,
         items, supplier_id: supplierId, supplier_name: supplier?.name ?? "—",
-        total, note: body.note ?? "", user_name: "", created_at: now(), pending: true };
+        total, note: body.note ?? "", user_name: "", transaction_date: body.transaction_date || todayIsoDate(), created_at: now(), pending: true };
       queryClient.setQueryData<any[]>(["purchases"], (old) => [rec, ...(old ?? [])]);
       queryClient.setQueryData<any>(["purchase", tempId], rec);
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
