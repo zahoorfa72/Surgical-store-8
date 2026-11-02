@@ -2,6 +2,29 @@ import { useEffect, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 import { useTheme } from "@/src/theme";
+import { formatDate } from "@/src/format";
+
+export function TransactionDateField({ value, onChange, label = "Transaction date", testID = "transaction-date-field" }: {
+  value: string; onChange: (iso: string) => void; label?: string; testID?: string;
+}) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  return <>
+    <View style={{ gap: 6 }}>
+      <Text style={{ color: colors.muted, fontSize: 12, fontWeight: "700" }}>{label}</Text>
+      <Pressable
+        testID={testID}
+        onPress={() => setOpen(true)}
+        style={{ minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10 }}
+      >
+        <MaterialDesignIcons name="calendar-month-outline" size={20} color={colors.brandPrimary} />
+        <Text style={{ flex: 1, color: colors.onSurface, fontSize: 15, fontWeight: "700" }}>{formatDate(value + "T12:00:00")}</Text>
+        <MaterialDesignIcons name="chevron-down" size={20} color={colors.muted} />
+      </Pressable>
+    </View>
+    <DateCalendar visible={open} initialIso={value} onSelect={onChange} onClose={() => setOpen(false)} />
+  </>;
+}
 
 export function DateCalendar({ visible, initialIso, onSelect, onClose }: {
   visible: boolean; initialIso: string; onSelect: (iso: string) => void; onClose: () => void;
