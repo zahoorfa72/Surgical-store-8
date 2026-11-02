@@ -9,8 +9,8 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { useParties, useSale, useProducts, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
-import { Loader, ScreenHeader, TransactionDateField, money, transactionDateIso, useToast } from "@/src/ui";
-import { DateCalendar } from "@/src/components/date-calendar";
+import { Loader, ScreenHeader, money, transactionDateIso, useToast } from "@/src/ui";
+import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 
