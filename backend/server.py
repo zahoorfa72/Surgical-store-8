@@ -252,10 +252,28 @@ def _transaction_date_matches(row: dict, start: Optional[datetime], end: Optiona
     return (start is None or created >= start) and (end is None or created < end)
 
 
-def _filter_transaction_dates(rows: list[dict], start: Optional[datetime], end: Optional[datetime], tz_offset_minutes: int = 0) -> list[dict]:
+def transaction_date_query(start: Optional[datetime], end: Optional[datetime], tz_offset_minutes: int = 0) -> dict:
+    """Build a database-side date filter that also includes legacy rows without transaction_date."""
     if start is None and end is None:
-        return rows
-    return [row for row in rows if _transaction_date_matches(row, start, end, tz_offset_minutes)]
+        return {}
+    local_start = (start - timedelta(minutes=tz_offset_minutes)).date().isoformat() if start else None
+    local_end = (end - timedelta(minutes=tz_offset_minutes)).date().isoformat() if end else None
+    business_range: dict = {}
+    recorded_range: dict = {}
+    if local_start:
+        business_range["$gte"] = local_start
+    if local_end:
+        business_range["$lt"] = local_end
+    if start:
+        recorded_range["$gte"] = start.isoformat()
+    if end:
+        recorded_range["$lt"] = end.isoformat()
+    return {
+        "$or": [
+            {"transaction_date": business_range},
+            {"transaction_date": {"$exists": False}, "created_at": recorded_range},
+        ]
+    }
 
 
 # ----- Auth models -----
@@ -1797,10 +1815,10 @@ async def get_budget(_: Staff):
     opening_transactions = await list_opening_budget_transactions(_)
     opening = round(sum(float(row.get("amount", 0) or 0) for row in opening_transactions), 2)
     start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    month_expenses = _filter_transaction_dates(
-        await db.expenses.find({"deleted": {"$ne": True}}).to_list(10000),
-        start, None, 0,
-    )
+    month_expenses = await db.expenses.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, None, 0),
+    }).to_list(10000)
     spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
     purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
     purchase_spent = round(sum(p.get("total", 0) for p in purchase_docs), 2)
@@ -2977,10 +2995,10 @@ async def report_inventory_usage(
         time_q["created_at"]["$gte"] = start.isoformat()
     if end:
         time_q["created_at"]["$lt"] = end.isoformat()
-    sales = _filter_transaction_dates(
-        await db.sales.find({"deleted": {"$ne": True}}).to_list(20000),
-        start, end, tz_offset_minutes,
-    )
+    sales = await db.sales.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, end, tz_offset_minutes),
+    }).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
     all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": {"$in": ["lost_product", "profit_product"]}, "deleted": {"$ne": True}}).to_list(20000)
@@ -3075,19 +3093,19 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # therefore be filtered independently from the original sale/purchase;
     # otherwise a return made today against an older invoice disappears from
     # today's cash report.
-    sales = _filter_transaction_dates(
-        await db.sales.find({"deleted": {"$ne": True}}).to_list(10000),
-        start, end, tz_offset_minutes,
-    )
+    sales = await db.sales.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, end, tz_offset_minutes),
+    }).to_list(10000)
     all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
-    expenses = _filter_transaction_dates(
-        await db.expenses.find({"deleted": {"$ne": True}}).to_list(10000),
-        start, end, tz_offset_minutes,
-    )
-    purchases = _filter_transaction_dates(
-        await db.purchases.find({"deleted": {"$ne": True}}).to_list(10000),
-        start, end, tz_offset_minutes,
-    )
+    expenses = await db.expenses.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, end, tz_offset_minutes),
+    }).to_list(10000)
+    purchases = await db.purchases.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, end, tz_offset_minutes),
+    }).to_list(10000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
@@ -3290,10 +3308,10 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
 async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
-    sales = _filter_transaction_dates(
-        await db.sales.find({"deleted": {"$ne": True}}).to_list(20000),
-        start, None, tz_offset_minutes,
-    )
+    sales = await db.sales.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, None, tz_offset_minutes),
+    }).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     agg: dict = {}
     for s in sales:
@@ -3320,10 +3338,10 @@ async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int 
 async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
-    sales = _filter_transaction_dates(
-        await db.sales.find({"deleted": {"$ne": True}}).to_list(20000),
-        start, None, tz_offset_minutes,
-    )
+    sales = await db.sales.find({
+        "deleted": {"$ne": True},
+        **transaction_date_query(start, None, tz_offset_minutes),
+    }).to_list(20000)
 
     def summarize(rows):
         gross = round(sum(s.get("total", 0) for s in rows), 2)
