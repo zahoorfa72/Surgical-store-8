@@ -53,6 +53,8 @@ export default function ExpenseForm() {
       });
       await queryClient.invalidateQueries({ queryKey: qk.expenses(undefined) });
       await queryClient.invalidateQueries({ queryKey: qk.expenses(bucket) });
+      await queryClient.invalidateQueries({ queryKey: qk.budget });
+      await queryClient.invalidateQueries({ queryKey: ["report"] });
       toast(editing ? "Expense updated" : "Expense added", "success");
       router.back();
     } catch (e: any) {
