@@ -1817,7 +1817,7 @@ async def get_budget(_: Staff):
     start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_expenses = await db.expenses.find({
         "deleted": {"$ne": True},
-        "created_at": {"$gte": start.isoformat()},
+        **transaction_date_query(start, None, 0),
     }).to_list(10000)
     spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
     purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
@@ -3102,9 +3102,11 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         **time_q,
     }).to_list(10000)
     all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    # Expenses are allocated to the month/day selected by the user.
+    # Legacy expenses without transaction_date continue using created_at.
     expenses = await db.expenses.find({
         "deleted": {"$ne": True},
-        **time_q,
+        **transaction_date_query(start, end, tz_offset_minutes),
     }).to_list(10000)
     purchases = await db.purchases.find({
         "deleted": {"$ne": True},
