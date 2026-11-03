@@ -3097,9 +3097,11 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # therefore be filtered independently from the original sale/purchase;
     # otherwise a return made today against an older invoice disappears from
     # today's cash report.
+    # Sales are grouped by the editable business date, not the immutable
+    # timestamp recording when the invoice was originally entered.
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **time_q,
+        **transaction_date_query(start, end, tz_offset_minutes),
     }).to_list(10000)
     all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
     # Expenses are allocated to the month/day selected by the user.
