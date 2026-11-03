@@ -1857,6 +1857,7 @@ def sale_public(d: dict) -> dict:
         "cashier_id": d.get("cashier_id"),
         "cashier_name": d.get("cashier_name", ""),
         "credit": d.get("credit", False),
+        "allow_negative_stock": d.get("allow_negative_stock", False),
         "created_at": d.get("created_at"),
         "transaction_date": str(d.get("transaction_date") or d.get("created_at") or "")[:10],
     }
