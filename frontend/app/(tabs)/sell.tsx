@@ -237,16 +237,14 @@ export default function Sell() {
   };
 
   const addToCart = (p: Product) => {
+    // Let staff build the full cart even when stock is zero/negative.
+    // Checkout still enforces the explicit "Allow out-of-stock / negative stock sale" permission.
     setCart((prev) => {
       const found = prev.find((c) => c.id === p.id);
       if (found) {
-        if (found.quantity >= p.quantity) {
-          toast(`Only ${p.quantity} in stock — checkout can still be completed below zero only when the permission box is checked`, "error");
-          return prev;
-        }
-        return prev.map((c) => (c.id === p.id ? { ...c, quantity: c.quantity + 1 } : c));
+        return prev.map((c) => (c.id === p.id ? { ...c, quantity: c.quantity + 1, stock: Number(p.quantity ?? 0) } : c));
       }
-      return [...prev, { id: p.id, name: p.name, stock: p.quantity, quantity: 1, unit_price: p.sale_price, threshold: p.low_stock_threshold }];
+      return [...prev, { id: p.id, name: p.name, stock: Number(p.quantity ?? 0), quantity: 1, unit_price: Number(p.sale_price ?? 0), threshold: p.low_stock_threshold }];
     });
   };
 
@@ -265,7 +263,7 @@ export default function Sell() {
   const setQty = (id: string, qty: number) => {
     setCart((prev) =>
       prev
-        .map((c) => (c.id === id ? { ...c, quantity: allowNegativeStock ? Math.max(0, qty) : Math.min(Math.max(0, qty), c.stock) } : c))
+        .map((c) => (c.id === id ? { ...c, quantity: Math.max(0, qty) } : c))
         .filter((c) => c.quantity > 0)
     );
   };
@@ -277,7 +275,7 @@ export default function Sell() {
     const n = parseInt(text || "0", 10);
     const qty = isNaN(n) ? 0 : n;
     setCart((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, quantity: allowNegativeStock ? Math.max(0, qty) : Math.min(Math.max(0, qty), c.stock) } : c))
+      prev.map((c) => (c.id === id ? { ...c, quantity: Math.max(0, qty) } : c))
     );
   };
   const setPrice = (id: string, price: number) =>
