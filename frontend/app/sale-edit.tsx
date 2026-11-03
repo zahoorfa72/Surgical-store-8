@@ -191,6 +191,8 @@ export default function SaleEdit() {
       await queryClient.invalidateQueries({ queryKey: qk.sales });
       await queryClient.invalidateQueries({ queryKey: qk.products });
       await queryClient.invalidateQueries({ queryKey: qk.sale(id!) });
+      await queryClient.invalidateQueries({ queryKey: ["report"] });
+      await queryClient.invalidateQueries({ queryKey: ["day-close"] });
       // Customer balances are derived from credit sales and payments. Refresh
       // them after editing the customer so both the old and new customer update.
       await queryClient.invalidateQueries({ queryKey: qk.parties("customer") });
