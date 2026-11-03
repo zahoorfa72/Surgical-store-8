@@ -81,6 +81,7 @@ export type Sale = {
   cashier_id?: string;
   cashier_name: string;
   credit?: boolean; // sold on credit -> adds to customer's owed balance
+  allow_negative_stock?: boolean;
   created_at: string;
   transaction_date?: string;
   pending?: boolean; // true while a locally-created sale is waiting to sync
