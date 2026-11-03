@@ -1928,11 +1928,11 @@ async def create_sale(body: SaleIn, user: AnyUser):
         layers = working_cost_layers.get(it.product_id)
         if layers is None:
             layers = await _ensure_cost_layers(p)
-        in_stock_qty = min(float(it.quantity), max(0.0, available))
-        if in_stock_qty > 0:
-            next_layers, line_cogs, cost_layers_used = _consume_cost_layers_with_breakdown(layers, in_stock_qty, float(p.get("purchase_price", 0) or 0))
-        else:
-            next_layers, line_cogs, cost_layers_used = layers, 0.0, []
+        # Value every sold unit, including the portion that takes stock below zero,
+        # at FIFO cost where available and the product purchase price as fallback.
+        next_layers, line_cogs, cost_layers_used = _consume_cost_layers_with_breakdown(
+            layers, float(it.quantity), float(p.get("purchase_price", 0) or 0)
+        )
         working_cost_layers[it.product_id] = next_layers
         unit_cost = round(line_cogs / it.quantity, 8) if it.quantity > 0 else 0.0
         subtotal += line_total
@@ -2103,7 +2103,10 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         if not p:
             raise HTTPException(status_code=400, detail="Product not found in cart")
         available_after_restore = float(p.get("quantity", 0) or 0) + old_qty.get(product_id, 0)
-        if requested_qty > available_after_restore and not body.allow_negative_stock:
+        # A price/discount-only edit must remain possible for an existing sale
+        # that was legitimately recorded below zero stock.
+        unchanged_qty = abs(requested_qty - old_qty.get(product_id, 0.0)) <= 1e-9
+        if requested_qty > available_after_restore and not body.allow_negative_stock and not unchanged_qty:
             raise HTTPException(status_code=400, detail=f"Only {available_after_restore:g} of {p['name']} available for this sale")
 
     # If only price, discount, customer, or note changed, do not touch stock
@@ -2212,11 +2215,11 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
             layers = working_cost_layers.get(it.product_id)
             if layers is None:
                 layers = await _ensure_cost_layers(p)
-            in_stock_qty = min(float(it.quantity), max(0.0, available))
-            if in_stock_qty > 0:
-                next_layers, line_cogs = _consume_cost_layers(layers, in_stock_qty)
-            else:
-                next_layers, line_cogs = layers, 0.0
+            # Preserve COGS for below-zero units using the product's purchase
+            # price when no FIFO stock layer exists.
+            next_layers, line_cogs = _consume_cost_layers(
+                layers, float(it.quantity), float(p.get("purchase_price", 0) or 0)
+            )
             working_cost_layers[it.product_id] = next_layers
             unit_cost = round(line_cogs / it.quantity, 8) if it.quantity > 0 else 0.0
             subtotal += line_total
