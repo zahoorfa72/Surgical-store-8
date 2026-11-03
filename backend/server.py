@@ -3095,16 +3095,16 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # today's cash report.
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, end, tz_offset_minutes),
+        **time_q,
     }).to_list(10000)
     all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
     expenses = await db.expenses.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, end, tz_offset_minutes),
+        **time_q,
     }).to_list(10000)
     purchases = await db.purchases.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, end, tz_offset_minutes),
+        **time_q,
     }).to_list(10000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
@@ -3340,7 +3340,7 @@ async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minute
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, None, tz_offset_minutes),
+        **time_q,
     }).to_list(20000)
 
     def summarize(rows):
