@@ -98,7 +98,10 @@ function localReport(range: string): ReportSummary {
   };
   const customPeriod = !!(exactStart || fromStart || toEnd || (monthStart && monthEnd) || (yearStart && yearEnd));
   const filterRows = <T extends { created_at?: string }>(rows: T[]) => customPeriod ? rows.filter(r => matchesDate(r.created_at)) : rows.filter(r => inRange(r.created_at, range));
-  const sales = filterRows(queryClient.getQueryData<Sale[]>(qk.sales) ?? []);
+  const saleRows = queryClient.getQueryData<Sale[]>(qk.sales) ?? [];
+  const sales = customPeriod
+    ? saleRows.filter((sale) => matchesDate(sale.transaction_date ?? sale.created_at))
+    : saleRows.filter((sale) => inRange(sale.transaction_date ?? sale.created_at, range));
   const purchases = filterRows(queryClient.getQueryData<Purchase[]>(qk.purchases) ?? []);
   const returns = filterRows(queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? []);
   const purchaseReturns = filterRows(queryClient.getQueryData<any[]>(qk.purchaseReturns) ?? []);
