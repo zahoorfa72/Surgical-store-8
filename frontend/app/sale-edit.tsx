@@ -155,7 +155,7 @@ export default function SaleEdit() {
     for (const [pid, qty] of requested) {
       const originalQty = sale.items.find((x) => x.product_id === pid)?.quantity ?? 0;
       const availableAfterRestore = (stockById.get(pid) ?? 0) + originalQty;
-      if (qty > availableAfterRestore && !Boolean(sale?.allow_negative_stock)) { const name = lines.find((l) => l.id === pid)?.name ?? "Product"; toast(name + " has only " + availableAfterRestore + " available for this sale", "error"); return; }
+      if (qty > availableAfterRestore && qty > originalQty && !Boolean(sale?.allow_negative_stock)) { const name = lines.find((l) => l.id === pid)?.name ?? "Product"; toast(name + " has only " + availableAfterRestore + " available for this sale", "error"); return; }
     }
     setBusy(true);
     try {
