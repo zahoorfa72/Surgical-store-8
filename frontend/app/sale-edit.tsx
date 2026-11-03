@@ -155,7 +155,7 @@ export default function SaleEdit() {
     for (const [pid, qty] of requested) {
       const originalQty = sale.items.find((x) => x.product_id === pid)?.quantity ?? 0;
       const availableAfterRestore = (stockById.get(pid) ?? 0) + originalQty;
-      if (qty > availableAfterRestore) { const name = lines.find((l) => l.id === pid)?.name ?? "Product"; toast(name + " has only " + availableAfterRestore + " available for this sale", "error"); return; }
+      if (qty > availableAfterRestore && !Boolean(sale?.allow_negative_stock)) { const name = lines.find((l) => l.id === pid)?.name ?? "Product"; toast(name + " has only " + availableAfterRestore + " available for this sale", "error"); return; }
     }
     setBusy(true);
     try {
@@ -164,6 +164,7 @@ export default function SaleEdit() {
         body: {
           items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_price: l.unit_price })),
           transaction_date: transactionDate,
+          allow_negative_stock: Boolean(sale?.allow_negative_stock),
           customer_id: customerId,
           // Credit can be explicitly switched on/off while editing.
           credit: Boolean(credit && customerId),
