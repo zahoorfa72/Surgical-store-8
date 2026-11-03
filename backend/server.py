@@ -1817,7 +1817,7 @@ async def get_budget(_: Staff):
     start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_expenses = await db.expenses.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, None, 0),
+        "created_at": {"$gte": start.isoformat()},
     }).to_list(10000)
     spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
     purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
@@ -2997,7 +2997,7 @@ async def report_inventory_usage(
         time_q["created_at"]["$lt"] = end.isoformat()
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, end, tz_offset_minutes),
+        **time_q,
     }).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
@@ -3310,7 +3310,7 @@ async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int 
     time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **transaction_date_query(start, None, tz_offset_minutes),
+        **time_q,
     }).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     agg: dict = {}
