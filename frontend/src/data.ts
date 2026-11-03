@@ -102,7 +102,10 @@ function localReport(range: string): ReportSummary {
   const purchases = filterRows(queryClient.getQueryData<Purchase[]>(qk.purchases) ?? []);
   const returns = filterRows(queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? []);
   const purchaseReturns = filterRows(queryClient.getQueryData<any[]>(qk.purchaseReturns) ?? []);
-  const expenses = filterRows(queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? []);
+  const expenseRows = queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? [];
+  const expenses = customPeriod
+    ? expenseRows.filter((expense) => matchesDate(expense.transaction_date ?? expense.created_at))
+    : expenseRows.filter((expense) => inRange(expense.transaction_date ?? expense.created_at, range));
   const payments = filterRows(queryClient.getQueryData<Payment[]>(qk.payments()) ?? []);
   const products = queryClient.getQueryData<Product[]>(qk.products) ?? [];
   const budget = queryClient.getQueryData<Budget>(qk.budget) ?? { monthly_amount: 0, opening_amount: 0, opening_transactions: [], spent_this_month: 0 };
