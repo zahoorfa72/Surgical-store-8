@@ -101,8 +101,8 @@ export function fakeReportRevenue(report: { revenue?: number }): number {
   return fakeDisplayAmount(report.revenue);
 }
 
-export function fakeReportProfit(report: { revenue?: number }): number {
-  return fakeReportRevenue(report) * 0.175;
+export function fakeReportProfit(report: { revenue?: number; lost_stock_gross_profit_transfer?: number }): number {
+  return fakeReportRevenue(report) * 0.175 - fakeDisplayAmount(report.lost_stock_gross_profit_transfer);
 }
 
 
@@ -110,14 +110,19 @@ export function fakeReportNetProfit(report: {
   revenue?: number;
   operating_expenses?: number;
   personal_expenses?: number;
+  lost_stock_gross_profit_transfer?: number;
   lost_products_net_profit_deduction?: number;
   profit_products_net_profit_addition?: number;
+  net_profit_adjustment?: number;
 }): number {
   const gross = fakeReportProfit(report);
   const expenses = fakeDisplayAmount(report.operating_expenses)
     + fakeDisplayAmount(report.personal_expenses)
     + fakeDisplayAmount(report.lost_products_net_profit_deduction);
-  return gross - expenses + fakeDisplayAmount(report.profit_products_net_profit_addition);
+  const adminAdjustment = Number(report.net_profit_adjustment ?? 0);
+  return gross - expenses
+    + fakeDisplayAmount(report.profit_products_net_profit_addition)
+    + (adminAdjustment >= 0 ? fakeDisplayAmount(adminAdjustment) : -fakeDisplayAmount(-adminAdjustment));
 }
 
 
