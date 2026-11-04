@@ -13,6 +13,7 @@ import {
 } from "@/src/models";
 import { AppUser } from "@/src/api";
 import { notifyLowStock } from "@/src/low-stock-notifications";
+import { storage } from "@/src/utils/storage";
 
 export const qk = {
   products: ["products"] as const,
@@ -70,6 +71,24 @@ function inRange(iso: string | undefined, range: string): boolean {
   if (!iso) return true;
   const start = startOfRange(range);
   return !start || new Date(iso) >= start;
+}
+
+async function loadLocalStockAdjustments(): Promise<void> {
+  const key = ["inventory-adjustments"] as const;
+  const cached = queryClient.getQueryData<any[]>(key) ?? [];
+  const [lostRows, profitRows] = await Promise.all([
+    storage.getItem<any[]>("ssm.lost-products.v1", []),
+    storage.getItem<any[]>("ssm.profit-products.v1", []),
+  ]);
+  const merged = [...cached, ...(lostRows ?? []), ...(profitRows ?? [])];
+  const unique = new Map<string, any>();
+  for (const row of merged) {
+    const id = String(row.client_id || row.id || [
+      row.product_id, row.date, row.delta, row.reason, row.loss_cost ?? row.profit_value,
+    ].join("|"));
+    if (!unique.has(id)) unique.set(id, row);
+  }
+  queryClient.setQueryData(key, Array.from(unique.values()));
 }
 
 function localReport(range: string): ReportSummary {
@@ -278,15 +297,24 @@ export function useReport(range: string, enabled = true) {
   const exactDate = range.startsWith("date:") ? range.slice(5) : null;
   const cacheRange = exactDate ? `date:${exactDate}` : range;
   return useQuery({ enabled, queryKey: qk.report(cacheRange), queryFn: async () => {
-    if ((await getConnectionMode()) === "offline") return localReport(range);
-    if (!(await online())) return localReport(range);
+    if ((await getConnectionMode()) === "offline") {
+      await loadLocalStockAdjustments();
+      return localReport(range);
+    }
+    if (!(await online())) {
+      await loadLocalStockAdjustments();
+      return localReport(range);
+    }
     try {
       const tzOffsetMinutes = new Date().getTimezoneOffset();
       const url = exactDate
         ? `/reports/summary?range=today&date=${encodeURIComponent(exactDate)}&tz_offset_minutes=${tzOffsetMinutes}`
         : `/reports/summary?range=${encodeURIComponent(range)}&tz_offset_minutes=${tzOffsetMinutes}`;
       return await apiRequest<ReportSummary>(url);
-    } catch { return localReport(range); }
+    } catch {
+      await loadLocalStockAdjustments();
+      return localReport(range);
+    }
   }});
 }
 export function useCustomers(range: string) {
