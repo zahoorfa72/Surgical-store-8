@@ -153,6 +153,7 @@ export default function Reports() {
             <Row label="Direct / purchase expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.cogs_expenses) : data.cogs_expenses)} />
             <Row label="Operating expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.operating_expenses) : data.operating_expenses)} />
             <Row label="Personal expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.personal_expenses) : data.personal_expenses)} />
+            <Row label="Lost product loss" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.lost_products_net_profit_deduction ?? 0) : data.lost_products_net_profit_deduction ?? 0)} />
             <Divider />
             <Row label="Total expenses" value={money(data.total_expenses)} bold tone="info" />
           </Card>
