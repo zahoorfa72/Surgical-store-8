@@ -154,6 +154,25 @@ function localReport(range: string): ReportSummary {
     .filter((row) => row.purchase_cost > 0);
   const lostStockGrossProfitTransfer = lostStockTransfers.reduce((sum, row) => sum + row.purchase_cost, 0);
   const grossProfit = grossProfitBeforeLostStock - lostStockGrossProfitTransfer;
+  const automaticLostRows = periodAdjustments.filter((row) => row.adjustment_type === "lost_product" && String(row.accounting_target ?? "none") === "none");
+  const automaticProfitRows = periodAdjustments.filter((row) => row.adjustment_type === "profit_product" && String(row.accounting_target ?? "none") === "none");
+  const lostProductsNetProfitDeduction = automaticLostRows.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
+  const profitProductsNetProfitAddition = automaticProfitRows.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
+  const stockAdjustmentDetail = (row: any, isLoss: boolean) => {
+    const amount = Math.round(Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)) * 100) / 100;
+    const product = products.find((item) => item.id === String(row.product_id || ""));
+    return {
+      product_id: String(row.product_id || ""),
+      product_name: product?.name ?? row.product_name ?? "Product",
+      date: String(row.date || row.created_at || "").slice(0, 10),
+      quantity: Math.abs(Number(row.delta ?? 0)),
+      reason: String(row.reason || ""),
+      purchase_cost: amount,
+      net_profit_change: isLoss ? -amount : amount,
+    };
+  };
+  const lostProductsNetProfitDetails = automaticLostRows.map((row) => stockAdjustmentDetail(row, true));
+  const profitProductsNetProfitDetails = automaticProfitRows.map((row) => stockAdjustmentDetail(row, false));
   const cogsGoods = sales.reduce((n, s) => n + Number(s.cogs ?? 0), 0) - returns.reduce((n, r) => n + Number(r.refund_cogs ?? 0), 0);
   const cogsExpenses = expenses.filter(e => e.bucket === "cogs").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const personal = expenses.filter(e => e.bucket === "personal").reduce((n, e) => n + Number(e.amount ?? 0), 0);
@@ -164,7 +183,7 @@ function localReport(range: string): ReportSummary {
   // exclusively from the amounts explicitly chosen by the admin.
   const selectedAdjustments = periodAdjustments.filter((row) => {
     const target = String(row.accounting_target ?? "none");
-    return target !== "none" && ["split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance"].includes(target);
+    return target !== "none" && target !== "inventory_only" && ["split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance"].includes(target);
   });
   const netProfitAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
   const remainingBalanceAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
@@ -189,8 +208,8 @@ function localReport(range: string): ReportSummary {
   return {
     range, revenue, gross_revenue: grossRevenue, returns_total: returnsTotal, returns_count: returns.length,
     cogs_goods: cogsGoods, cogs_expenses: cogsExpenses, cogs_total: cogsGoods + cogsExpenses,
-    personal_expenses: personal, gross_profit: grossProfit, gross_profit_before_lost_stock: grossProfitBeforeLostStock, lost_stock_gross_profit_transfer: lostStockGrossProfitTransfer, lost_stock_remaining_balance_addition: lostStockGrossProfitTransfer, lost_stock_transfers: lostStockTransfers, operating_expenses: operating, lost_products_cost: lostProductsCost, profit_products_value: profitProductsValue,
-    total_expenses: cogsExpenses + operating + personal,
+    personal_expenses: personal, gross_profit: grossProfit, gross_profit_before_lost_stock: grossProfitBeforeLostStock, lost_stock_gross_profit_transfer: lostStockGrossProfitTransfer, lost_stock_remaining_balance_addition: lostStockGrossProfitTransfer, lost_stock_transfers: lostStockTransfers, operating_expenses: operating, lost_products_cost: lostProductsCost, profit_products_value: profitProductsValue, lost_products_net_profit_deduction: lostProductsNetProfitDeduction, profit_products_net_profit_addition: profitProductsNetProfitAddition, lost_products_net_profit_details: lostProductsNetProfitDetails, profit_products_net_profit_details: profitProductsNetProfitDetails,
+    total_expenses: cogsExpenses + operating + personal + lostProductsNetProfitDeduction,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
     // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
     // Preserve the other agreed balance components and budget attribution.
@@ -199,7 +218,7 @@ function localReport(range: string): ReportSummary {
       + openingBudgetForRange + Number(budget.monthly_amount ?? 0) + remainingBalanceAdjustment,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
-    net_profit: grossProfit - personal - operating + netProfitAdjustment,
+    net_profit: grossProfit - personal - operating - lostProductsNetProfitDeduction + profitProductsNetProfitAddition + netProfitAdjustment,
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
     product_count: products.length,
     low_stock: products.filter(p => Number(p.quantity ?? 0) <= Number(p.low_stock_threshold ?? 0)),
