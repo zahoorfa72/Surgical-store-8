@@ -110,12 +110,14 @@ export function fakeReportNetProfit(report: {
   revenue?: number;
   operating_expenses?: number;
   personal_expenses?: number;
-  lost_products_cost?: number;
-  profit_products_value?: number;
+  lost_products_net_profit_deduction?: number;
+  profit_products_net_profit_addition?: number;
 }): number {
   const gross = fakeReportProfit(report);
-  const expenses = fakeDisplayAmount(report.operating_expenses) + fakeDisplayAmount(report.personal_expenses) + fakeDisplayAmount(report.lost_products_cost);
-  return gross - expenses + fakeDisplayAmount(report.profit_products_value);
+  const expenses = fakeDisplayAmount(report.operating_expenses)
+    + fakeDisplayAmount(report.personal_expenses)
+    + fakeDisplayAmount(report.lost_products_net_profit_deduction);
+  return gross - expenses + fakeDisplayAmount(report.profit_products_net_profit_addition);
 }
 
 
