@@ -177,9 +177,9 @@ export default function Reports() {
           </Card>
 
           {lostStockRows.length > 0 && <Card>
-            <SectionHead icon="package-variant-closed-remove" title="Lost stock accounting transfer" tone={colors.warning} />
+            <SectionHead icon="package-variant-closed" title="Lost stock accounting transfer" tone={colors.warning} />
             <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
-              Purchase cost is deducted from Gross Profit and added to Remaining Balance once.
+              Purchase cost reduces Gross Profit (and therefore Net Profit) and increases Remaining Balance by the same amount, once.
             </Text>
             <Row label="Total moved to Remaining Balance" value={"+ " + money(data.lost_stock_remaining_balance_addition ?? lostStockTransfer)} bold tone="success" />
             {lostStockRows.map((item, index) => <View key={item.product_id + "-" + item.date + "-" + index} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 8 }}>
