@@ -146,6 +146,26 @@ export type ReportSummary = {
     gross_profit_deduction: number;
     remaining_balance_addition: number;
   }>;
+  lost_products_net_profit_deduction?: number;
+  profit_products_net_profit_addition?: number;
+  lost_products_net_profit_details?: Array<{
+    product_id: string;
+    product_name: string;
+    date: string;
+    quantity: number;
+    reason: string;
+    purchase_cost: number;
+    net_profit_change: number;
+  }>;
+  profit_products_net_profit_details?: Array<{
+    product_id: string;
+    product_name: string;
+    date: string;
+    quantity: number;
+    reason: string;
+    purchase_cost: number;
+    net_profit_change: number;
+  }>;
   operating_expenses: number;
   lost_products_cost?: number;
   profit_products_value?: number;
