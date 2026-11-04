@@ -60,6 +60,9 @@ export default function Reports() {
   const netPurchases = data ? (fakeFinanceDisplay ? fakeDisplayAmount(data.purchase_total) : Number(data.purchase_total ?? 0)) : 0;
   const displayGrossProfit = data ? (fakeFinanceDisplay ? fakeReportProfit(data) : Number(data.gross_profit ?? 0)) : 0;
   const displayNetProfit = data ? (fakeFinanceDisplay ? fakeReportNetProfit(data) : Number(data.net_profit ?? 0)) : 0;
+  const lostStockTransfer = Number(data?.lost_stock_gross_profit_transfer ?? 0);
+  const grossProfitBeforeLostStock = Number(data?.gross_profit_before_lost_stock ?? (Number(data?.gross_profit ?? 0) + lostStockTransfer));
+  const lostStockRows = data?.lost_stock_transfers ?? [];
 
   return (
     <View style={styles.root}>
@@ -108,6 +111,13 @@ export default function Reports() {
             tone={displayNetProfit >= 0 ? "success" : "error"}
             testID="report-net-profit"
           />
+          <StatTile
+            label="Remaining Balance"
+            value={money(data.remaining_balance)}
+            icon="wallet"
+            tone={Number(data.remaining_balance ?? 0) >= 0 ? "success" : "error"}
+            testID="report-remaining-balance"
+          />
 
           {/* Sales */}
           <Card>
@@ -150,7 +160,12 @@ export default function Reports() {
           {/* Profit */}
           <Card>
             <SectionHead icon="chart-line" title="Profit" tone={colors.success} />
-            <Row label="Gross profit" value={money(displayGrossProfit)} />
+            {lostStockTransfer > 0 && <>
+              <Row label="Gross profit before lost stock" value={money(grossProfitBeforeLostStock)} />
+              <Row label="Less: lost stock transferred to Remaining Balance" value={"- " + money(lostStockTransfer)} muted />
+              <Divider />
+            </>}
+            <Row label="Gross profit after lost stock" value={money(displayGrossProfit)} bold />
             <Row label="Less: personal expenses" value={"- " + money(data.personal_expenses)} muted />
             <Divider />
             <Row
@@ -160,6 +175,21 @@ export default function Reports() {
               tone={data.net_profit >= 0 ? "success" : "error"}
             />
           </Card>
+
+          {lostStockRows.length > 0 && <Card>
+            <SectionHead icon="package-variant-closed-remove" title="Lost stock accounting transfer" tone={colors.warning} />
+            <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
+              Purchase cost is deducted from Gross Profit and added to Remaining Balance once.
+            </Text>
+            <Row label="Total moved to Remaining Balance" value={"+ " + money(data.lost_stock_remaining_balance_addition ?? lostStockTransfer)} bold tone="success" />
+            {lostStockRows.map((item, index) => <View key={item.product_id + "-" + item.date + "-" + index} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 8 }}>
+              <Text style={{ color: colors.onSurface, fontWeight: "700" }}>{item.product_name} · {item.quantity} lost</Text>
+              <Text style={{ color: colors.muted, fontSize: 12, marginTop: 3 }}>{item.date}{item.reason ? " · " + item.reason : ""}</Text>
+              <Row label="Purchase cost" value={money(item.purchase_cost)} />
+              <Row label="Gross Profit deduction" value={"- " + money(item.gross_profit_deduction)} tone="error" />
+              <Row label="Remaining Balance addition" value={"+ " + money(item.remaining_balance_addition)} tone="success" />
+            </View>)}
+          </Card>}
         </ScrollView>
       )}
     </View>
