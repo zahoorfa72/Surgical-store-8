@@ -1297,7 +1297,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         existing_adjustment = await db.inventory_adjustments.find_one({"client_id": body.client_id, "deleted": {"$ne": True}})
         if existing_adjustment:
             existing_adjustment["id"] = oid(existing_adjustment["_id"])
-            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
+            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
                     "product": product_public(product)}
     current = float(product.get("quantity", 0) or 0)
     if -delta > current + 1e-9:
@@ -1335,7 +1335,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     }
     result = await db.inventory_adjustments.insert_one(row)
     row["id"] = oid(result.inserted_id)
-    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
+    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
             "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
