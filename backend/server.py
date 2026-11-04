@@ -3142,9 +3142,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     personal_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "personal"), 2)
     # Keep every profit component explicit before calculating Remaining Balance.
     cogs_total = round(cogs_goods + cogs_expenses, 2)
-    total_expenses = round(
-        cogs_expenses + operating_expenses + personal_expenses + automatic_lost_stock_deduction, 2
-    )
+    total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
 
     payments = await db.payments.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     supplier_payments = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "pay"), 2)
@@ -3238,6 +3236,9 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     automatic_profit_stock_addition = round(sum(
         max(0.0, float(row.get("loss_cost", 0) or 0)) for row in automatic_profit_stock_rows
     ), 2)
+    total_expenses = round(
+        cogs_expenses + operating_expenses + personal_expenses + automatic_lost_stock_deduction, 2
+    )
 
     def stock_adjustment_detail(row: dict, direction: str) -> dict:
         product_id = str(row.get("product_id") or "")
@@ -3266,8 +3267,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     net_profit_adjustment = 0.0
     remaining_balance_adjustment = 0.0
     for adjustment in adjustments_in_period:
-        # Only entries with a persisted, explicit admin choice affect finance.
-        # Legacy entries have no accounting_target and therefore default to none.
+        # Explicit routes are applied separately; automatic and inventory-only rows were handled above.
         if adjustment.get("accounting_target", "none") in ("none", "inventory_only"):
             continue
         net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
