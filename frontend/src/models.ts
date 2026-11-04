@@ -133,6 +133,19 @@ export type ReportSummary = {
   cogs_total: number;
   personal_expenses: number;
   gross_profit: number;
+  gross_profit_before_lost_stock?: number;
+  lost_stock_gross_profit_transfer?: number;
+  lost_stock_remaining_balance_addition?: number;
+  lost_stock_transfers?: Array<{
+    product_id: string;
+    product_name: string;
+    date: string;
+    quantity: number;
+    reason: string;
+    purchase_cost: number;
+    gross_profit_deduction: number;
+    remaining_balance_addition: number;
+  }>;
   operating_expenses: number;
   lost_products_cost?: number;
   profit_products_value?: number;
