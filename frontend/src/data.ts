@@ -70,7 +70,14 @@ function startOfRange(range: string): Date | null {
 function inRange(iso: string | undefined, range: string): boolean {
   if (!iso) return true;
   const start = startOfRange(range);
-  return !start || new Date(iso) >= start;
+  if (!start) return true;
+  const end = new Date(start);
+  if (range === "today" || range === "day") end.setDate(end.getDate() + 1);
+  else if (range === "week") end.setDate(end.getDate() + 7);
+  else if (range === "month") end.setMonth(end.getMonth() + 1);
+  else if (range === "year") end.setFullYear(end.getFullYear() + 1);
+  const date = new Date(iso);
+  return !Number.isNaN(date.getTime()) && date >= start && date < end;
 }
 
 async function loadLocalStockAdjustments(): Promise<void> {
