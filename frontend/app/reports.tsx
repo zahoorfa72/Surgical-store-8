@@ -161,12 +161,15 @@ export default function Reports() {
           <Card>
             <SectionHead icon="chart-line" title="Profit" tone={colors.success} />
             {lostStockTransfer > 0 && <>
-              <Row label="Gross profit before lost stock" value={money(grossProfitBeforeLostStock)} />
-              <Row label="Less: lost stock transferred to Remaining Balance" value={"- " + money(lostStockTransfer)} muted />
-              <Divider />
+              <Row label="Gross profit before stock transfer" value={money(grossProfitBeforeLostStock)} />
+              <Row label="Less: lost stock moved to Remaining Balance" value={"- " + money(lostStockTransfer)} muted />
             </>}
-            <Row label="Gross profit after lost stock" value={money(displayGrossProfit)} bold />
+            <Row label="Gross profit" value={money(displayGrossProfit)} />
             <Row label="Less: personal expenses" value={"- " + money(data.personal_expenses)} muted />
+            <Row label="Less: operating expenses" value={"- " + money(data.operating_expenses)} muted />
+            <Row label="Less: lost product deduction" value={"- " + money(data.lost_products_net_profit_deduction ?? 0)} muted />
+            <Row label="Add: profit product value" value={"+ " + money(data.profit_products_net_profit_addition ?? 0)} muted />
+            {Number(data.net_profit_adjustment ?? 0) !== 0 && <Row label="Admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(Math.abs(Number(data.net_profit_adjustment)))} muted />}
             <Divider />
             <Row
               label="Net profit"
