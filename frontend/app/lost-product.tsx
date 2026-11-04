@@ -63,7 +63,7 @@ export default function LostProductScreen() {
       if (!active) return;
       const productName = (id: string) => products.find((p) => p.id === id)?.name ?? "Product";
       queryClient.setQueryData(["inventory-adjustments"], [...(remote ?? []), ...(local ?? [])]);
-      const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "lost_product").map((r) => ({ ...r, product_name: productName(r.product_id) })), ...(local ?? [])];
+      const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "lost_product").map((r) => ({ ...r, product_name: products.find((p) => p.id === r.product_id)?.name ?? r.product_name ?? productName(r.product_id) })), ...(local ?? [])];
       const unique = new Map<string, LossRow>();
       for (const row of rows) {
         const key = row.client_id || (row.id && !row.id.startsWith("local-") ? row.id : [row.product_id,row.date,row.delta,row.reason,Number(row.loss_cost).toFixed(2)].join("|"));
