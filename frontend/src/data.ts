@@ -129,6 +129,7 @@ function localReport(range: string): ReportSummary {
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
+  const periodAdjustments = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })));
   // Match Sell exactly: use the stored profit on each sale and reverse
   // returned profit. This keeps offline Remaining Balance identical to Sell.
   const storedSaleProfit = sales.reduce((n, s) => n + Number(s.profit ?? 0), 0);
@@ -157,7 +158,6 @@ function localReport(range: string): ReportSummary {
   const cogsExpenses = expenses.filter(e => e.bucket === "cogs").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const personal = expenses.filter(e => e.bucket === "personal").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
-  const periodAdjustments = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })));
   const lostProductsCost = periodAdjustments.filter((row) => row.adjustment_type === "lost_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
   const profitProductsValue = periodAdjustments.filter((row) => row.adjustment_type === "profit_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
   // These stock values are informational only. Accounting changes are applied
