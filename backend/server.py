@@ -1329,7 +1329,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         # This option transfers the full purchase-cost loss out of Gross Profit.
         # The finance formula then increases Remaining Balance by the same amount.
         "gross_profit_adjustment": -round(loss_cost, 2) if body.accounting_target == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0,
-        "accounting_target": body.accounting_target if body.accounting_target in ("none", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none",
+        "accounting_target": body.accounting_target if body.accounting_target in ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none",
         "client_id": body.client_id,
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
     }
@@ -1421,7 +1421,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         cost = round(delta * unit_cost, 2)
     next_qty = current + delta
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {"quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": now_iso()}})
-    update = {"product_id": body.product_id, "product_name": target.get("name", ""), "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "gross_profit_adjustment": -round(cost, 2) if body.accounting_target == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0, "accounting_target": body.accounting_target if body.accounting_target in ("none", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none", "edited_at": now_iso(), "edited_by": _.get("name", "")}
+    update = {"product_id": body.product_id, "product_name": target.get("name", ""), "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "gross_profit_adjustment": -round(cost, 2) if body.accounting_target == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0, "accounting_target": body.accounting_target if body.accounting_target in ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none", "edited_at": now_iso(), "edited_by": _.get("name", "")}
     await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
     fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
     return {"ok": True, "adjustment": {"id": oid(fresh["_id"]), "product_id": fresh["product_id"], "product_name": fresh.get("product_name", ""), "delta": fresh["delta"], "reason": fresh["reason"], "adjustment_type": fresh["adjustment_type"], "date": fresh["date"], "loss_cost": fresh["loss_cost"], "net_profit_adjustment": fresh.get("net_profit_adjustment", 0), "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0), "gross_profit_adjustment": fresh.get("gross_profit_adjustment", 0), "accounting_target": fresh.get("accounting_target", "none"), "client_id": fresh.get("client_id"), "user_name": fresh.get("user_name", ""), "created_at": fresh.get("created_at", "")}}
@@ -3142,7 +3142,9 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     personal_expenses = round(sum(e.get("amount", 0) for e in expenses if e.get("bucket") == "personal"), 2)
     # Keep every profit component explicit before calculating Remaining Balance.
     cogs_total = round(cogs_goods + cogs_expenses, 2)
-    total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
+    total_expenses = round(
+        cogs_expenses + operating_expenses + personal_expenses + automatic_lost_stock_deduction, 2
+    )
 
     payments = await db.payments.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     supplier_payments = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "pay"), 2)
@@ -3215,6 +3217,50 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     adjustments_in_period = [row for row in all_lost_adjustments
         if (not opening_period_start or str(row.get("date") or row.get("created_at", "")[:10])[:10] >= opening_period_start.isoformat())
         and (not opening_period_end or str(row.get("date") or row.get("created_at", "")[:10])[:10] < opening_period_end.isoformat())]
+
+    # Legacy/default stock records (accounting_target="none") are automatically
+    # recognized in Net Profit: lost stock is an expense and added/found stock
+    # is a gain. Explicit admin routes override this automatic treatment.
+    # "inventory_only" is the explicit opt-out and has no P&L effect.
+    automatic_lost_stock_rows = [
+        row for row in adjustments_in_period
+        if row.get("adjustment_type") == "lost_product"
+        and row.get("accounting_target", "none") == "none"
+    ]
+    automatic_profit_stock_rows = [
+        row for row in adjustments_in_period
+        if row.get("adjustment_type") == "profit_product"
+        and row.get("accounting_target", "none") == "none"
+    ]
+    automatic_lost_stock_deduction = round(sum(
+        max(0.0, float(row.get("loss_cost", 0) or 0)) for row in automatic_lost_stock_rows
+    ), 2)
+    automatic_profit_stock_addition = round(sum(
+        max(0.0, float(row.get("loss_cost", 0) or 0)) for row in automatic_profit_stock_rows
+    ), 2)
+
+    def stock_adjustment_detail(row: dict, direction: str) -> dict:
+        product_id = str(row.get("product_id") or "")
+        product_name = next(
+            (p.get("name", "") for p in products if oid(p.get("_id")) == product_id), ""
+        ) or row.get("product_name", "Product")
+        amount = round(max(0.0, float(row.get("loss_cost", 0) or 0)), 2)
+        return {
+            "product_id": product_id,
+            "product_name": product_name,
+            "date": str(row.get("date") or row.get("created_at", "")[:10])[:10],
+            "quantity": abs(float(row.get("delta", 0) or 0)),
+            "reason": row.get("reason", ""),
+            "purchase_cost": amount,
+            "net_profit_change": -amount if direction == "loss" else amount,
+        }
+
+    automatic_lost_stock_details = [
+        stock_adjustment_detail(row, "loss") for row in automatic_lost_stock_rows
+    ]
+    automatic_profit_stock_details = [
+        stock_adjustment_detail(row, "gain") for row in automatic_profit_stock_rows
+    ]
     # Stock adjustments affect account totals only when explicitly selected by
     # the admin. Older entries without these fields safely default to zero.
     net_profit_adjustment = 0.0
@@ -3222,7 +3268,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     for adjustment in adjustments_in_period:
         # Only entries with a persisted, explicit admin choice affect finance.
         # Legacy entries have no accounting_target and therefore default to none.
-        if adjustment.get("accounting_target", "none") == "none":
+        if adjustment.get("accounting_target", "none") in ("none", "inventory_only"):
             continue
         net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
         remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
@@ -3290,7 +3336,15 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
-    net_profit = round(gross_profit - personal_expenses - operating_expenses + net_profit_adjustment, 2)
+    net_profit = round(
+        gross_profit
+        - personal_expenses
+        - operating_expenses
+        - automatic_lost_stock_deduction
+        + automatic_profit_stock_addition
+        + net_profit_adjustment,
+        2,
+    )
     opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
@@ -3319,6 +3373,10 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         "operating_expenses": operating_expenses,
         "lost_products_cost": lost_products_cost,
         "profit_products_value": profit_products_value,
+        "lost_products_net_profit_deduction": automatic_lost_stock_deduction,
+        "profit_products_net_profit_addition": automatic_profit_stock_addition,
+        "lost_products_net_profit_details": automatic_lost_stock_details,
+        "profit_products_net_profit_details": automatic_profit_stock_details,
         "net_profit_adjustment": net_profit_adjustment,
         "remaining_balance_adjustment": remaining_balance_adjustment,
         "total_expenses": total_expenses,
