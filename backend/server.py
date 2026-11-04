@@ -1266,7 +1266,7 @@ async def delete_product(product_id: str, _: AdminOnly):
 async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=1000)):
     rows = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
     return [{
-        "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "delta": row.get("delta", 0),
+        "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "product_name": row.get("product_name", ""), "delta": row.get("delta", 0),
         "reason": row.get("reason", ""), "adjustment_type": row.get("adjustment_type", "adjustment"),
         "date": row.get("date") or row.get("created_at", "")[:10], "loss_cost": row.get("loss_cost", 0),
         "net_profit_adjustment": row.get("net_profit_adjustment", 0),
@@ -1319,7 +1319,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         "quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": ts
     }})
     row = {
-        "product_id": body.product_id, "delta": delta, "reason": body.reason.strip(),
+        "product_id": body.product_id, "product_name": product.get("name", ""), "delta": delta, "reason": body.reason.strip(),
         "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
         "loss_cost": round(loss_cost, 2),
         "cost_layers_used": cost_layers_used,
@@ -1421,10 +1421,10 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         cost = round(delta * unit_cost, 2)
     next_qty = current + delta
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {"quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": now_iso()}})
-    update = {"product_id": body.product_id, "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "gross_profit_adjustment": -round(cost, 2) if body.accounting_target == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0, "accounting_target": body.accounting_target if body.accounting_target in ("none", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none", "edited_at": now_iso(), "edited_by": _.get("name", "")}
+    update = {"product_id": body.product_id, "product_name": target.get("name", ""), "delta": delta, "reason": body.reason.strip(), "adjustment_type": body.adjustment_type, "date": body.date or now_iso()[:10], "loss_cost": round(cost, 2), "cost_layers_used": cost_layers_used, "net_profit_adjustment": round(float(body.net_profit_adjustment or 0), 2), "remaining_balance_adjustment": round(float(body.remaining_balance_adjustment or 0), 2), "gross_profit_adjustment": -round(cost, 2) if body.accounting_target == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0, "accounting_target": body.accounting_target if body.accounting_target in ("none", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none", "edited_at": now_iso(), "edited_by": _.get("name", "")}
     await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
     fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
-    return {"ok": True, "adjustment": {"id": oid(fresh["_id"]), "product_id": fresh["product_id"], "delta": fresh["delta"], "reason": fresh["reason"], "adjustment_type": fresh["adjustment_type"], "date": fresh["date"], "loss_cost": fresh["loss_cost"], "net_profit_adjustment": fresh.get("net_profit_adjustment", 0), "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0), "gross_profit_adjustment": fresh.get("gross_profit_adjustment", 0), "accounting_target": fresh.get("accounting_target", "none"), "client_id": fresh.get("client_id"), "user_name": fresh.get("user_name", ""), "created_at": fresh.get("created_at", "")}}
+    return {"ok": True, "adjustment": {"id": oid(fresh["_id"]), "product_id": fresh["product_id"], "product_name": fresh.get("product_name", ""), "delta": fresh["delta"], "reason": fresh["reason"], "adjustment_type": fresh["adjustment_type"], "date": fresh["date"], "loss_cost": fresh["loss_cost"], "net_profit_adjustment": fresh.get("net_profit_adjustment", 0), "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0), "gross_profit_adjustment": fresh.get("gross_profit_adjustment", 0), "accounting_target": fresh.get("accounting_target", "none"), "client_id": fresh.get("client_id"), "user_name": fresh.get("user_name", ""), "created_at": fresh.get("created_at", "")}}
 
 
 @api.post("/stock-transfers")
@@ -3243,7 +3243,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             continue
         lost_stock_transfers.append({
             "product_id": str(adjustment.get("product_id") or ""),
-            "product_name": next((p.get("name", "Product") for p in products if oid(p.get("_id")) == str(adjustment.get("product_id") or "")), "Product"),
+            "product_name": next((p.get("name", "") for p in products if oid(p.get("_id")) == str(adjustment.get("product_id") or "")), "") or adjustment.get("product_name", "Product"),
             "date": str(adjustment.get("date") or adjustment.get("created_at", "")[:10])[:10],
             "quantity": abs(float(adjustment.get("delta", 0) or 0)),
             "reason": adjustment.get("reason", ""),
