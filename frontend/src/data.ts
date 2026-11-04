@@ -86,7 +86,7 @@ async function loadLocalStockAdjustments(): Promise<void> {
     const id = String(row.client_id || row.id || [
       row.product_id, row.date, row.delta, row.reason, row.loss_cost ?? row.profit_value,
     ].join("|"));
-    if (!unique.has(id)) unique.set(id, row);
+    unique.set(id, row);
   }
   queryClient.setQueryData(key, Array.from(unique.values()));
 }
@@ -198,8 +198,8 @@ function localReport(range: string): ReportSummary {
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const lostProductsCost = periodAdjustments.filter((row) => row.adjustment_type === "lost_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
   const profitProductsValue = periodAdjustments.filter((row) => row.adjustment_type === "profit_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
-  // These stock values are informational only. Accounting changes are applied
-  // exclusively from the amounts explicitly chosen by the admin.
+  // Default stock adjustments are posted automatically to Net Profit above.
+  // Explicit accounting routes and the Inventory only opt-out are handled here.
   const selectedAdjustments = periodAdjustments.filter((row) => {
     const target = String(row.accounting_target ?? "none");
     return target !== "none" && target !== "inventory_only" && ["split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance"].includes(target);
