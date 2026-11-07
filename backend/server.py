@@ -39,6 +39,11 @@ from pydantic import BaseModel, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
 try:
+    from .report_dates import range_start, range_end
+except ImportError:
+    from report_dates import range_start, range_end
+
+try:
     from .finance_math import calculate_finance_totals
 except ImportError:
     from finance_math import calculate_finance_totals
@@ -3535,67 +3540,6 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
 # ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
-def range_end(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
-    """Exclusive UTC end boundary for a local calendar period.
-
-    The client sends JavaScript Date.getTimezoneOffset(): local time is UTC
-    minus this value, and a local boundary converts back to UTC by adding it.
-    """
-    now_utc = datetime.now(timezone.utc)
-    local_now = now_utc - timedelta(minutes=tz_offset_minutes)
-    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if range_ in ("today", "day"):
-        return local_midnight + timedelta(days=1) + timedelta(minutes=tz_offset_minutes)
-    if range_ == "week":
-        local_start = local_midnight - timedelta(days=local_midnight.weekday())
-        return local_start + timedelta(days=7) + timedelta(minutes=tz_offset_minutes)
-    if range_ == "month":
-        if local_midnight.month == 12:
-            next_month = datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc)
-        else:
-            next_month = datetime(local_midnight.year, local_midnight.month + 1, 1, tzinfo=timezone.utc)
-        return next_month + timedelta(minutes=tz_offset_minutes)
-    if range_ == "year":
-        return datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-    if range_.startswith("month:"):
-        local_month = datetime.strptime(range_.split(":", 1)[1], "%Y-%m").replace(tzinfo=timezone.utc)
-        if local_month.month == 12:
-            next_month = datetime(local_month.year + 1, 1, 1, tzinfo=timezone.utc)
-        else:
-            next_month = datetime(local_month.year, local_month.month + 1, 1, tzinfo=timezone.utc)
-        return next_month + timedelta(minutes=tz_offset_minutes)
-    if range_.startswith("year:"):
-        year = int(range_.split(":", 1)[1])
-        return datetime(year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-    return None
-
-
-def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
-    """Inclusive UTC start boundary for a local calendar period."""
-    now = datetime.now(timezone.utc)
-    local_now = now - timedelta(minutes=tz_offset_minutes)
-    if range_ in ("today", "day"):
-        local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return local_start + timedelta(minutes=tz_offset_minutes)
-    if range_ == "week":
-        local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        local_start -= timedelta(days=local_start.weekday())
-        return local_start + timedelta(minutes=tz_offset_minutes)
-    if range_ == "month":
-        local_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        return local_start + timedelta(minutes=tz_offset_minutes)
-    if range_ == "year":
-        local_start = local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        return local_start + timedelta(minutes=tz_offset_minutes)
-    if range_.startswith("month:"):
-        local_month = datetime.strptime(range_.split(":", 1)[1], "%Y-%m").replace(tzinfo=timezone.utc)
-        return local_month + timedelta(minutes=tz_offset_minutes)
-    if range_.startswith("year:"):
-        year = int(range_.split(":", 1)[1])
-        return datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
-    return None  # all
-
-
 @api.get("/reports/inventory-usage")
 async def report_inventory_usage(
     _: AnyUser,
