@@ -11,7 +11,7 @@ import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
 
-type LossRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; cost_layers_used?: { quantity: number; unit_cost: number; purchase_id?: string | null }[]; net_profit_adjustment?: number; remaining_balance_adjustment?: number; gross_profit_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
+type LossRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; cost_layers_used?: { quantity: number; unit_cost: number; purchase_id?: string | null }[]; net_profit_adjustment?: number; remaining_balance_adjustment?: number; gross_profit_adjustment?: number; accounting_target?: string; created_at: string; edited_at?: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.lost-products.v1";
 const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
