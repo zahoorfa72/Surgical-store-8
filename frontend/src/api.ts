@@ -209,16 +209,25 @@ function consumeCostLayersMatching(layers: any[], quantity: number, unitCost: nu
   return { layers: work.filter((x) => Number(x.quantity ?? 0) > 1e-9), totalCost };
 }
 
-function consumeCostLayers(layers: any[], quantity: number): { layers: any[]; totalCost: number } {
-  let remaining = Number(quantity);
+function consumeCostLayers(
+  layers: any[],
+  quantity: number,
+  fallbackUnitCost = 0,
+): { layers: any[]; totalCost: number; usedLayers: any[] } {
+  let remaining = Math.max(0, Number(quantity) || 0);
   let totalCost = 0;
   const next: any[] = [];
+  const usedLayers: any[] = [];
   for (let index = 0; index < layers.length; index += 1) {
     const layer = layers[index];
-    const q = Number(layer?.quantity ?? 0);
-    if (q <= 0) continue;
+    const q = Math.max(0, Number(layer?.quantity ?? 0));
+    if (q <= 1e-9) continue;
     const take = Math.min(q, remaining);
-    totalCost += take * Number(layer?.unit_cost ?? 0);
+    const unitCost = Math.max(0, Number(layer?.unit_cost ?? 0));
+    if (take > 1e-9) {
+      usedLayers.push({ quantity: take, unit_cost: unitCost, purchase_id: layer?.purchase_id ?? null });
+      totalCost += take * unitCost;
+    }
     const left = q - take;
     if (left > 1e-9) next.push({ ...layer, quantity: left });
     remaining -= take;
@@ -227,8 +236,57 @@ function consumeCostLayers(layers: any[], quantity: number): { layers: any[]; to
       break;
     }
   }
-  if (remaining > 1e-9) throw new Error("Inventory cost layers are inconsistent with stock.");
-  return { layers: next, totalCost };
+  // Match the backend's permitted negative-stock treatment: value any units
+  // beyond available FIFO lots at the product's current purchase-price fallback.
+  if (remaining > 1e-9) {
+    const unitCost = Math.max(0, Number(fallbackUnitCost) || 0);
+    usedLayers.push({ quantity: remaining, unit_cost: unitCost, purchase_id: null });
+    totalCost += remaining * unitCost;
+  }
+  return { layers: next, totalCost, usedLayers };
+}
+
+function sliceCostLayers(layers: any[], skipQuantity: number, quantity: number): any[] {
+  let skip = Math.max(0, Number(skipQuantity) || 0);
+  let remaining = Math.max(0, Number(quantity) || 0);
+  const result: any[] = [];
+  for (const layer of layers ?? []) {
+    const layerQty = Math.max(0, Number(layer?.quantity ?? 0));
+    const skipped = Math.min(layerQty, skip);
+    skip -= skipped;
+    const available = layerQty - skipped;
+    const take = Math.min(available, remaining);
+    if (take > 1e-9) {
+      result.push({
+        quantity: take,
+        unit_cost: Math.max(0, Number(layer?.unit_cost ?? 0)),
+        purchase_id: layer?.purchase_id ?? null,
+      });
+      remaining -= take;
+    }
+    if (remaining <= 1e-9) break;
+  }
+  return result;
+}
+
+function removeCostLayerComposition(layers: any[], usedLayers: any[]): any[] {
+  const work = (layers ?? []).map((layer: any) => ({ ...layer, quantity: Math.max(0, Number(layer?.quantity ?? 0)) }));
+  for (const used of usedLayers ?? []) {
+    let remaining = Math.max(0, Number(used?.quantity ?? 0));
+    const cost = Math.max(0, Number(used?.unit_cost ?? 0));
+    const purchaseId = String(used?.purchase_id ?? "");
+    for (let pass = 0; pass < 2 && remaining > 1e-9; pass += 1) {
+      for (const layer of work) {
+        if (remaining <= 1e-9) break;
+        if (Math.abs(Number(layer.unit_cost ?? 0) - cost) > 1e-6) continue;
+        if (pass === 0 && String(layer.purchase_id ?? "") !== purchaseId) continue;
+        const take = Math.min(Number(layer.quantity ?? 0), remaining);
+        layer.quantity = Number(layer.quantity ?? 0) - take;
+        remaining -= take;
+      }
+    }
+  }
+  return work.filter((layer: any) => Number(layer.quantity ?? 0) > 1e-9);
 }
 
 
