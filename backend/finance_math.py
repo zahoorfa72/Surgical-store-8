@@ -59,12 +59,12 @@ def calculate_finance_totals(
     net_profit_adjustment = round(sum(
         _amount(row, "net_profit_adjustment")
         for row in stock_adjustments
-        if row.get("accounting_target", "none") in ("net_profit", "both", "split_50_50")
+        if row.get("accounting_target", "none") in ("net_profit", "both", "split_50_50", "net_profit_to_remaining_balance")
     ), 2)
     remaining_balance_adjustment = round(sum(
         _amount(row, "remaining_balance_adjustment")
         for row in stock_adjustments
-        if row.get("accounting_target", "none") in ("remaining_balance", "both", "split_50_50")
+        if row.get("accounting_target", "none") in ("remaining_balance", "both", "split_50_50", "net_profit_to_remaining_balance")
     ), 2)
 
     # Net Profit includes every expense class. COGS expenses were previously
