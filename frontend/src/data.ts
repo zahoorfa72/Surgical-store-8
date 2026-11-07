@@ -89,12 +89,20 @@ function uniqueStockAdjustmentRows<T extends {
   reason?: string;
   loss_cost?: number;
   profit_value?: number;
+  created_at?: string;
+  edited_at?: string;
 }>(rows: T[]): T[] {
+  // Prefer the newest version of a record when server cache and local history
+  // both contain it. This keeps an old cached adjustment from shadowing edits.
+  const newestFirst = [...rows].sort((a, b) => {
+    const time = (row: T) => new Date(row.edited_at || row.created_at || row.date || 0).getTime() || 0;
+    return time(b) - time(a);
+  });
   const result: T[] = [];
   const ids = new Set<string>();
   const clientIds = new Set<string>();
   const fallbackKeys = new Set<string>();
-  for (const row of rows) {
+  for (const row of newestFirst) {
     const id = String(row.id || "");
     const clientId = String(row.client_id || "");
     const fallback = !id && !clientId
@@ -106,7 +114,7 @@ function uniqueStockAdjustmentRows<T extends {
     if (clientId) clientIds.add(clientId);
     if (fallback) fallbackKeys.add(fallback);
   }
-  return result;
+  return result.reverse();
 }
 
 async function loadLocalStockAdjustments(): Promise<void> {
