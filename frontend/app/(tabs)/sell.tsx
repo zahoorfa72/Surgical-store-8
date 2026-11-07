@@ -142,8 +142,71 @@ export default function Sell() {
 
   useEffect(() => { AsyncStorage.getItem("ssm.heldSales").then((raw) => { if (!raw) return; try { setHeldSales(JSON.parse(raw)); } catch { setHeldSales([]); } }); }, []);
   const persistHeldSales = async (next: HeldSale[]) => { setHeldSales(next); await AsyncStorage.setItem("ssm.heldSales", JSON.stringify(next)); };
-  const holdCurrentSale = async () => { const lines = cart.filter((c) => c.quantity > 0); if (!lines.length) { toast("Add products before holding the sale", "error"); return; } const held: HeldSale = { id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`, createdAt: new Date().toISOString(), cart: lines, customerId, discount, credit, transactionDate }; await persistHeldSales([held, ...heldSales]); setCart([]); setTransactionDate(todayIsoDate()); setDiscount("0"); setCustomerId(null); setCredit(false); setReviewOpen(false); toast("Sale held. You can start a new sale.", "success"); };
-  const resumeHeldSale = (held: HeldSale) => { if (cart.length) { Alert.alert("Current sale", "Hold or complete the current sale before opening another held sale."); return; } const restored = held.cart.map((line) => { const p = (products ?? []).find((x) => x.id === line.id); return { ...line, stock: p?.quantity ?? line.stock, threshold: p?.low_stock_threshold ?? line.threshold }; }).filter((line) => line.stock > 0); if (!restored.length) { toast("Products in this held sale are no longer available", "error"); return; } setCart(restored); setTransactionDate(held.transactionDate || todayIsoDate()); setCustomerId(held.customerId); setDiscount(held.discount); setCredit(held.credit); void persistHeldSales(heldSales.filter((x) => x.id !== held.id)); setHeldSearch(""); setHeldOpen(false); setReviewOpen(true); };
+  const holdCurrentSale = async () => {
+    // Keep zero-quantity lines too: a cleared quantity field is an unfinished
+    // edit, not permission to discard that product from the held draft.
+    const lines = cart;
+    if (!lines.length) {
+      toast("Add products before holding the sale", "error");
+      return;
+    }
+    const held: HeldSale = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      createdAt: new Date().toISOString(),
+      cart: lines,
+      customerId,
+      discount,
+      credit,
+      transactionDate,
+    };
+    await persistHeldSales([held, ...heldSales]);
+    setCart([]);
+    setTransactionDate(todayIsoDate());
+    setDiscount("0");
+    setCustomerId(null);
+    setCredit(false);
+    setAllowNegativeStock(false);
+    setReviewOpen(false);
+    toast("Sale held with all products. You can resume it later.", "success");
+  };
+  const resumeHeldSale = (held: HeldSale) => {
+    if (cart.length) {
+      Alert.alert("Current sale", "Hold or complete the current sale before opening another held sale.");
+      return;
+    }
+    // Restore every saved line. Out-of-stock/negative-stock items must never be
+    // silently filtered out of a held sale: that can erase billable items.
+    const restored = held.cart.map((line) => {
+      const p = (products ?? []).find((x) => x.id === line.id);
+      return {
+        ...line,
+        stock: Number(p?.quantity ?? line.stock ?? 0),
+        threshold: p?.low_stock_threshold ?? line.threshold,
+      };
+    });
+    if (!restored.length) {
+      toast("This held sale has no items. It has been kept unchanged.", "error");
+      return;
+    }
+    setCart(restored);
+    setTransactionDate(held.transactionDate || todayIsoDate());
+    setCustomerId(held.customerId);
+    setDiscount(held.discount);
+    setCredit(held.credit);
+    // Do not remove the saved draft until the user completes this sale. A
+    // failed checkout, app close, or further edit must not destroy the draft.
+    setHeldSearch("");
+    setHeldOpen(false);
+    setReviewOpen(true);
+    const unavailable = restored.filter((line) => line.quantity > line.stock);
+    if (unavailable.length) {
+      setAllowNegativeStock(false);
+      toast(
+        `${unavailable.length} held item(s) are now out of stock or below the requested quantity. Review the warning before checkout.`,
+        "error",
+      );
+    }
+  };
   const deleteHeldSale = (held: HeldSale) => Alert.alert("Delete held sale?", "This removes only the held draft.", [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => void persistHeldSales(heldSales.filter((x) => x.id !== held.id)) }]);
 
   const selectedCustomer = customers?.find((c) => c.id === customerId);
@@ -417,6 +480,7 @@ export default function Sell() {
       setDiscount("0");
       setCustomerId(null);
       setCredit(false);
+      setAllowNegativeStock(false);
       setReviewOpen(false);
       toast(
         queued
