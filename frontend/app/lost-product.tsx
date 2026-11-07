@@ -11,9 +11,24 @@ import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
 
-type LossRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; net_profit_adjustment?: number; remaining_balance_adjustment?: number; gross_profit_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
+type LossRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; cost_layers_used?: { quantity: number; unit_cost: number; purchase_id?: string | null }[]; net_profit_adjustment?: number; remaining_balance_adjustment?: number; gross_profit_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.lost-products.v1";
 const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+
+function mergeUniqueRows<T extends { id?: string; client_id?: string }>(rows: T[]): T[] {
+  const result: T[] = [];
+  const ids = new Set<string>();
+  const clientIds = new Set<string>();
+  for (const row of rows) {
+    const id = String(row.id || "");
+    const clientId = String(row.client_id || "");
+    if ((id && ids.has(id)) || (clientId && clientIds.has(clientId))) continue;
+    result.push(row);
+    if (id) ids.add(id);
+    if (clientId) clientIds.add(clientId);
+  }
+  return result;
+}
 
 function fifoLossCost(product: Product | undefined, quantity: number): number {
   if (!product || quantity <= 0) return 0;
@@ -50,7 +65,24 @@ export default function LostProductScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
-  const costPreview = useMemo(() => fifoLossCost(selected, qty), [selected, qty]);
+  const editingRow = editingId ? history.find((row) => row.id === editingId) : undefined;
+  const previewProduct = useMemo(() => {
+    if (!selected || !editingRow || editingRow.product_id !== selected.id || Number(editingRow.delta) >= 0) return selected;
+    const layers = (selected.cost_layers ?? []).map((layer: any) => ({ ...layer }));
+    const usedLayers = editingRow.cost_layers_used ?? [];
+    const restore = usedLayers.length
+      ? usedLayers
+      : [{ quantity: Math.abs(Number(editingRow.delta)), unit_cost: Math.abs(Number(editingRow.delta)) > 0 ? Number(editingRow.loss_cost || 0) / Math.abs(Number(editingRow.delta)) : Number(selected.purchase_price || 0), purchase_id: null }];
+    for (const used of restore) {
+      const purchaseId = used.purchase_id ?? null;
+      const unitCost = Number(used.unit_cost || 0);
+      const match = layers.findIndex((layer: any) => String(layer.purchase_id ?? "") === String(purchaseId ?? "") && Math.abs(Number(layer.unit_cost || 0) - unitCost) <= 1e-8);
+      if (match >= 0) layers[match] = { ...layers[match], quantity: Number(layers[match].quantity || 0) + Number(used.quantity || 0) };
+      else layers.push({ quantity: Number(used.quantity || 0), unit_cost: unitCost, purchase_id: purchaseId });
+    }
+    return { ...selected, cost_layers: layers } as Product;
+  }, [selected, editingRow]);
+  const costPreview = useMemo(() => fifoLossCost(previewProduct, qty), [previewProduct, qty]);
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 80);
   const totalLost = history.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost) || 0), 0);
 
@@ -64,12 +96,7 @@ export default function LostProductScreen() {
       const productName = (id: string) => products.find((p) => p.id === id)?.name ?? "Product";
       queryClient.setQueryData(["inventory-adjustments"], [...(remote ?? []), ...(local ?? [])]);
       const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "lost_product").map((r) => ({ ...r, product_name: products.find((p) => p.id === r.product_id)?.name ?? r.product_name ?? productName(r.product_id) })), ...(local ?? [])];
-      const unique = new Map<string, LossRow>();
-      for (const row of rows) {
-        const key = row.client_id || (row.id && !row.id.startsWith("local-") ? row.id : [row.product_id,row.date,row.delta,row.reason,Number(row.loss_cost).toFixed(2)].join("|"));
-        if (!unique.has(key)) unique.set(key, row);
-      }
-      setHistory([...unique.values()].sort((a,b) => String(b.created_at || b.date).localeCompare(String(a.created_at || a.date))));
+      setHistory(mergeUniqueRows(rows).sort((a,b) => String(b.created_at || b.date).localeCompare(String(a.created_at || a.date))));
     })();
     return () => { active = false; };
   }, [products.length]);
@@ -90,17 +117,19 @@ export default function LostProductScreen() {
     const netProfitAdjustment = accountingTarget === "split_50_50" ? -halfCents / 100 : accountingTarget === "net_profit" ? -selectedCents / 100 : 0;
     const remainingBalanceAdjustment = accountingTarget === "split_50_50" ? -(selectedCents - halfCents) / 100 : accountingTarget === "remaining_balance" ? -selectedCents / 100 : 0;
     const grossProfitAdjustment = accountingTarget === "gross_profit_to_remaining_balance" ? -lossCost : 0;
-    const clientId = editingId ? (history.find(row => row.id === editingId)?.client_id || "lost-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)) : "lost-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
-    const localRow: LossRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: -qty, reason: reason.trim(), date, loss_cost: lossCost, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, gross_profit_adjustment: grossProfitAdjustment, accounting_target: accountingTarget, created_at: new Date().toISOString(), adjustment_type: "lost_product" };
+    const editedRow = editingId ? history.find(row => row.id === editingId) : undefined;
+    const clientId = editingId ? editedRow?.client_id : "lost-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
+    const localRow: LossRow = { id: editingId || (clientId ? "local-"+clientId : "local-"+Date.now()), ...(clientId ? { client_id: clientId } : {}), product_id: selected.id, product_name: selected.name, delta: -qty, reason: reason.trim(), date, loss_cost: lossCost, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, gross_profit_adjustment: grossProfitAdjustment, accounting_target: accountingTarget, created_at: new Date().toISOString(), adjustment_type: "lost_product" };
     try {
       const response = await apiRequest<any>(editingId ? `/inventory-adjustments/${editingId}` : "/inventory-adjustments", { method: editingId ? "PUT" : "POST", body: { product_id: selected.id, delta: -qty, reason: reason.trim(), adjustment_type: "lost_product", date, loss_cost: lossCost, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, gross_profit_adjustment: grossProfitAdjustment, accounting_target: accountingTarget, client_id: editingId ? undefined : clientId } });
-      const row: LossRow = response?.adjustment ? { ...response.adjustment, client_id: response.adjustment.client_id || clientId, product_name: selected.name } : response?.pending ? { ...localRow, id: response.id || localRow.id } : localRow;
-      const next = [row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])];
-      const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
-      await storage.setItem(HISTORY_KEY, dedup as any);
-      queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => [row, ...old.filter((x) => (x.client_id || x.id) !== (row.client_id || row.id))]);
+      const row: LossRow = response?.adjustment
+        ? { ...response.adjustment, ...(!editingId && !response.adjustment.client_id && clientId ? { client_id: clientId } : {}), product_name: selected.name }
+        : response?.pending ? { ...localRow, id: response.id || localRow.id } : localRow;
+      const next = mergeUniqueRows([row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])]);
+      await storage.setItem(HISTORY_KEY, next as any);
+      queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => mergeUniqueRows([row, ...old]));
       void queryClient.invalidateQueries({ queryKey: ["report"] });
-      setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
+      setHistory((old) => mergeUniqueRows([row, ...old]));
       toast("Lost product recorded. Stock and FIFO cost lots updated.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setAccountingTarget("none"); setAccountingAmountText("0"); setEditingId(null);
     } catch (e: any) {
