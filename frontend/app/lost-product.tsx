@@ -83,6 +83,9 @@ export default function LostProductScreen() {
     return { ...selected, cost_layers: layers } as Product;
   }, [selected, editingRow]);
   const costPreview = useMemo(() => fifoLossCost(previewProduct, qty), [previewProduct, qty]);
+  const accountingAmount = accountingTarget === "split_50_50" ? costPreview : Number(accountingAmountText);
+  const selectedCents = Math.round(accountingAmount * 100);
+  const halfCents = Math.round(selectedCents / 2);
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 80);
   const totalLost = history.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost) || 0), 0);
 
@@ -143,7 +146,7 @@ export default function LostProductScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <ScreenHeader title="Lost Product" subtitle="Stock loss valued at purchase cost" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 28, gap: 12 }}>
         <Card>
