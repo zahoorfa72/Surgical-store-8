@@ -118,7 +118,9 @@ export default function ProfitProductScreen() {
       const next = mergeUniqueRows([row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])]);
       await storage.setItem(HISTORY_KEY, next as any);
       queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => mergeUniqueRows([row, ...old]));
-      void queryClient.invalidateQueries({ queryKey: ["report"] });
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
+      await queryClient.invalidateQueries({ queryKey: ["inventory-adjustments"] });
+      await queryClient.invalidateQueries({ queryKey: ["report"] });
       setHistory((old) => mergeUniqueRows([row, ...old]));
       toast("Profit product recorded. Stock and cost lots increased.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setAccountingTarget("none"); setAccountingAmountText("0"); setEditingId(null);
