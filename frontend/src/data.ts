@@ -88,14 +88,23 @@ async function loadLocalStockAdjustments(): Promise<void> {
     storage.getItem<any[]>("ssm.profit-products.v1", []),
   ]);
   const merged = [...cached, ...(lostRows ?? []), ...(profitRows ?? [])];
-  const unique = new Map<string, any>();
+  const unique: any[] = [];
+  const seenIds = new Set<string>();
+  const seenClientIds = new Set<string>();
+  const seenFallback = new Set<string>();
   for (const row of merged) {
-    const id = String(row.client_id || row.id || [
-      row.product_id, row.date, row.delta, row.reason, row.loss_cost ?? row.profit_value,
-    ].join("|"));
-    unique.set(id, row);
+    const id = String(row.id || "");
+    const clientId = String(row.client_id || "");
+    const fallback = !id && !clientId
+      ? [row.product_id, row.date, row.delta, row.reason, row.loss_cost ?? row.profit_value].join("|")
+      : "";
+    if ((id && seenIds.has(id)) || (clientId && seenClientIds.has(clientId)) || (fallback && seenFallback.has(fallback))) continue;
+    unique.push(row);
+    if (id) seenIds.add(id);
+    if (clientId) seenClientIds.add(clientId);
+    if (fallback) seenFallback.add(fallback);
   }
-  queryClient.setQueryData(key, Array.from(unique.values()));
+  queryClient.setQueryData(key, unique);
 }
 
 function localReport(range: string): ReportSummary {
