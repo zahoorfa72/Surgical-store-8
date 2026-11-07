@@ -577,6 +577,28 @@ def _append_cost_layer(layers: list, quantity: float, unit_cost: float, purchase
     return [*layers, {"quantity": quantity, "unit_cost": unit_cost, "purchase_id": purchase_id}]
 
 
+def _remove_cost_layer_composition(layers: list, used_layers: list) -> list:
+    """Remove the exact cost lots previously restored by a sale return."""
+    result = [{**layer, "quantity": max(0.0, float(layer.get("quantity", 0) or 0))} for layer in layers]
+    for used in used_layers or []:
+        remaining = max(0.0, float(used.get("quantity", 0) or 0))
+        unit_cost = max(0.0, float(used.get("unit_cost", 0) or 0))
+        purchase_id = str(used.get("purchase_id") or "")
+        for pass_index in (0, 1):
+            for layer in result:
+                if remaining <= 1e-9:
+                    break
+                if abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) > 1e-6:
+                    continue
+                if pass_index == 0 and str(layer.get("purchase_id") or "") != purchase_id:
+                    continue
+                available = max(0.0, float(layer.get("quantity", 0) or 0))
+                take = min(available, remaining)
+                layer["quantity"] = available - take
+                remaining -= take
+    return [layer for layer in result if float(layer.get("quantity", 0) or 0) > 1e-9]
+
+
 async def _save_cost_layers(product_id: str, layers: list):
     clean = [
         {"quantity": round(float(x.get("quantity", 0)), 8), "unit_cost": round(float(x.get("unit_cost", 0)), 8), "purchase_id": x.get("purchase_id")}
@@ -2230,15 +2252,32 @@ async def delete_sale(sale_id: str, _: AdminOnly):
     if not sale or sale.get("deleted"):
         raise HTTPException(status_code=404, detail="Sale not found")
     returned = await _sale_returned_map(sale_id)
-    # Restore the stock that is still "out" (sold minus already returned)
+    # Restore only units still out, using their exact original FIFO lots.
+    returned_remaining = dict(returned)
     for it in sale.get("items", []):
-        restore = it["quantity"] - returned.get(it["product_id"], 0)
-        if restore > 0:
-            prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
+        product_id = str(it["product_id"])
+        item_qty = float(it.get("quantity", 0) or 0)
+        skip_returned = min(item_qty, max(0.0, float(returned_remaining.get(product_id, 0) or 0)))
+        returned_remaining[product_id] = max(0.0, float(returned_remaining.get(product_id, 0) or 0) - skip_returned)
+        restore = item_qty - skip_returned
+        if restore > 1e-9:
+            prod = await db.products.find_one({"_id": ObjectId(product_id)})
             layers = await _ensure_cost_layers(prod or {})
-            layers = _append_cost_layer(layers, restore, float(it.get("purchase_price", 0) or 0), None)
+            original_layers = it.get("cost_layers_used") or [{
+                "quantity": item_qty,
+                "unit_cost": float(it.get("purchase_price", 0) or 0),
+                "purchase_id": None,
+            }]
+            restore_layers = _cost_layer_slice(original_layers, skip_returned, restore)
+            for lot in restore_layers:
+                layers = _append_cost_layer(
+                    layers,
+                    float(lot.get("quantity", 0) or 0),
+                    float(lot.get("unit_cost", 0) or 0),
+                    lot.get("purchase_id"),
+                )
             await db.products.update_one(
-                {"_id": ObjectId(it["product_id"])},
+                {"_id": ObjectId(product_id)},
                 {"$inc": {"quantity": restore}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
             )
     # Remove the sale and its returns from the books
