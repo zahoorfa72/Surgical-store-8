@@ -71,6 +71,18 @@ class FinanceMathTests(unittest.TestCase):
         self.assertEqual(result["net_profit"], 32.25)
         self.assertEqual(result["remaining_balance"], 36.25)
 
+    def test_lost_product_transfer_moves_same_amount_from_net_profit_to_remaining_balance(self):
+        adjustments = [{
+            "accounting_target": "net_profit_to_remaining_balance",
+            "net_profit_adjustment": -12.34,
+            "remaining_balance_adjustment": 12.34,
+        }]
+        result = calculate_finance_totals(self.sales, self.returns, self.expenses, self.payments, adjustments)
+        self.assertEqual(result["net_profit_adjustment"], -12.34)
+        self.assertEqual(result["remaining_balance_adjustment"], 12.34)
+        self.assertEqual(result["net_profit"], 9.66)
+        self.assertEqual(result["remaining_balance"], 48.34)
+
     def test_profit_product_and_lost_product_none_do_not_change_gross_profit(self):
         adjustments = [
             {"adjustment_type": "profit_product", "accounting_target": "none", "loss_cost": 1500},
