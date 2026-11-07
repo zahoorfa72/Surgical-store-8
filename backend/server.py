@@ -1269,6 +1269,7 @@ async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=
         "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "product_name": row.get("product_name", ""), "delta": row.get("delta", 0),
         "reason": row.get("reason", ""), "adjustment_type": row.get("adjustment_type", "adjustment"),
         "date": row.get("date") or row.get("created_at", "")[:10], "loss_cost": row.get("loss_cost", 0),
+        "cost_layers_used": row.get("cost_layers_used", []),
         "net_profit_adjustment": row.get("net_profit_adjustment", 0),
         "remaining_balance_adjustment": row.get("remaining_balance_adjustment", 0),
         "gross_profit_adjustment": row.get("gross_profit_adjustment", 0),
@@ -1297,7 +1298,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         existing_adjustment = await db.inventory_adjustments.find_one({"client_id": body.client_id, "deleted": {"$ne": True}})
         if existing_adjustment:
             existing_adjustment["id"] = oid(existing_adjustment["_id"])
-            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
+            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "cost_layers_used", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
                     "product": product_public(product)}
     current = float(product.get("quantity", 0) or 0)
     if -delta > current + 1e-9:
@@ -1318,24 +1319,28 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {
         "quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": ts
     }})
+    allowed_targets = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance")
+    target_name = body.accounting_target if body.accounting_target in allowed_targets else "none"
+    net_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.net_profit_adjustment or 0), 2)
+    balance_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.remaining_balance_adjustment or 0), 2)
     row = {
         "product_id": body.product_id, "product_name": product.get("name", ""), "delta": delta, "reason": body.reason.strip(),
         "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
         "loss_cost": round(loss_cost, 2),
         "cost_layers_used": cost_layers_used,
         # None and inventory-only are strictly stock valuation/quantity changes.
-        "net_profit_adjustment": 0.0 if body.accounting_target in ("none", "inventory_only") else round(float(body.net_profit_adjustment or 0), 2),
-        "remaining_balance_adjustment": 0.0 if body.accounting_target in ("none", "inventory_only") else round(float(body.remaining_balance_adjustment or 0), 2),
+        "net_profit_adjustment": net_adjustment,
+        "remaining_balance_adjustment": balance_adjustment,
         # This option transfers the full purchase-cost loss out of Gross Profit.
         # The finance formula then increases Remaining Balance by the same amount.
-        "gross_profit_adjustment": -round(loss_cost, 2) if body.accounting_target == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0,
-        "accounting_target": body.accounting_target if body.accounting_target in ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance") else "none",
+        "gross_profit_adjustment": -round(loss_cost, 2) if target_name == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0,
+        "accounting_target": target_name,
         "client_id": body.client_id,
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
     }
     result = await db.inventory_adjustments.insert_one(row)
     row["id"] = oid(result.inserted_id)
-    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
+    return {"ok": True, "adjustment": {k: row[k] for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "cost_layers_used", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
             "product": product_public({**product, "quantity": max(0, next_qty), "cost_layers": layers, "updated_at": ts})}
 
 
@@ -1487,6 +1492,24 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
             {"_id": ObjectId(new_pid)},
             {"$set": {"quantity": next_qty, "cost_layers": next_layers, "updated_at": now}},
         )
+        update = {
+            "product_id": new_pid,
+            "product_name": target.get("name", ""),
+            "delta": delta,
+            "reason": body.reason.strip(),
+            "adjustment_type": body.adjustment_type,
+            "date": body.date or now[:10],
+            "loss_cost": round(cost, 2),
+            "cost_layers_used": cost_layers_used,
+            "net_profit_adjustment": net_adjustment,
+            "remaining_balance_adjustment": balance_adjustment,
+            "gross_profit_adjustment": gross_adjustment,
+            "accounting_target": target_name,
+            "edited_at": now,
+            "edited_by": _.get("name", ""),
+        }
+        # The update retains the original Mongo ID and client_id.
+        await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
     except Exception:
         # Restore product snapshots so a failed edit never leaves a half-applied transfer.
         await db.products.update_one(
@@ -1504,25 +1527,8 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
             )
         raise
 
-    update = {
-        "product_id": new_pid,
-        "product_name": target.get("name", ""),
-        "delta": delta,
-        "reason": body.reason.strip(),
-        "adjustment_type": body.adjustment_type,
-        "date": body.date or now[:10],
-        "loss_cost": round(cost, 2),
-        "cost_layers_used": cost_layers_used,
-        "net_profit_adjustment": net_adjustment,
-        "remaining_balance_adjustment": balance_adjustment,
-        "gross_profit_adjustment": gross_adjustment,
-        "accounting_target": target_name,
-        "edited_at": now,
-        "edited_by": _.get("name", ""),
-    }
     # Keep the same database ID and client_id. An edit replaces one record; it
     # never creates a second adjustment/ledger row.
-    await db.inventory_adjustments.update_one({"_id": ObjectId(adjustment_id)}, {"$set": update})
     fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
     return {"ok": True, "adjustment": {
         "id": oid(fresh["_id"]),
@@ -1533,6 +1539,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         "adjustment_type": fresh["adjustment_type"],
         "date": fresh["date"],
         "loss_cost": fresh["loss_cost"],
+        "cost_layers_used": fresh.get("cost_layers_used", []),
         "net_profit_adjustment": fresh.get("net_profit_adjustment", 0),
         "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0),
         "gross_profit_adjustment": fresh.get("gross_profit_adjustment", 0),
