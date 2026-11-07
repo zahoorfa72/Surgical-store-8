@@ -3337,51 +3337,188 @@ async def delete_return(return_id: str, _: AdminOnly):
 async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminOnly):
     if not ObjectId.is_valid(return_id):
         raise HTTPException(status_code=404, detail="Purchase return not found")
-    row=await db.purchase_returns.find_one({"_id":ObjectId(return_id),"deleted":{"$ne":True}})
-    if not row: raise HTTPException(status_code=404, detail="Purchase return not found")
-    if body.purchase_id != row.get("purchase_id"): raise HTTPException(status_code=400, detail="Purchase cannot be changed")
-    purchase=await db.purchases.find_one({"_id":ObjectId(body.purchase_id),"deleted":{"$ne":True}})
-    if not purchase: raise HTTPException(status_code=404, detail="Purchase not found")
-    for old in row.get("items",[]):
-        await db.products.update_one({"_id":ObjectId(old["product_id"])},{"$inc":{"quantity":old["quantity"]},"$set":{"updated_at":now_iso()}})
-    prev=await db.purchase_returns.find({"purchase_id":body.purchase_id,"deleted":{"$ne":True},"_id":{"$ne":ObjectId(return_id)}}).to_list(1000)
-    already={}
-    for rr in prev:
-        for it in rr.get("items",[]): already[it["product_id"]]=already.get(it["product_id"],0)+it["quantity"]
-    po_items={it["product_id"]:it for it in purchase.get("items",[])}
-    items=[]; total=0.0
-    try:
-        for it in body.items:
-            if it.quantity<=0: continue
-            pi=po_items.get(it.product_id)
-            if not pi: raise HTTPException(status_code=400,detail="Item was not part of this purchase")
-            remaining=pi["quantity"]-already.get(it.product_id,0)
-            if it.quantity>remaining: raise HTTPException(status_code=400,detail=f"Only {remaining} of {pi['name']} can be returned")
-            prod=await db.products.find_one({"_id":ObjectId(it.product_id)})
-            if it.quantity>(prod.get("quantity",0) if prod else 0): raise HTTPException(status_code=400,detail=f"Not enough {pi['name']} in stock")
-            line_total=round(it.quantity*pi["unit_cost"],2); total+=line_total
-            items.append({"product_id":it.product_id,"name":pi["name"],"quantity":it.quantity,"unit_cost":pi["unit_cost"],"line_total":line_total})
-        if not items: raise HTTPException(status_code=400,detail="Select at least one item to return")
-    except HTTPException:
-        for old in row.get("items",[]):
-            await db.products.update_one({"_id":ObjectId(old["product_id"])},{"$inc":{"quantity":-old["quantity"]},"$set":{"updated_at":now_iso()}})
-        raise
-    await db.purchase_returns.update_one({"_id":ObjectId(return_id)},{"$set":{"items":items,"refund_total":round(total,2),"reason":body.reason,"edited_at":now_iso()}})
-    for it in items:
-        await db.products.update_one({"_id":ObjectId(it["product_id"])},{"$inc":{"quantity":-it["quantity"]},"$set":{"updated_at":now_iso()}})
-    return purchase_return_public(await db.purchase_returns.find_one({"_id":ObjectId(return_id)}))
+    row = await db.purchase_returns.find_one({"_id": ObjectId(return_id), "deleted": {"$ne": True}})
+    if not row:
+        raise HTTPException(status_code=404, detail="Purchase return not found")
+    if body.purchase_id != row.get("purchase_id"):
+        raise HTTPException(status_code=400, detail="Purchase cannot be changed")
+    purchase = await db.purchases.find_one({"_id": ObjectId(body.purchase_id), "deleted": {"$ne": True}})
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    prev = await db.purchase_returns.find({
+        "purchase_id": body.purchase_id,
+        "deleted": {"$ne": True},
+        "_id": {"$ne": ObjectId(return_id)},
+    }).to_list(1000)
+    already: dict[str, float] = {}
+    for previous_return in prev:
+        for previous_item in previous_return.get("items", []):
+            pid = str(previous_item["product_id"])
+            already[pid] = already.get(pid, 0.0) + float(previous_item.get("quantity", 0) or 0)
+
+    purchase_items = {str(item["product_id"]): item for item in purchase.get("items", [])}
+    requested = _aggregate_item_quantities(body.items)
+    product_ids = set(str(item.get("product_id")) for item in row.get("items", [])) | set(requested)
+    product_states: dict[str, dict] = {}
+    for product_id in product_ids:
+        product = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+        if not product:
+            raise HTTPException(status_code=400, detail="Product for this purchase return was not found")
+        layers = await _ensure_cost_layers(product)
+        restored_qty = 0.0
+        for old_item in row.get("items", []):
+            if str(old_item.get("product_id")) != product_id:
+                continue
+            old_qty = float(old_item.get("quantity", 0) or 0)
+            old_layers = old_item.get("cost_layers_used") or [{
+                "quantity": old_qty,
+                "unit_cost": float(old_item.get("unit_cost", 0) or 0),
+                "purchase_id": body.purchase_id,
+            }]
+            for lot in old_layers:
+                layers = _append_cost_layer(
+                    layers,
+                    float(lot.get("quantity", 0) or 0),
+                    float(lot.get("unit_cost", 0) or 0),
+                    lot.get("purchase_id") or body.purchase_id,
+                )
+            restored_qty += old_qty
+        product_states[product_id] = {
+            "quantity": float(product.get("quantity", 0) or 0) + restored_qty,
+            "layers": layers,
+        }
+
+    items = []
+    total = 0.0
+    returned_in_this_edit: dict[str, float] = {}
+    for it in body.items:
+        qty = float(it.quantity)
+        if qty <= 0:
+            continue
+        product_id = str(it.product_id)
+        purchase_item = purchase_items.get(product_id)
+        if not purchase_item:
+            raise HTTPException(status_code=400, detail="Item was not part of this purchase")
+        already_qty = already.get(product_id, 0.0) + returned_in_this_edit.get(product_id, 0.0)
+        remaining = float(purchase_item.get("quantity", 0) or 0) - already_qty
+        if qty > remaining + 1e-9:
+            raise HTTPException(status_code=400, detail=f"Only {remaining:g} of {purchase_item['name']} can be returned")
+        state = product_states[product_id]
+        available = float(state["quantity"])
+        if qty > available + 1e-9:
+            raise HTTPException(status_code=400, detail=f"Only {available:g} of {purchase_item['name']} in stock to return")
+        unit_cost = float(purchase_item.get("unit_cost", 0) or 0)
+        lot_available = _purchase_lot_quantity_at_cost(state["layers"], body.purchase_id, unit_cost)
+        if qty > lot_available + 1e-9:
+            raise HTTPException(status_code=400, detail=f"Only {lot_available:g} units from this purchase lot remain available to return")
+        state["layers"] = _remove_purchase_cost_lot(state["layers"], qty, body.purchase_id, unit_cost)
+        state["quantity"] = available - qty
+        line_total = round(qty * unit_cost, 2)
+        total += line_total
+        returned_in_this_edit[product_id] = returned_in_this_edit.get(product_id, 0.0) + qty
+        items.append({
+            "product_id": product_id,
+            "name": purchase_item["name"],
+            "quantity": qty,
+            "unit_cost": unit_cost,
+            "purchase_id": body.purchase_id,
+            "cost_layers_used": [{
+                "quantity": qty,
+                "unit_cost": unit_cost,
+                "purchase_id": body.purchase_id,
+            }],
+            "line_total": line_total,
+        })
+
+    if not items:
+        raise HTTPException(status_code=400, detail="Select at least one item to return")
+
+    await db.purchase_returns.update_one(
+        {"_id": ObjectId(return_id)},
+        {"$set": {
+            "items": items,
+            "refund_total": round(total, 2),
+            "reason": body.reason,
+            "edited_at": now_iso(),
+        }},
+    )
+    for product_id, state in product_states.items():
+        clean_layers = [
+            {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
+             "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
+             "purchase_id": layer.get("purchase_id")}
+            for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
+        ]
+        await db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$set": {
+                "quantity": round(float(state["quantity"]), 8),
+                "cost_layers": clean_layers,
+                "updated_at": now_iso(),
+            }},
+        )
+    return purchase_return_public(await db.purchase_returns.find_one({"_id": ObjectId(return_id)}))
 
 
 @api.delete("/purchase-returns/{return_id}")
 async def delete_purchase_return(return_id: str, _: AdminOnly):
-    if not ObjectId.is_valid(return_id): raise HTTPException(status_code=404, detail="Purchase return not found")
+    if not ObjectId.is_valid(return_id):
+        raise HTTPException(status_code=404, detail="Purchase return not found")
     row = await db.purchase_returns.find_one({"_id": ObjectId(return_id), "deleted": {"$ne": True}})
-    if not row: raise HTTPException(status_code=404, detail="Purchase return not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Purchase return not found")
+    product_states: dict[str, dict] = {}
     for it in row.get("items", []):
-        if ObjectId.is_valid(it["product_id"]): await db.products.update_one({"_id": ObjectId(it["product_id"])}, {"$inc": {"quantity": it["quantity"]}, "$set": {"updated_at": now_iso()}})
-    await db.purchase_returns.update_one({"_id": ObjectId(return_id)}, {"$set": {"deleted": True, "deleted_at": now_iso()}})
-    return {"ok": True}
+        product_id = str(it.get("product_id") or "")
+        if not ObjectId.is_valid(product_id):
+            continue
+        state = product_states.get(product_id)
+        if state is None:
+            product = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
+            if not product:
+                continue
+            state = {
+                "quantity": float(product.get("quantity", 0) or 0),
+                "layers": await _ensure_cost_layers(product),
+            }
+            product_states[product_id] = state
+        qty = float(it.get("quantity", 0) or 0)
+        purchase_id = str(it.get("purchase_id") or row.get("purchase_id") or "")
+        lots = it.get("cost_layers_used") or [{
+            "quantity": qty,
+            "unit_cost": float(it.get("unit_cost", 0) or 0),
+            "purchase_id": purchase_id,
+        }]
+        for lot in lots:
+            state["layers"] = _append_cost_layer(
+                state["layers"],
+                float(lot.get("quantity", 0) or 0),
+                float(lot.get("unit_cost", 0) or 0),
+                lot.get("purchase_id") or purchase_id,
+            )
+        state["quantity"] += qty
 
+    await db.purchase_returns.update_one(
+        {"_id": ObjectId(return_id)},
+        {"$set": {"deleted": True, "deleted_at": now_iso()}},
+    )
+    for product_id, state in product_states.items():
+        clean_layers = [
+            {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
+             "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
+             "purchase_id": layer.get("purchase_id")}
+            for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
+        ]
+        await db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$set": {
+                "quantity": round(float(state["quantity"]), 8),
+                "cost_layers": clean_layers,
+                "updated_at": now_iso(),
+            }},
+        )
+    return {"ok": True}
 
 # ---------------------------------------------------------------------------
 # Reports
