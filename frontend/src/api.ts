@@ -494,34 +494,50 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
   } else if (entity === "sales") {
     if (method === "POST") {
       const products = queryClient.getQueryData<any[]>(["products"]) ?? [];
+      const workingLayers = new Map<string, any[]>();
+      const soldByProduct = new Map<string, number>();
+      let exactCogs = 0;
       const items = (body.items ?? []).map((it: any) => {
         const product = products.find((p: any) => p.id === it.product_id);
+        const pid = String(it.product_id);
         const qty = Number(it.quantity ?? 0);
         const unitPrice = Number(it.unit_price ?? 0);
-        const layers = ensureCostLayers(product);
-        const consumed = consumeCostLayers(layers, qty);
-        const purchasePrice = qty > 0 ? consumed.totalCost / qty : 0;
-        return { ...it, name: product?.name ?? "Item", purchase_price: purchasePrice,
+        const layers = workingLayers.get(pid) ?? ensureCostLayers(product);
+        const consumed = consumeCostLayers(layers, qty, Number(product?.purchase_price ?? 0));
+        workingLayers.set(pid, consumed.layers);
+        soldByProduct.set(pid, (soldByProduct.get(pid) ?? 0) + qty);
+        exactCogs += consumed.totalCost;
+        return {
+          ...it,
+          name: product?.name ?? "Item",
+          purchase_price: qty > 0 ? consumed.totalCost / qty : 0,
           line_cogs: Math.round(consumed.totalCost * 100) / 100,
-          _remaining_cost_layers: consumed.layers,
-          line_total: Math.round(qty * unitPrice * 100) / 100 };
+          cost_layers_used: consumed.usedLayers,
+          _line_cogs_exact: consumed.totalCost,
+          line_total: Math.round(qty * unitPrice * 100) / 100,
+        };
       });
-      const subtotal = items.reduce((s: number, it: any) => s + Number(it.line_total ?? 0), 0);
+      const subtotal = Math.round(items.reduce((sum: number, it: any) => sum + Number(it.line_total ?? 0), 0) * 100) / 100;
       const discount = Math.max(0, Number(body.discount ?? 0));
-      const total = Math.max(0, subtotal - discount);
-      const cogs = items.reduce((s: number, it: any) => s + Number(it.quantity ?? 0) * Number(it.purchase_price ?? 0), 0);
+      const total = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
+      const cogs = Math.round(exactCogs * 100) / 100;
       const customer = body.customer_id ? (queryClient.getQueryData<any[]>(["parties", "customer"]) ?? []).find((p: any) => p.id === body.customer_id) : null;
       const rec = { id: tempId, invoice_no: `OFFLINE-INV-${tempId.split("-").pop()}`, items,
         customer_id: body.customer_id ?? null, customer_name: customer?.name ?? "Walk-in",
-        subtotal, discount, total, cogs, profit: total - cogs, note: body.note ?? "",
+        subtotal, discount, total, cogs, profit: Math.round((total - cogs) * 100) / 100, note: body.note ?? "",
         credit: !!(body.credit && body.customer_id), cashier_name: "", transaction_date: body.transaction_date || todayIsoDate(), created_at: now(), pending: true };
       queryClient.setQueryData<any[]>(["sales"], (old) => [rec, ...(old ?? [])]);
       queryClient.setQueryData<any>(["sale", tempId], rec);
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
-        const it = items.find((x: any) => x.product_id === p.id);
-        if (!it) return p;
-        const layers = (it as any)._remaining_cost_layers ?? consumeCostLayers(ensureCostLayers(p), Number(it.quantity ?? 0)).layers;
-        return { ...p, quantity: Number(p.quantity ?? 0) - Number(it.quantity ?? 0), cost_layers: layers };
+        const qty = soldByProduct.get(String(p.id)) ?? 0;
+        if (!qty) return p;
+        return {
+          ...p,
+          quantity: Number(p.quantity ?? 0) - qty,
+          cost_layers: workingLayers.get(String(p.id)) ?? ensureCostLayers(p),
+          updated_at: now(),
+          pending: true,
+        };
       }));
       if (rec.credit && rec.customer_id) {
         queryClient.setQueryData<any[]>(["parties", "customer"], (old) => (old ?? []).map((p: any) =>
