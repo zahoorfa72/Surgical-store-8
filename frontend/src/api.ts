@@ -781,7 +781,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         applyDelta(
           String(previous.product_id ?? ""),
           -oldDelta,
-          undefined,
+          Math.abs(oldDelta) > 1e-9 ? oldCost / Math.abs(oldDelta) : undefined,
           previous.cost_layers_used,
         );
       } else {
