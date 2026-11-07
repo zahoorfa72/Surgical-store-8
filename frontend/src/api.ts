@@ -734,17 +734,40 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     // update stock and the FIFO layer cache, not just the history list.
     const records = queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
     const previous = id ? records.find((row: any) => row.id === id) : undefined;
-    const applyDelta = (pid: string, delta: number, unitCost?: number) => {
+    const applyDelta = (
+      pid: string,
+      delta: number,
+      unitCost?: number,
+      restoreLayers?: Array<{ quantity: number; unit_cost: number; purchase_id?: string | null }>,
+      matchCostOnRemoval = false,
+    ) => {
       queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((p: any) => {
         if (p.id !== pid || !Number.isFinite(delta) || Math.abs(delta) < 1e-9) return p;
         let layers = ensureCostLayers(p);
         let quantity = Number(p.quantity ?? 0);
         if (delta < 0) {
           const take = Math.min(quantity, Math.abs(delta));
-          if (take > 0) layers = consumeCostLayers(layers, take).layers;
+          if (take > 0) {
+            layers = matchCostOnRemoval && unitCost !== undefined
+              ? consumeCostLayersMatching(layers, take, unitCost).layers
+              : consumeCostLayers(layers, take).layers;
+          }
           quantity -= take;
         } else {
-          layers = appendCostLayer(layers, delta, Math.max(0, Number(unitCost ?? p.purchase_price ?? 0)), null);
+          // Reversing a lost-stock adjustment must restore the exact FIFO lot
+          // composition originally removed, not an averaged synthetic layer.
+          if (restoreLayers?.length) {
+            for (const used of restoreLayers) {
+              layers = appendCostLayer(
+                layers,
+                Number(used.quantity ?? 0),
+                Math.max(0, Number(used.unit_cost ?? 0)),
+                used.purchase_id ?? null,
+              );
+            }
+          } else {
+            layers = appendCostLayer(layers, delta, Math.max(0, Number(unitCost ?? p.purchase_price ?? 0)), null);
+          }
           quantity += delta;
         }
         return { ...p, quantity: Math.max(0, quantity), cost_layers: layers, updated_at: now(), pending: true };
@@ -753,7 +776,24 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     if ((method === "PUT" || method === "DELETE") && previous) {
       const oldDelta = Number(previous.delta ?? 0);
       const oldCost = Math.max(0, Number(previous.loss_cost ?? 0));
-      applyDelta(String(previous.product_id ?? ""), -oldDelta, Math.abs(oldDelta) > 1e-9 ? oldCost / Math.abs(oldDelta) : undefined);
+      if (oldDelta < 0) {
+        // Undoing lost stock restores original FIFO lots exactly when available.
+        applyDelta(
+          String(previous.product_id ?? ""),
+          -oldDelta,
+          undefined,
+          previous.cost_layers_used,
+        );
+      } else {
+        // Undoing added stock removes its original cost layer before a replacement.
+        applyDelta(
+          String(previous.product_id ?? ""),
+          -oldDelta,
+          Math.abs(oldDelta) > 1e-9 ? oldCost / Math.abs(oldDelta) : undefined,
+          undefined,
+          true,
+        );
+      }
     }
     if (method === "POST" || method === "PUT") {
       const delta = Number(body?.delta ?? 0);
