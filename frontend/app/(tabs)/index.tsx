@@ -194,7 +194,6 @@ export default function Dashboard() {
   const { data: returns = [], refetch: refetchReturns } = useReturns();
   const { data: products = [], refetch: refetchProducts } = useProducts();
   const { data: budget } = useBudget();
-  const { data: inventoryAdjustments = [] } = useInventoryAdjustments(!cashier);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -847,6 +846,7 @@ const useStyles = makeStyles((colors) => ({
   detailValue: { fontSize: 13, fontWeight: "800", color: colors.success },
   detailOut: { fontSize: 13, fontWeight: "800", color: colors.error },
   detailBig: { fontSize: 28, fontWeight: "900", color: colors.brandPrimary },
+  itemFinance: { fontSize: 12, lineHeight: 17, color: colors.onSurfaceSecondary, marginTop: 2 },
   dateFilter: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 14, height: 46, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
   dateInput: { flex: 1, fontSize: 14, color: colors.onSurface },
   clearDate: { color: colors.brandPrimary, fontWeight: "800", fontSize: 12 },
