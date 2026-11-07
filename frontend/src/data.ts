@@ -243,7 +243,11 @@ function localReport(range: string): ReportSummary {
     return target !== "none" && target !== "inventory_only" && ["split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance"].includes(target);
   });
   const netProfitAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
-  const remainingBalanceAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
+  // Stock adjustments are non-cash movements and cannot increase/decrease the
+  // Remaining Balance, even if a legacy row retained a stale routed amount.
+  const remainingBalanceAdjustment = selectedAdjustments
+    .filter((row) => row.adjustment_type !== "lost_product" && row.adjustment_type !== "profit_product")
+    .reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
   const revenue = salesRevenue - returnsTotal;
   // Cash movement is the actual amount field only. Adjustment is a
   // non-cash settlement/discount and must not be counted as money in hand.
@@ -271,7 +275,8 @@ function localReport(range: string): ReportSummary {
     // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
     // Preserve the other agreed balance components and budget attribution.
     remaining_balance:
-      revenue - grossProfit - supplierPayments - cogsExpenses + supplierRefunds
+      // Stock loss can reduce accounting Gross Profit, but it is not cash.
+      revenue - grossProfitBeforeLostStock - supplierPayments - cogsExpenses + supplierRefunds
       + openingBudgetForRange + Number(budget.monthly_amount ?? 0) + remainingBalanceAdjustment,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
