@@ -15,6 +15,21 @@ type ProfitRow = { id: string; client_id?: string; product_id: string; product_n
 const HISTORY_KEY = "ssm.profit-products.v1";
 const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
+function mergeUniqueRows<T extends { id?: string; client_id?: string }>(rows: T[]): T[] {
+  const result: T[] = [];
+  const ids = new Set<string>();
+  const clientIds = new Set<string>();
+  for (const row of rows) {
+    const id = String(row.id || "");
+    const clientId = String(row.client_id || "");
+    if ((id && ids.has(id)) || (clientId && clientIds.has(clientId))) continue;
+    result.push(row);
+    if (id) ids.add(id);
+    if (clientId) clientIds.add(clientId);
+  }
+  return result;
+}
+
 function fifoProfitValue(product: Product | undefined, quantity: number): number {
   if (!product || quantity <= 0) return 0;
   let left = quantity, cost = 0;
@@ -50,7 +65,16 @@ export default function ProfitProductScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
-  const costPreview = useMemo(() => fifoProfitValue(selected, qty), [selected, qty]);
+  const editingRow = editingId ? history.find((row) => row.id === editingId) : undefined;
+  const costPreview = useMemo(() => {
+    // When an added-stock record is edited, retain its original unit-cost basis.
+    if (editingRow && editingRow.product_id === selected?.id && Number(editingRow.delta) > 0) {
+      const oldQty = Math.abs(Number(editingRow.delta));
+      const oldUnitCost = oldQty > 0 ? Number(editingRow.loss_cost ?? editingRow.profit_value ?? 0) / oldQty : 0;
+      return Math.round(qty * oldUnitCost * 100) / 100;
+    }
+    return fifoProfitValue(selected, qty);
+  }, [selected, qty, editingRow]);
   const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 80);
   const totalAdded = history.reduce((sum, row) => sum + Math.max(0, Number(row.profit_value ?? (row as any).loss_cost) || 0), 0);
 
@@ -64,12 +88,7 @@ export default function ProfitProductScreen() {
       const productName = (id: string) => products.find((p) => p.id === id)?.name ?? "Product";
       queryClient.setQueryData(["inventory-adjustments"], [...(remote ?? []), ...(local ?? [])]);
       const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "profit_product").map((r) => ({ ...r, product_name: productName(r.product_id) })), ...(local ?? [])];
-      const unique = new Map<string, ProfitRow>();
-      for (const row of rows) {
-        const key = row.client_id || (row.id && !row.id.startsWith("local-") ? row.id : [row.product_id,row.date,row.delta,row.reason,Number(row.profit_value).toFixed(2)].join("|"));
-        if (!unique.has(key)) unique.set(key, row);
-      }
-      setHistory([...unique.values()].sort((a,b) => String(b.created_at || b.date).localeCompare(String(a.created_at || a.date))));
+      setHistory(mergeUniqueRows(rows).sort((a,b) => String(b.created_at || b.date).localeCompare(String(a.created_at || a.date))));
     })();
     return () => { active = false; };
   }, [products.length]);
@@ -88,17 +107,19 @@ export default function ProfitProductScreen() {
     const halfCents = Math.round(amountCents / 2);
     const netProfitAdjustment = accountingTarget === "split_50_50" ? halfCents / 100 : accountingTarget === "net_profit" || accountingTarget === "both" ? amountCents / 100 : 0;
     const remainingBalanceAdjustment = accountingTarget === "split_50_50" ? (amountCents - halfCents) / 100 : accountingTarget === "remaining_balance" || accountingTarget === "both" ? amountCents / 100 : 0;
-    const clientId = editingId ? (history.find(row => row.id === editingId)?.client_id || "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)) : "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
-    const localRow: ProfitRow = { id: "local-"+clientId, client_id: clientId, product_id: selected.id, product_name: selected.name, delta: qty, reason: reason.trim(), date, profit_value: profitValue, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, accounting_target: accountingTarget, created_at: new Date().toISOString(), adjustment_type: "profit_product" };
+    const editedRow = editingId ? history.find(row => row.id === editingId) : undefined;
+    const clientId = editingId ? editedRow?.client_id : "added-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
+    const localRow: ProfitRow = { id: editingId || (clientId ? "local-"+clientId : "local-"+Date.now()), ...(clientId ? { client_id: clientId } : {}), product_id: selected.id, product_name: selected.name, delta: qty, reason: reason.trim(), date, profit_value: profitValue, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, accounting_target: accountingTarget, created_at: new Date().toISOString(), adjustment_type: "profit_product" };
     try {
       const response = await apiRequest<any>(editingId ? `/inventory-adjustments/${editingId}` : "/inventory-adjustments", { method: editingId ? "PUT" : "POST", body: { product_id: selected.id, delta: qty, reason: reason.trim(), adjustment_type: "profit_product", date, loss_cost: profitValue, net_profit_adjustment: netProfitAdjustment, remaining_balance_adjustment: remainingBalanceAdjustment, accounting_target: accountingTarget, client_id: editingId ? undefined : clientId } });
-      const row: ProfitRow = response?.adjustment ? { ...response.adjustment, client_id: response.adjustment.client_id || clientId, product_name: selected.name } : response?.pending ? { ...localRow, id: response.id || localRow.id } : localRow;
-      const next = [row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])];
-      const dedup = next.filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i);
-      await storage.setItem(HISTORY_KEY, dedup as any);
-      queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => [row, ...old.filter((x) => (x.client_id || x.id) !== (row.client_id || row.id))]);
+      const row: ProfitRow = response?.adjustment
+        ? { ...response.adjustment, ...(!editingId && !response.adjustment.client_id && clientId ? { client_id: clientId } : {}), product_name: selected.name }
+        : response?.pending ? { ...localRow, id: response.id || localRow.id } : localRow;
+      const next = mergeUniqueRows([row, ...(await storage.getItem<any>(HISTORY_KEY, []) ?? [])]);
+      await storage.setItem(HISTORY_KEY, next as any);
+      queryClient.setQueryData(["inventory-adjustments"], (old: any[] = []) => mergeUniqueRows([row, ...old]));
       void queryClient.invalidateQueries({ queryKey: ["report"] });
-      setHistory((old) => [row, ...old].filter((r, i, arr) => arr.findIndex(x => (x.client_id || x.id) === (r.client_id || r.id)) === i));
+      setHistory((old) => mergeUniqueRows([row, ...old]));
       toast("Profit product recorded. Stock and cost lots increased.");
       setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setAccountingTarget("none"); setAccountingAmountText("0"); setEditingId(null);
     } catch (e: any) {
