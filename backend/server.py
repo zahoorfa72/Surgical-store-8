@@ -3313,10 +3313,13 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
 
-    gross_revenue = round(sum(s.get("total", 0) for s in sales), 2)
-    returns_total = round(sum(r.get("refund_total", 0) for r in returns), 2)
-    returns_cogs = round(sum(r.get("refund_cogs", 0) for r in returns), 2)
-    revenue = round(gross_revenue - returns_total, 2)  # net sales
+    # Gross Revenue is before invoice discounts (subtotal); Revenue is the
+    # actual billed sale total after invoice discounts and before returns.
+    gross_revenue = round(sum(float(s.get("subtotal", s.get("total", 0)) or 0) for s in sales), 2)
+    sales_revenue = round(sum(float(s.get("total", 0) or 0) for s in sales), 2)
+    returns_total = round(sum(float(r.get("refund_total", 0) or 0) for r in returns), 2)
+    returns_cogs = round(sum(float(r.get("refund_cogs", 0) or 0) for r in returns), 2)
+    revenue = round(sales_revenue - returns_total, 2)  # net sales after discounts and returns
     # Gross Profit must match the profit recorded by Sell for every invoice.
     # This preserves sale-level discounts and the exact purchase-cost layer used
     # when the sale was created/edited. Returns reverse the original sale profit.
@@ -3446,18 +3449,19 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     ]
     # Stock adjustments affect account totals only when explicitly selected by
     # the admin. Older entries without these fields safely default to zero.
-    net_profit_adjustment = 0.0
-    remaining_balance_adjustment = 0.0
-    for adjustment in adjustments_in_period:
-        # Only explicit single-field and explicit multi-field targets apply.
-        # Legacy gross-profit transfers are excluded because they coupled fields.
-        target_name = adjustment.get("accounting_target", "none")
-        if target_name not in ("net_profit", "remaining_balance", "both", "split_50_50"):
-            continue
-        net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
-        remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
-    net_profit_adjustment = round(net_profit_adjustment, 2)
-    remaining_balance_adjustment = round(remaining_balance_adjustment, 2)
+    # Route each ledger amount through only its named destination. Do not trust
+    # the unused amount column on old/corrupted rows: this prevents a Net Profit
+    # only record from changing Remaining Balance (and vice versa).
+    net_profit_adjustment = round(sum(
+        float(row.get("net_profit_adjustment", 0) or 0)
+        for row in adjustments_in_period
+        if row.get("accounting_target", "none") in ("net_profit", "both", "split_50_50")
+    ), 2)
+    remaining_balance_adjustment = round(sum(
+        float(row.get("remaining_balance_adjustment", 0) or 0)
+        for row in adjustments_in_period
+        if row.get("accounting_target", "none") in ("remaining_balance", "both", "split_50_50")
+    ), 2)
 
     # Selected lost-stock transfers reduce Gross Profit and, through the
     # existing Remaining Balance formula (Net Sales - Gross Profit), add the
