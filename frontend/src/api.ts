@@ -600,6 +600,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
             };
           });
         } else {
+          newCogsExact = 0;
           // Restore the original sold FIFO layers, then consume the replacement
           // cart in order. This mirrors the backend even when the sale used
           // multiple purchase lots or the same product appears on several lines.
@@ -645,7 +646,6 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
             };
           });
           queryClient.setQueryData<any[]>(["products"], updatedProducts);
-          newCogsExact = newCogsExact; // retain the exact FIFO total for the sale report.
         }
         const subtotal = newItems.reduce((a:number,x:any)=>a+Number(x.line_total||0),0);
         const discount = Math.max(0,Number(body.discount??0));
