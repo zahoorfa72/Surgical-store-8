@@ -578,26 +578,29 @@ def _append_cost_layer(layers: list, quantity: float, unit_cost: float, purchase
 
 
 def _remove_cost_layer_composition(layers: list, used_layers: list) -> list:
-    """Remove the exact cost lots previously restored by a sale return."""
+    """Remove exact returned lots; never substitute another purchase lot at a similar cost."""
     result = [{**layer, "quantity": max(0.0, float(layer.get("quantity", 0) or 0))} for layer in layers]
     for used in used_layers or []:
         remaining = max(0.0, float(used.get("quantity", 0) or 0))
         unit_cost = max(0.0, float(used.get("unit_cost", 0) or 0))
         purchase_id = str(used.get("purchase_id") or "")
-        for pass_index in (0, 1):
-            for layer in result:
-                if remaining <= 1e-9:
-                    break
-                if abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) > 1e-6:
-                    continue
-                if pass_index == 0 and str(layer.get("purchase_id") or "") != purchase_id:
-                    continue
-                available = max(0.0, float(layer.get("quantity", 0) or 0))
-                take = min(available, remaining)
-                layer["quantity"] = available - take
-                remaining -= take
+        for layer in result:
+            if remaining <= 1e-9:
+                break
+            if str(layer.get("purchase_id") or "") != purchase_id:
+                continue
+            if abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) > 1e-6:
+                continue
+            available = max(0.0, float(layer.get("quantity", 0) or 0))
+            take = min(available, remaining)
+            layer["quantity"] = available - take
+            remaining -= take
+        if remaining > 1e-9:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot reverse this return safely: its original cost lot is no longer available in stock.",
+            )
     return [layer for layer in result if float(layer.get("quantity", 0) or 0) > 1e-9]
-
 
 async def _save_cost_layers(product_id: str, layers: list):
     clean = [
