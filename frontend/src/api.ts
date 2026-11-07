@@ -1120,14 +1120,29 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     };
     if (method === "PUT" && id) {
       const existing = (queryClient.getQueryData<any[]>(["payments", "all"]) ?? []).find((p) => p.id === id);
-      queryClient.setQueryData<any[]>(["payments", "all"], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
       if (existing) {
-        queryClient.setQueryData<any[]>(["payments", existing.party_id], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
-        if (body.party_id === existing.party_id) {
-          const oldEffect = balanceEffect(existing.kind, existing.amount, existing.adjustment);
-          const newEffect = balanceEffect(existing.kind, body.amount, body.adjustment);
-          applyBalance(existing.party_type, existing.party_id, newEffect - oldEffect);
-        }
+        const nextType = (body.kind === "pay" || body.kind === "supplier_refund") ? "supplier" : "customer";
+        const nextPartyId = String(body.party_id ?? existing.party_id);
+        const oldEffect = balanceEffect(existing.kind, existing.amount, existing.adjustment);
+        const newEffect = balanceEffect(body.kind, body.amount, body.adjustment);
+
+        // Reverse the old entry from its original party, then apply it to the
+        // new party. Changing the payment's party/type must not strand balances.
+        applyBalance(existing.party_type, existing.party_id, -oldEffect);
+        applyBalance(nextType, nextPartyId, newEffect);
+
+        const updated = {
+          ...existing,
+          ...body,
+          party_id: nextPartyId,
+          party_type: nextType,
+          amount: Number(body.amount ?? 0),
+          adjustment: Number(body.adjustment ?? 0),
+          pending: true,
+        };
+        queryClient.setQueryData<any[]>(["payments", "all"], (rows) => (rows ?? []).map((p) => p.id === id ? updated : p));
+        queryClient.setQueryData<any[]>(["payments", existing.party_id], (rows) => (rows ?? []).filter((p) => p.id !== id));
+        queryClient.setQueryData<any[]>(["payments", nextPartyId], (rows) => [updated, ...(rows ?? []).filter((p) => p.id !== id)]);
       }
     } else if (method === "POST") {
       const type = (body.kind === "pay" || body.kind === "supplier_refund") ? "supplier" : "customer";
