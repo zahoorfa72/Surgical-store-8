@@ -80,6 +80,35 @@ function inRange(iso: string | undefined, range: string): boolean {
   return !Number.isNaN(date.getTime()) && date >= start && date < end;
 }
 
+function uniqueStockAdjustmentRows<T extends {
+  id?: string;
+  client_id?: string;
+  product_id?: string;
+  date?: string;
+  delta?: number;
+  reason?: string;
+  loss_cost?: number;
+  profit_value?: number;
+}>(rows: T[]): T[] {
+  const result: T[] = [];
+  const ids = new Set<string>();
+  const clientIds = new Set<string>();
+  const fallbackKeys = new Set<string>();
+  for (const row of rows) {
+    const id = String(row.id || "");
+    const clientId = String(row.client_id || "");
+    const fallback = !id && !clientId
+      ? [row.product_id, row.date, row.delta, row.reason, row.loss_cost ?? row.profit_value].join("|")
+      : "";
+    if ((id && ids.has(id)) || (clientId && clientIds.has(clientId)) || (fallback && fallbackKeys.has(fallback))) continue;
+    result.push(row);
+    if (id) ids.add(id);
+    if (clientId) clientIds.add(clientId);
+    if (fallback) fallbackKeys.add(fallback);
+  }
+  return result;
+}
+
 async function loadLocalStockAdjustments(): Promise<void> {
   const key = ["inventory-adjustments"] as const;
   const cached = queryClient.getQueryData<any[]>(key) ?? [];
@@ -87,24 +116,7 @@ async function loadLocalStockAdjustments(): Promise<void> {
     storage.getItem<any[]>("ssm.lost-products.v1", []),
     storage.getItem<any[]>("ssm.profit-products.v1", []),
   ]);
-  const merged = [...cached, ...(lostRows ?? []), ...(profitRows ?? [])];
-  const unique: any[] = [];
-  const seenIds = new Set<string>();
-  const seenClientIds = new Set<string>();
-  const seenFallback = new Set<string>();
-  for (const row of merged) {
-    const id = String(row.id || "");
-    const clientId = String(row.client_id || "");
-    const fallback = !id && !clientId
-      ? [row.product_id, row.date, row.delta, row.reason, row.loss_cost ?? row.profit_value].join("|")
-      : "";
-    if ((id && seenIds.has(id)) || (clientId && seenClientIds.has(clientId)) || (fallback && seenFallback.has(fallback))) continue;
-    unique.push(row);
-    if (id) seenIds.add(id);
-    if (clientId) seenClientIds.add(clientId);
-    if (fallback) seenFallback.add(fallback);
-  }
-  queryClient.setQueryData(key, unique);
+  queryClient.setQueryData(key, uniqueStockAdjustmentRows([...cached, ...(lostRows ?? []), ...(profitRows ?? [])]));
 }
 
 function localReport(range: string): ReportSummary {
@@ -164,7 +176,7 @@ function localReport(range: string): ReportSummary {
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
-  const periodAdjustments = filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at })));
+  const periodAdjustments = uniqueStockAdjustmentRows(filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at }))));
   // Match Sell exactly: use the stored profit on each sale and reverse
   // returned profit. This keeps offline Remaining Balance identical to Sell.
   const storedSaleProfit = sales.reduce((n, s) => n + Number(s.profit ?? 0), 0);
