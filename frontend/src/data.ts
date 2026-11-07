@@ -184,7 +184,7 @@ function localReport(range: string): ReportSummary {
     return date >= start && date < end;
   }).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
 
-  const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? 0), 0);
+  const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? s.total ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
   const periodAdjustments = uniqueStockAdjustmentRows(filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at }))));
