@@ -7,7 +7,7 @@ import { getAppNotifications } from "@/src/notification-center";
 import { notifyLowStock } from "@/src/low-stock-notifications";
 
 import { useAuth } from "@/src/auth";
-import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget } from "@/src/data";
+import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget, useInventoryAdjustments } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
@@ -18,6 +18,17 @@ const displayFinanceAmount = (value: unknown, fake: boolean) => fake ? fakeDispl
 function isoToDisplay(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
+}
+
+function saleBusinessDateLabel(sale: any): string {
+  const day = String(sale?.transaction_date || sale?.created_at || "").slice(0, 10);
+  const date = day ? new Date(day + "T12:00:00") : new Date(sale?.created_at || Date.now());
+  const dateLabel = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+  const created = sale?.created_at ? new Date(sale.created_at) : null;
+  const timeLabel = created && !Number.isNaN(created.getTime())
+    ? created.toLocaleTimeString()
+    : "";
+  return [dateLabel, timeLabel].filter(Boolean).join(", ");
 }
 
 function displayToIso(value: string): string {
@@ -174,6 +185,7 @@ export default function Dashboard() {
   const { data: returns = [], refetch: refetchReturns } = useReturns();
   const { data: products = [], refetch: refetchProducts } = useProducts();
   const { data: budget } = useBudget();
+  const { data: inventoryAdjustments = [] } = useInventoryAdjustments(!cashier);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -195,9 +207,9 @@ export default function Dashboard() {
     if (balanceEnd && d >= balanceEnd) return false;
     return true;
   };
-  const balanceDaySales = sales.filter((s: any) => inBalanceRange(s.created_at));
+  const balanceDaySales = sales.filter((s: any) => inBalanceRange(s.transaction_date ? s.transaction_date + "T00:00:00" : s.created_at));
   const balanceDayPayments = payments.filter((p: any) => inBalanceRange(p.created_at));
-  const balanceDayExpenses = expenses.filter((e: any) => inBalanceRange(e.created_at));
+  const balanceDayExpenses = expenses.filter((e: any) => inBalanceRange(e.transaction_date ? e.transaction_date + "T00:00:00" : e.created_at));
   const balanceDayReturns = returns.filter((r: any) => inBalanceRange(r.created_at));
   const balanceDayRevenue =
     balanceDaySales.reduce((n: number, s: any) => n + Number(s.total ?? 0), 0) -
@@ -213,11 +225,18 @@ export default function Dashboard() {
   const openingBudgetForBalanceRange = (budget?.opening_transactions ?? [])
     .filter((entry: any) => inBalanceRange(entry.date))
     .reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0);
+  const balanceDayAdjustment = inventoryAdjustments
+    .filter((row: any) => inBalanceRange(row.date ? String(row.date) + "T00:00:00" : row.created_at))
+    .filter((row: any) => ["remaining_balance", "both", "split_50_50"].includes(String(row.accounting_target ?? "none")))
+    .reduce((sum: number, row: any) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
+  const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
   const balanceDayRemaining =
     balanceDayRevenue - balanceDayGrossProfit - balanceDayCogsExpense
     - balanceSupplierPayments + balanceSupplierRefunds
-    + openingBudgetForBalanceRange + monthlyExpensesBudget;
-  const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
+    + openingBudgetForBalanceRange + monthlyExpensesBudget + balanceDayAdjustment;
+  // The all-dates view must use the report's canonical all-time calculation,
+  // so it cannot drift from the dashboard headline.
+  const balanceSelectedRemaining = !selectedBalanceFrom && !selectedBalanceTo ? balanceAllTime : balanceDayRemaining;
   const inSelectedReport = (iso?: string) => {
     if (!iso) return false;
     const d = new Date(iso);
@@ -284,9 +303,9 @@ export default function Dashboard() {
     }
     return true;
   };
-  const periodSales = sales.filter((x: any) => inOverviewBalancePeriod(x.created_at));
+  const periodSales = sales.filter((x: any) => inOverviewBalancePeriod(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
   const periodPayments = payments.filter((x: any) => inOverviewBalancePeriod(x.created_at));
-  const periodExpenses = expenses.filter((x: any) => inOverviewBalancePeriod(x.created_at));
+  const periodExpenses = expenses.filter((x: any) => inOverviewBalancePeriod(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
   const periodReturns = returns.filter((x: any) => inOverviewBalancePeriod(x.created_at));
   const selectedPeriodRemaining =
     periodSales.reduce((n: number, x: any) => n + Number(x.total ?? 0) - Number(x.profit ?? 0), 0)
@@ -295,7 +314,8 @@ export default function Dashboard() {
     - periodPayments.filter((x: any) => x.kind === "pay").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + (budget?.opening_transactions ?? []).filter((entry: any) => inOverviewBalancePeriod(entry.date)).reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0)
-    + monthlyExpensesBudget;
+    + monthlyExpensesBudget
+    + Number(data?.remaining_balance_adjustment ?? 0);
   const periodBalanceLabel = range === "day" ? "Selected Day Remaining" : range === "week" ? "Selected Week Remaining" : range === "month" ? "Selected Month Remaining" : range === "year" ? "Selected Year Remaining" : range === "custom" ? "Selected Dates Remaining" : "Period Remaining";
 
   const detailFromIso = displayToIso(detailFromDate);
@@ -310,8 +330,9 @@ export default function Dashboard() {
     if (end) { end.setDate(end.getDate()+1); return d < end; }
     return inSelectedReport(iso);
   };
-  const detailSales = sales.filter((x:any) => inDetailRange(x.created_at));
-  const detailPurchases = purchases.filter((x:any) => inDetailRange(x.created_at));
+  const detailSales = sales.filter((x:any) => inDetailRange(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
+  const detailReturns = returns.filter((x:any) => inDetailRange(x.created_at));
+  const detailPurchases = purchases.filter((x:any) => inDetailRange(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
 
   return (
     <View style={styles.root}>
@@ -403,13 +424,13 @@ export default function Dashboard() {
                 {financeDetailsOpen === "revenue" && (
                   <Card>
                     <Text style={styles.detailHeader}>Revenue & returns</Text>
-                    {sales.map((s: any) => (
+                    {detailSales.map((s: any) => (
                       <View key={s.id} style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}{"\n"}{new Date(s.created_at).toLocaleString()}</Text>
+                        <Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}{"\n"}{saleBusinessDateLabel(s)}</Text>
                         <Text style={styles.detailValue}>{money(displayFinanceAmount(s.total, fakeFinanceDisplay))}</Text>
                       </View>
                     ))}
-                    {returns.map((r: any) => (
+                    {detailReturns.map((r: any) => (
                       <View key={"r" + r.id} style={styles.detailLine}>
                         <Text style={styles.detailLabel}>Return · {r.invoice_no}</Text>
                         <Text style={styles.detailOut}>-{money(displayFinanceAmount(r.refund_total, fakeFinanceDisplay))}</Text>
@@ -606,7 +627,7 @@ export default function Dashboard() {
                       <PLRow label="Opening purchase budget" value={"+ " + money(displayFinanceAmount(openingBudgetForBalanceRange, fakeFinanceDisplay))} muted />
                       <PLRow label="Monthly expenses budget" value={"+ " + money(displayFinanceAmount(monthlyExpensesBudget, fakeFinanceDisplay))} muted />
                       <View style={styles.plDivider} />
-                      <PLRow label="Remaining balance" value={money(displayFinanceAmount(balanceDayRemaining, fakeFinanceDisplay))} bold tone={balanceDayRemaining >= 0 ? "success" : "error"} />
+                      <PLRow label="Remaining balance" value={money(displayFinanceAmount(balanceSelectedRemaining, fakeFinanceDisplay))} bold tone={balanceSelectedRemaining >= 0 ? "success" : "error"} />
                       <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.divider }}>
                         <Text style={styles.detailHeader}>All-time remaining balance</Text>
                         <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceAllTime, fakeFinanceDisplay))}</Text>
@@ -618,7 +639,7 @@ export default function Dashboard() {
                       {balanceDaySales.map((s: any) => (
                         <View key={"sale-"+s.id} style={styles.detailLine}>
                           <View style={{flex:1}}>
-                            <Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"}</Text>
+                            <Text style={styles.detailLabel}>{s.invoice_no} · {s.customer_name || "Walk-in"} · {saleBusinessDateLabel(s)}</Text>
                             {(s.items || []).map((it:any, idx:number) => (
                               <Text key={idx} style={styles.itemFinance}>{it.name} · Qty {it.quantity} × {money(it.unit_price)} = {money(it.line_total)}</Text>
                             ))}
@@ -647,7 +668,7 @@ export default function Dashboard() {
                     </Card>
                     <Card>
                       <Text style={styles.detailHeader}>Selected period total</Text>
-                      <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceDayRemaining, fakeFinanceDisplay))}</Text>
+                      <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceSelectedRemaining, fakeFinanceDisplay))}</Text>
                     </Card>
                   </>
                 )}}
