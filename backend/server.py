@@ -648,6 +648,36 @@ async def _consume_cost_layers_matching(layers: list, quantity: float, unit_cost
     return [x for i, x in enumerate(layers) if not used[i] and float(x.get("quantity", 0) or 0) > 1e-9], total
 
 
+def _purchase_lot_quantity_at_cost(layers: list, purchase_id: str, unit_cost: float) -> float:
+    return sum(
+        float(layer.get("quantity", 0) or 0)
+        for layer in layers
+        if str(layer.get("purchase_id") or "") == str(purchase_id)
+        and abs(float(layer.get("unit_cost", 0) or 0) - float(unit_cost)) <= 1e-6
+    )
+
+
+def _remove_purchase_cost_lot(layers: list, quantity: float, purchase_id: str, unit_cost: float) -> list:
+    remaining = float(quantity)
+    result = []
+    for layer in layers:
+        q = max(0.0, float(layer.get("quantity", 0) or 0))
+        matches = (
+            str(layer.get("purchase_id") or "") == str(purchase_id)
+            and abs(float(layer.get("unit_cost", 0) or 0) - float(unit_cost)) <= 1e-6
+        )
+        if matches and remaining > 1e-9:
+            take = min(q, remaining)
+            remaining -= take
+            if q - take > 1e-9:
+                result.append({**layer, "quantity": q - take})
+        else:
+            result.append(layer)
+    if remaining > 1e-9:
+        raise HTTPException(status_code=400, detail="Cannot return this purchase lot safely: its matching cost layer is missing or already used.")
+    return [layer for layer in result if float(layer.get("quantity", 0) or 0) > 1e-9]
+
+
 def _purchase_lot_quantity(layers: list, purchase_id: str) -> float:
     return sum(float(layer.get("quantity", 0) or 0) for layer in layers
                if str(layer.get("purchase_id") or "") == purchase_id)
@@ -3044,9 +3074,13 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
         if not pi: raise HTTPException(status_code=400, detail="Item was not part of this purchase")
         remaining = pi["quantity"] - already.get(product_id, 0)
         if requested_qty > remaining: raise HTTPException(status_code=400, detail=f"Only {remaining} of {pi['name']} can be returned")
-        prod = await db.products.find_one({"_id": ObjectId(product_id)})
+        prod = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
         in_stock = float(prod.get("quantity", 0)) if prod else 0
         if requested_qty > in_stock: raise HTTPException(status_code=400, detail=f"Only {in_stock} of {pi['name']} in stock to return")
+        layers = await _ensure_cost_layers(prod or {})
+        lot_available = _purchase_lot_quantity_at_cost(layers, body.purchase_id, float(pi["unit_cost"]))
+        if requested_qty > lot_available + 1e-9:
+            raise HTTPException(status_code=400, detail=f"Only {lot_available:g} units from this purchase lot remain available to return")
     items = []
     refund_total = 0.0
     for it in body.items:
@@ -3069,6 +3103,12 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
             "name": pi["name"],
             "quantity": it.quantity,
             "unit_cost": pi["unit_cost"],
+            "purchase_id": body.purchase_id,
+            "cost_layers_used": [{
+                "quantity": float(it.quantity),
+                "unit_cost": float(pi["unit_cost"]),
+                "purchase_id": body.purchase_id,
+            }],
             "line_total": line_total,
         })
 
@@ -3092,11 +3132,13 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
     res = await db.purchase_returns.insert_one(doc)
     doc["_id"] = res.inserted_id
 
-    # Remove the returned units from their purchase-cost layer.
+    # Remove only the exact purchase's matching-cost lot.
     for it in items:
         prod = await db.products.find_one({"_id": ObjectId(it["product_id"])})
         layers = await _ensure_cost_layers(prod or {})
-        layers, _ = _consume_cost_layers_matching(layers, it["quantity"], float(it.get("unit_cost", 0) or 0))
+        layers = _remove_purchase_cost_lot(
+            layers, float(it["quantity"]), body.purchase_id, float(it["unit_cost"])
+        )
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
             {"$inc": {"quantity": -it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
