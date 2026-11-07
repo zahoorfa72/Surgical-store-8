@@ -11,7 +11,7 @@ import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
 
-type ProfitRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; profit_value: number; loss_cost?: number; net_profit_adjustment?: number; remaining_balance_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
+type ProfitRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; profit_value: number; loss_cost?: number; edited_at?: string; net_profit_adjustment?: number; remaining_balance_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.profit-products.v1";
 const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
