@@ -66,6 +66,7 @@ export default function Sell() {
   const [busy, setBusy] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
+  const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
   const [heldOpen, setHeldOpen] = useState(false);
   const [heldSearch, setHeldSearch] = useState("");
   const [reviewSearch, setReviewSearch] = useState("");
@@ -151,7 +152,7 @@ export default function Sell() {
       return;
     }
     const held: HeldSale = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      id: activeHeldSaleId ?? `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
       createdAt: new Date().toISOString(),
       cart: lines,
       customerId,
@@ -159,7 +160,8 @@ export default function Sell() {
       credit,
       transactionDate,
     };
-    await persistHeldSales([held, ...heldSales]);
+    await persistHeldSales([held, ...heldSales.filter((item) => item.id !== held.id)]);
+    setActiveHeldSaleId(null);
     setCart([]);
     setTransactionDate(todayIsoDate());
     setDiscount("0");
@@ -189,6 +191,7 @@ export default function Sell() {
       return;
     }
     setCart(restored);
+    setActiveHeldSaleId(held.id);
     setTransactionDate(held.transactionDate || todayIsoDate());
     setCustomerId(held.customerId);
     setDiscount(held.discount);
@@ -475,6 +478,12 @@ export default function Sell() {
       await queryClient.invalidateQueries({ queryKey: qk.sales });
       setPendingBalanceAdjustment(0);
       setApplyCustomerCredit(false);
+      // Remove the resumed held draft only after createSale confirms success
+      // (including a successfully queued offline sale). Failures keep it intact.
+      if (activeHeldSaleId) {
+        await persistHeldSales(heldSales.filter((item) => item.id !== activeHeldSaleId));
+        setActiveHeldSaleId(null);
+      }
       setCart([]);
       setTransactionDate(todayIsoDate());
       setDiscount("0");
