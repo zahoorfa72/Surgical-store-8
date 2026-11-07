@@ -703,7 +703,7 @@ export default function Dashboard() {
                       <Text style={styles.detailBig}>{money(displayFinanceAmount(balanceSelectedRemaining, fakeFinanceDisplay))}</Text>
                     </Card>
                   </>
-                )}}
+                )}
               </ScrollView>
             </View>
           </Modal>
