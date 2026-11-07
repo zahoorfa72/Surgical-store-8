@@ -32,6 +32,7 @@ export default function SaleEdit() {
   const { data: products } = useProducts();
 
   const [lines, setLines] = useState<Line[]>([]);
+  const [allowNegativeStock, setAllowNegativeStock] = useState(false);
   const [transactionDate, setTransactionDate] = useState("");
   const [discount, setDiscount] = useState("0");
   const [credit, setCredit] = useState(false);
@@ -76,6 +77,7 @@ export default function SaleEdit() {
       setCustomerId(sale.customer_id ?? null);
       setCredit(Boolean(sale.credit && sale.customer_id));
       setApplyCustomerCredit(Number(sale.credit_applied ?? 0) > 0);
+      setAllowNegativeStock(Boolean(sale.allow_negative_stock));
       setPrefilled(true);
     }
   }, [sale, prefilled]);
@@ -155,7 +157,11 @@ export default function SaleEdit() {
     for (const [pid, qty] of requested) {
       const originalQty = sale.items.find((x) => x.product_id === pid)?.quantity ?? 0;
       const availableAfterRestore = (stockById.get(pid) ?? 0) + originalQty;
-      if (qty > availableAfterRestore && qty > originalQty && !Boolean(sale?.allow_negative_stock)) { const name = lines.find((l) => l.id === pid)?.name ?? "Product"; toast(name + " has only " + availableAfterRestore + " available for this sale", "error"); return; }
+      if (qty > availableAfterRestore && !allowNegativeStock) {
+        const name = lines.find((l) => l.id === pid)?.name ?? "Product";
+        toast(`${name} has ${availableAfterRestore} available after restoring this sale. Enable the negative-stock confirmation to save this quantity.`, "error");
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -164,7 +170,7 @@ export default function SaleEdit() {
         body: {
           items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_price: l.unit_price })),
           transaction_date: transactionDate,
-          allow_negative_stock: Boolean(sale?.allow_negative_stock),
+          allow_negative_stock: allowNegativeStock,
           customer_id: customerId,
           // Credit can be explicitly switched on/off while editing.
           credit: Boolean(credit && customerId),
@@ -229,6 +235,24 @@ export default function SaleEdit() {
           <MaterialDesignIcons name={credit ? "toggle-switch" : "toggle-switch-off-outline"} size={28} color={credit ? colors.brandPrimary : colors.muted} />
           <View style={{ flex: 1 }}><Text style={styles.customerText}>Sell on credit</Text><Text style={{ color: colors.muted, fontSize: 12 }}>{credit ? "This sale adds to the customer outstanding balance" : "This sale is not marked as credit"}</Text></View>
           {!admin && <Text style={{ color: colors.muted, fontSize: 11 }}>Admin only</Text>}
+        </Pressable>
+
+        <Pressable
+          testID="edit-allow-negative-stock-toggle"
+          style={styles.customerRow}
+          onPress={() => setAllowNegativeStock((value) => !value)}
+        >
+          <MaterialDesignIcons
+            name={allowNegativeStock ? "checkbox-marked" : "checkbox-blank-outline"}
+            size={22}
+            color={allowNegativeStock ? colors.warning : colors.muted}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.customerText}>Allow out-of-stock / negative stock sale</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>
+              Required when this edit sells more units than will be available. No item will be removed automatically.
+            </Text>
+          </View>
         </Pressable>
 
         {lines.map((l) => (
