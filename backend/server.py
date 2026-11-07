@@ -3216,20 +3216,11 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         if (not opening_period_start or str(row.get("date") or row.get("created_at", "")[:10])[:10] >= opening_period_start.isoformat())
         and (not opening_period_end or str(row.get("date") or row.get("created_at", "")[:10])[:10] < opening_period_end.isoformat())]
 
-    # Legacy/default stock records (accounting_target="none") are automatically
-    # recognized in Net Profit: lost stock is an expense and added/found stock
-    # is a gain. Explicit admin routes override this automatic treatment.
-    # "inventory_only" is the explicit opt-out and has no P&L effect.
-    automatic_lost_stock_rows = [
-        row for row in adjustments_in_period
-        if row.get("adjustment_type") == "lost_product"
-        and row.get("accounting_target", "none") == "none"
-    ]
-    automatic_profit_stock_rows = [
-        row for row in adjustments_in_period
-        if row.get("adjustment_type") == "profit_product"
-        and row.get("accounting_target", "none") == "none"
-    ]
+    # Stock-only adjustments (accounting_target="none" or "inventory_only")
+    # change quantities and FIFO inventory valuation, but do not affect P&L
+    # or Remaining Balance. Financial routing is applied only when explicitly selected.
+    automatic_lost_stock_rows = []
+    automatic_profit_stock_rows = []
     automatic_lost_stock_deduction = round(sum(
         max(0.0, float(row.get("loss_cost", 0) or 0)) for row in automatic_lost_stock_rows
     ), 2)
@@ -3267,7 +3258,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     net_profit_adjustment = 0.0
     remaining_balance_adjustment = 0.0
     for adjustment in adjustments_in_period:
-        # Explicit routes are applied separately; automatic and inventory-only rows were handled above.
+        # Stock-only rows have no P&L or balance effect.
         if adjustment.get("accounting_target", "none") in ("none", "inventory_only"):
             continue
         net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
