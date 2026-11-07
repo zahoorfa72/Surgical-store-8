@@ -266,8 +266,32 @@ export default function Dashboard() {
     if (reportRange.startsWith("year:")) {
       const start = new Date(reportRange.slice(5)+"-01-01T00:00:00"); const end = new Date(start.getFullYear()+1,0,1); return d >= start && d < end;
     }
+    if (reportRange === "today" || reportRange === "day") {
+      const start = new Date(localDay + "T00:00:00");
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      return d >= start && d < end;
+    }
+    if (reportRange === "week") {
+      const today = new Date(localDay + "T00:00:00");
+      const start = new Date(today);
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      return d >= start && d < end;
+    }
+    if (reportRange === "month") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      return d >= start && d < end;
+    }
+    if (reportRange === "year") {
+      const start = new Date(now.getFullYear(), 0, 1);
+      const end = new Date(now.getFullYear() + 1, 0, 1);
+      return d >= start && d < end;
+    }
     if (reportRange === "all") return true;
-    return true;
+    return false;
   };
   const inOverviewBalancePeriod = (iso?: string) => {
     if (!iso) return false;
