@@ -223,17 +223,14 @@ function localReport(range: string): ReportSummary {
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const lostProductsCost = periodAdjustments.filter((row) => row.adjustment_type === "lost_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
   const profitProductsValue = periodAdjustments.filter((row) => row.adjustment_type === "profit_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
-  // Only explicitly selected accounting routes affect Net Profit or Remaining Balance.
-  // None remains inventory-only on both online and offline reports.
-  const selectedAdjustments = periodAdjustments.filter((row) => {
-    const target = String(row.accounting_target ?? "none");
-    return target !== "none" && target !== "inventory_only" &&
-      ["split_50_50", "net_profit", "remaining_balance", "both"].includes(target);
-  });
-  // Each route changes only the amount stored for that field. None/Inventory
-  // only are excluded above; Both/Split are the only deliberate multi-field routes.
-  const netProfitAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
-  const remainingBalanceAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
+  // Route each field independently. Ignore stale values in the non-selected
+  // destination on legacy rows so the offline result matches the server exactly.
+  const netProfitAdjustment = periodAdjustments
+    .filter((row) => ["net_profit", "both", "split_50_50"].includes(String(row.accounting_target ?? "none")))
+    .reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
+  const remainingBalanceAdjustment = periodAdjustments
+    .filter((row) => ["remaining_balance", "both", "split_50_50"].includes(String(row.accounting_target ?? "none")))
+    .reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
   const revenue = salesRevenue - returnsTotal;
   // Cash movement is the actual amount field only. Adjustment is a
   // non-cash settlement/discount and must not be counted as money in hand.
