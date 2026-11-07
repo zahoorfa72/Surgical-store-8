@@ -1275,6 +1275,7 @@ async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=
         "gross_profit_adjustment": row.get("gross_profit_adjustment", 0),
         "accounting_target": row.get("accounting_target", "none"),
         "client_id": row.get("client_id"), "user_name": row.get("user_name", ""), "created_at": row.get("created_at", ""),
+        "edited_at": row.get("edited_at", ""),
     } for row in rows]
 
 
@@ -1465,6 +1466,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
             "client_id": fresh.get("client_id"),
             "user_name": fresh.get("user_name", ""),
             "created_at": fresh.get("created_at", ""),
+            "edited_at": fresh.get("edited_at", ""),
         }}
 
     # First calculate the old entry's reversal without writing it. If the new
@@ -1590,6 +1592,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         "client_id": fresh.get("client_id"),
         "user_name": fresh.get("user_name", ""),
         "created_at": fresh.get("created_at", ""),
+            "edited_at": fresh.get("edited_at", ""),
     }}
 
 
