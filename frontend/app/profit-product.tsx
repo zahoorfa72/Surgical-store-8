@@ -130,7 +130,7 @@ export default function ProfitProductScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <ScreenHeader title="Profit Product" subtitle="Stock profit valued at purchase cost" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 28, gap: 12 }}>
         <Card>
