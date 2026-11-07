@@ -932,7 +932,7 @@ export default function Sell() {
             <Text style={styles.hint}>If the product is new and has zero stock, enable “Sell below zero stock” before saving the sale. Existing matching products are reused.</Text>
             <Pressable testID="save-new-sell-product" style={styles.createPartySaveBtn} onPress={createProductFromSell}>
               <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
-              <Text style={styles.heldBtnText}>Create & Add to Sale</Text>
+              <Text style={styles.resumeText}>Create & Add to Sale</Text>
             </Pressable>
           </KeyboardAwareScrollView>
         </View>
@@ -949,7 +949,7 @@ export default function Sell() {
               onPress={() => setCustomerCreateOpen(true)}
             >
               <MaterialDesignIcons name="account-plus" size={20} color={colors.onBrandPrimary} />
-              <Text style={styles.heldBtnText}>+ Create new customer</Text>
+              <Text style={styles.resumeText}>+ Create new customer</Text>
             </Pressable>
             <Pressable
               testID="customer-walkin"
