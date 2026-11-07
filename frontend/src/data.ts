@@ -229,10 +229,10 @@ function localReport(range: string): ReportSummary {
   // Route each field independently. Ignore stale values in the non-selected
   // destination on legacy rows so the offline result matches the server exactly.
   const netProfitAdjustment = periodAdjustments
-    .filter((row) => ["net_profit", "both", "split_50_50"].includes(String(row.accounting_target ?? "none")))
+    .filter((row) => ["net_profit", "both", "split_50_50", "net_profit_to_remaining_balance"].includes(String(row.accounting_target ?? "none")))
     .reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
   const remainingBalanceAdjustment = periodAdjustments
-    .filter((row) => ["remaining_balance", "both", "split_50_50"].includes(String(row.accounting_target ?? "none")))
+    .filter((row) => ["remaining_balance", "both", "split_50_50", "net_profit_to_remaining_balance"].includes(String(row.accounting_target ?? "none")))
     .reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
   const revenue = salesRevenue - returnsTotal;
   // Cash movement is the actual amount field only. Adjustment is a
