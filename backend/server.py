@@ -1262,6 +1262,25 @@ async def delete_product(product_id: str, _: AdminOnly):
     return {"ok": True}
 
 
+def _normalize_stock_accounting(
+    target: str,
+    net_profit_amount: float,
+    remaining_balance_amount: float,
+) -> tuple[str, float, float]:
+    """Enforce one-field routing; Both/Split are the only multi-field choices."""
+    allowed = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both")
+    selected = target if target in allowed else "none"
+    net_amount = round(float(net_profit_amount or 0), 2)
+    balance_amount = round(float(remaining_balance_amount or 0), 2)
+    if selected == "net_profit":
+        return selected, net_amount, 0.0
+    if selected == "remaining_balance":
+        return selected, 0.0, balance_amount
+    if selected in ("both", "split_50_50"):
+        return selected, net_amount, balance_amount
+    return selected, 0.0, 0.0
+
+
 @api.get("/inventory-adjustments")
 async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=1000)):
     rows = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
@@ -1320,10 +1339,11 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
     await db.products.update_one({"_id": ObjectId(body.product_id)}, {"$set": {
         "quantity": round(max(0, next_qty), 8), "cost_layers": layers, "updated_at": ts
     }})
-    allowed_targets = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance")
-    target_name = body.accounting_target if body.accounting_target in allowed_targets else "none"
-    net_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.net_profit_adjustment or 0), 2)
-    balance_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.remaining_balance_adjustment or 0), 2)
+    target_name, net_adjustment, balance_adjustment = _normalize_stock_accounting(
+        body.accounting_target,
+        body.net_profit_adjustment,
+        body.remaining_balance_adjustment,
+    )
     row = {
         "product_id": body.product_id, "product_name": product.get("name", ""), "delta": delta, "reason": body.reason.strip(),
         "adjustment_type": body.adjustment_type, "date": body.date or ts[:10],
@@ -1334,7 +1354,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         "remaining_balance_adjustment": balance_adjustment,
         # This option transfers the full purchase-cost loss out of Gross Profit.
         # The finance formula then increases Remaining Balance by the same amount.
-        "gross_profit_adjustment": -round(loss_cost, 2) if target_name == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0,
+        "gross_profit_adjustment": 0.0,
         "accounting_target": target_name,
         "client_id": body.client_id,
         "user_id": oid(user["_id"]), "user_name": user.get("name", ""), "created_at": ts, "deleted": False,
@@ -1429,12 +1449,13 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
     # This also allows editing metadata on an entry whose units have since been sold.
     old_delta = float(old.get("delta", 0) or 0)
     if old_pid == new_pid and abs(old_delta - float(body.delta)) <= 1e-9:
-        allowed_targets = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance")
-        target_name = body.accounting_target if body.accounting_target in allowed_targets else "none"
-        net_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.net_profit_adjustment or 0), 2)
-        balance_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.remaining_balance_adjustment or 0), 2)
+        target_name, net_adjustment, balance_adjustment = _normalize_stock_accounting(
+            body.accounting_target,
+            body.net_profit_adjustment,
+            body.remaining_balance_adjustment,
+        )
         cost = round(float(old.get("loss_cost", 0) or 0), 2)
-        gross_adjustment = -cost if target_name == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0
+        gross_adjustment = 0.0
         await db.inventory_adjustments.update_one(
             {"_id": ObjectId(adjustment_id)},
             {"$set": {
@@ -1518,11 +1539,12 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
         for layer in next_layers if float(layer.get("quantity", 0) or 0) > 1e-9
     ]
 
-    allowed_targets = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance")
-    target_name = body.accounting_target if body.accounting_target in allowed_targets else "none"
-    net_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.net_profit_adjustment or 0), 2)
-    balance_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.remaining_balance_adjustment or 0), 2)
-    gross_adjustment = -round(cost, 2) if target_name == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0
+    target_name, net_adjustment, balance_adjustment = _normalize_stock_accounting(
+        body.accounting_target,
+        body.net_profit_adjustment,
+        body.remaining_balance_adjustment,
+    )
+    gross_adjustment = 0.0
     now = now_iso()
 
     # Inventory writes happen only after all validation and calculations pass.
@@ -3427,15 +3449,13 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     net_profit_adjustment = 0.0
     remaining_balance_adjustment = 0.0
     for adjustment in adjustments_in_period:
-        # None/inventory-only rows never affect finance. Lost/profit product
-        # adjustments are stock movements, not cash movements: even if an old
-        # row contains a legacy balance amount, never add it to cash balance.
-        if adjustment.get("accounting_target", "none") in ("none", "inventory_only"):
+        # Only explicit single-field and explicit multi-field targets apply.
+        # Legacy gross-profit transfers are excluded because they coupled fields.
+        target_name = adjustment.get("accounting_target", "none")
+        if target_name not in ("net_profit", "remaining_balance", "both", "split_50_50"):
             continue
-        adjustment_type = adjustment.get("adjustment_type")
         net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
-        if adjustment_type not in ("lost_product", "profit_product"):
-            remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
+        remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
     net_profit_adjustment = round(net_profit_adjustment, 2)
     remaining_balance_adjustment = round(remaining_balance_adjustment, 2)
 
@@ -3445,24 +3465,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # remaining_balance_adjustment.
     gross_profit_before_lost_stock = gross_profit
     lost_stock_transfers = []
-    for adjustment in adjustments_in_period:
-        if adjustment.get("adjustment_type") != "lost_product" or adjustment.get("accounting_target") != "gross_profit_to_remaining_balance":
-            continue
-        transfer = round(abs(float(adjustment.get("gross_profit_adjustment", 0) or -float(adjustment.get("loss_cost", 0) or 0))), 2)
-        if transfer <= 0:
-            continue
-        lost_stock_transfers.append({
-            "product_id": str(adjustment.get("product_id") or ""),
-            "product_name": next((p.get("name", "") for p in products if oid(p.get("_id")) == str(adjustment.get("product_id") or "")), "") or adjustment.get("product_name", "Product"),
-            "date": str(adjustment.get("date") or adjustment.get("created_at", "")[:10])[:10],
-            "quantity": abs(float(adjustment.get("delta", 0) or 0)),
-            "reason": adjustment.get("reason", ""),
-            "purchase_cost": transfer,
-            "gross_profit_deduction": transfer,
-            "remaining_balance_addition": transfer,
-        })
-    lost_stock_gross_profit_transfer = round(sum(row["purchase_cost"] for row in lost_stock_transfers), 2)
-    gross_profit = round(gross_profit_before_lost_stock - lost_stock_gross_profit_transfer, 2)
+    lost_stock_gross_profit_transfer = 0.0
 
     opening_total = 0.0
     for opening_row in opening_rows:
