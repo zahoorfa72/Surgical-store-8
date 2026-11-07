@@ -1352,8 +1352,8 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         # None and inventory-only are strictly stock valuation/quantity changes.
         "net_profit_adjustment": net_adjustment,
         "remaining_balance_adjustment": balance_adjustment,
-        # This option transfers the full purchase-cost loss out of Gross Profit.
-        # The finance formula then increases Remaining Balance by the same amount.
+        # Stock adjustments never rewrite Gross Profit; only the two explicit
+        # finance adjustment fields above can affect their selected destinations.
         "gross_profit_adjustment": 0.0,
         "accounting_target": target_name,
         "client_id": body.client_id,
