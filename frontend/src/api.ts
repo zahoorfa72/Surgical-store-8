@@ -269,6 +269,19 @@ function sliceCostLayers(layers: any[], skipQuantity: number, quantity: number):
   return result;
 }
 
+function removePurchaseLot(layers: any[], quantity: number, purchaseId: string): any[] {
+  let remaining = Math.max(0, Number(quantity) || 0);
+  const work = (layers ?? []).map((layer: any) => ({ ...layer, quantity: Math.max(0, Number(layer?.quantity ?? 0)) }));
+  for (const layer of work) {
+    if (remaining <= 1e-9) break;
+    if (String(layer.purchase_id ?? "") !== String(purchaseId ?? "")) continue;
+    const take = Math.min(Number(layer.quantity ?? 0), remaining);
+    layer.quantity = Number(layer.quantity ?? 0) - take;
+    remaining -= take;
+  }
+  return work.filter((layer: any) => Number(layer.quantity ?? 0) > 1e-9);
+}
+
 function removeCostLayerComposition(layers: any[], usedLayers: any[]): any[] {
   const work = (layers ?? []).map((layer: any) => ({ ...layer, quantity: Math.max(0, Number(layer?.quantity ?? 0)) }));
   for (const used of usedLayers ?? []) {
@@ -827,11 +840,18 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["purchases"], (old) => [rec, ...(old ?? [])]);
       queryClient.setQueryData<any>(["purchase", tempId], rec);
       queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p: any) => {
-        const it = items.find((x: any) => x.product_id === p.id);
-        if (!it) return p;
-        const layers = appendCostLayer(ensureCostLayers(p), Number(it.quantity ?? 0), Number(it.unit_cost ?? 0), tempId);
-        return { ...p, quantity: Number(p.quantity ?? 0) + Number(it.quantity ?? 0),
-          purchase_price: Number(it.unit_cost ?? p.purchase_price ?? 0), cost_layers: layers, updated_at: now() };
+        const matching = items.filter((x: any) => String(x.product_id) === String(p.id));
+        if (!matching.length) return p;
+        let layers = ensureCostLayers(p);
+        let addedQty = 0;
+        for (const it of matching) {
+          const qty = Number(it.quantity ?? 0);
+          layers = appendCostLayer(layers, qty, Number(it.unit_cost ?? 0), tempId);
+          addedQty += qty;
+        }
+        return { ...p, quantity: Number(p.quantity ?? 0) + addedQty,
+          purchase_price: Number(matching[matching.length - 1].unit_cost ?? p.purchase_price ?? 0),
+          cost_layers: layers, updated_at: now(), pending: true };
       }));
       if (supplierId) {
         queryClient.setQueryData<any[]>(["parties", "supplier"], (old) => (old ?? []).map((p: any) =>
@@ -848,10 +868,10 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           const newForProduct=newItems.filter((x:any)=>x.product_id===p.id);
           if(!oldForProduct.length && !newForProduct.length) return p;
           let layers=ensureCostLayers(p);
-          for(const old of oldForProduct) layers=consumeCostLayersMatching(layers,Number(old.quantity||0),Number(old.unit_cost||0)).layers;
-          for(const ni of newForProduct) layers = appendCostLayer(layers, Number(ni.quantity || 0), Number(ni.unit_cost || 0), id);
-          const newQty=newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           const oldQty=oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
+          const newQty=newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
+          layers = removePurchaseLot(layers, oldQty, id);
+          for(const ni of newForProduct) layers = appendCostLayer(layers, Number(ni.quantity || 0), Number(ni.unit_cost || 0), id);
           const nextQty = Math.max(0, Number(p.quantity ?? 0) + newQty - oldQty);
           layers = ensureCostLayers({ ...p, quantity: nextQty, cost_layers: layers });
           return {...p,quantity:nextQty,cost_layers:layers,purchase_price:newForProduct.length?Number(newForProduct[newForProduct.length-1].unit_cost):p.purchase_price};
@@ -885,8 +905,17 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
           const bought = (purchase.items ?? []).filter((x:any)=>x.product_id===p.id).reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           const back = Number(returnedQty[p.id] ?? 0);
-          const net = bought - back;
-          return net ? { ...p, quantity: Number(p.quantity ?? 0) - net } : p;
+          const net = Math.max(0, bought - back);
+          if (!net) return p;
+          const layers = removePurchaseLot(ensureCostLayers(p), net, id);
+          const nextQty = Number(p.quantity ?? 0) - net;
+          return {
+            ...p,
+            quantity: nextQty,
+            cost_layers: ensureCostLayers({ ...p, quantity: nextQty, cost_layers: layers }),
+            updated_at: now(),
+            pending: true,
+          };
         }));
       }
     }
