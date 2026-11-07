@@ -561,6 +561,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           Math.abs((oldQuantities[pid] ?? 0) - (newQuantities[pid] ?? 0)) <= 1e-9
         );
         let newItems: any[] = [];
+        let newCogsExact = Number(oldSale.cogs ?? 0);
         if (sameInventory) {
           // A price/discount/customer-only edit must not restore and re-consume
           // stock or recalculate historic cost layers.
@@ -571,35 +572,80 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
             map[pid] = (map[pid] ?? 0) + cost;
             return map;
           }, {});
+          const oldLayersByProduct: Record<string, any[]> = {};
+          for (const item of oldItems) {
+            const pid = String(item.product_id);
+            const original = Array.isArray(item.cost_layers_used) && item.cost_layers_used.length
+              ? item.cost_layers_used
+              : [{ quantity: Number(item.quantity ?? 0), unit_cost: Number(item.purchase_price ?? 0), purchase_id: null }];
+            oldLayersByProduct[pid] = [...(oldLayersByProduct[pid] ?? []), ...original];
+          }
+          const usedByProduct: Record<string, number> = {};
           newItems = requestedItems.map((it: any) => {
             const product = products.find((p: any) => p.id === it.product_id);
             const qty = Number(it.quantity ?? 0);
-            const oldQty = oldQuantities[String(it.product_id)] ?? 0;
-            const unitCost = oldQty > 0 ? Number(oldCostByProduct[String(it.product_id)] ?? 0) / oldQty : 0;
+            const pid = String(it.product_id);
+            const oldQty = oldQuantities[pid] ?? 0;
+            const unitCost = oldQty > 0 ? Number(oldCostByProduct[pid] ?? 0) / oldQty : 0;
             const price = Number(it.unit_price ?? 0);
-            return { ...it, name: product?.name ?? "Item", purchase_price: unitCost,
+            const costLayersUsed = sliceCostLayers(oldLayersByProduct[pid] ?? [], usedByProduct[pid] ?? 0, qty);
+            usedByProduct[pid] = (usedByProduct[pid] ?? 0) + qty;
+            return {
+              ...it,
+              name: product?.name ?? "Item",
+              purchase_price: unitCost,
               line_cogs: Math.round(qty * unitCost * 100) / 100,
-              line_total: Math.round(qty * price * 100) / 100 };
+              cost_layers_used: costLayersUsed,
+              line_total: Math.round(qty * price * 100) / 100,
+            };
           });
         } else {
-          queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((p:any) => {
-            const oldForProduct = oldItems.filter((x:any)=>x.product_id===p.id);
-            const newForProduct = requestedItems.filter((x:any)=>x.product_id===p.id);
-            if (!oldForProduct.length && !newForProduct.length) return p;
-            let layers = ensureCostLayers(p);
-            for (const old of oldForProduct) layers = appendCostLayer(layers, Number(old.quantity || 0), Number(old.purchase_price || 0), null);
-            const qty = newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
-            let totalCost = 0;
-            if (qty > 0) {
-              const consumed = consumeCostLayers(layers, qty);
-              layers = consumed.layers; totalCost = consumed.totalCost;
+          // Restore the original sold FIFO layers, then consume the replacement
+          // cart in order. This mirrors the backend even when the sale used
+          // multiple purchase lots or the same product appears on several lines.
+          const updatedProducts = products.map((product: any) => {
+            const pid = String(product.id);
+            const oldForProduct = oldItems.filter((x: any) => String(x.product_id) === pid);
+            const newForProduct = requestedItems.filter((x: any) => String(x.product_id) === pid);
+            if (!oldForProduct.length && !newForProduct.length) return product;
+            let layers = ensureCostLayers(product);
+            let oldQty = 0;
+            for (const oldItem of oldForProduct) {
+              const restored = Array.isArray(oldItem.cost_layers_used) && oldItem.cost_layers_used.length
+                ? oldItem.cost_layers_used
+                : [{ quantity: Number(oldItem.quantity ?? 0), unit_cost: Number(oldItem.purchase_price ?? 0), purchase_id: null }];
+              for (const lot of restored) {
+                layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null);
+              }
+              oldQty += Number(oldItem.quantity ?? 0);
             }
-            for (const it of newForProduct) {
-              const q=Number(it.quantity||0), price=Number(it.unit_price||0);
-              newItems.push({...it,name:p?.name??"Item",purchase_price:qty>0?totalCost/qty:0,line_cogs:q*(qty>0?totalCost/qty:0),line_total:q*price});
+            let newQty = 0;
+            for (const newItem of newForProduct) {
+              const qty = Number(newItem.quantity ?? 0);
+              const price = Number(newItem.unit_price ?? 0);
+              const consumed = consumeCostLayers(layers, qty, Number(product.purchase_price ?? 0));
+              layers = consumed.layers;
+              newQty += qty;
+              newCogsExact += consumed.totalCost;
+              newItems.push({
+                ...newItem,
+                name: product?.name ?? "Item",
+                purchase_price: qty > 0 ? consumed.totalCost / qty : 0,
+                line_cogs: Math.round(consumed.totalCost * 100) / 100,
+                cost_layers_used: consumed.usedLayers,
+                line_total: Math.round(qty * price * 100) / 100,
+              });
             }
-            return {...p, quantity:Number(p.quantity??0)+oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0)-qty, cost_layers:layers};
-          }));
+            return {
+              ...product,
+              quantity: Number(product.quantity ?? 0) + oldQty - newQty,
+              cost_layers: layers,
+              updated_at: now(),
+              pending: true,
+            };
+          });
+          queryClient.setQueryData<any[]>(["products"], updatedProducts);
+          newCogsExact = newCogsExact; // retain the exact FIFO total for the sale report.
         }
         const subtotal = newItems.reduce((a:number,x:any)=>a+Number(x.line_total||0),0);
         const discount = Math.max(0,Number(body.discount??0));
@@ -624,8 +670,8 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           subtotal,
           discount,
           total,
-          cogs: sameInventory ? Number(oldSale.cogs ?? newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0)) : newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0),
-          profit: total-(sameInventory ? Number(oldSale.cogs ?? newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0)) : newItems.reduce((a:number,x:any)=>a+Number(x.quantity||0)*Number(x.purchase_price||0),0)),
+          cogs: Math.round(newCogsExact * 100) / 100,
+          profit: Math.round((total - Math.round(newCogsExact * 100) / 100) * 100) / 100,
           credit,
           pending: true,
         };
