@@ -279,6 +279,7 @@ function removePurchaseLot(layers: any[], quantity: number, purchaseId: string):
     layer.quantity = Number(layer.quantity ?? 0) - take;
     remaining -= take;
   }
+  if (remaining > 1e-9) throw new Error("The original purchase stock lot is no longer available. The operation was not applied.");
   return work.filter((layer: any) => Number(layer.quantity ?? 0) > 1e-9);
 }
 
@@ -288,16 +289,15 @@ function removeCostLayerComposition(layers: any[], usedLayers: any[]): any[] {
     let remaining = Math.max(0, Number(used?.quantity ?? 0));
     const cost = Math.max(0, Number(used?.unit_cost ?? 0));
     const purchaseId = String(used?.purchase_id ?? "");
-    for (let pass = 0; pass < 2 && remaining > 1e-9; pass += 1) {
-      for (const layer of work) {
-        if (remaining <= 1e-9) break;
-        if (Math.abs(Number(layer.unit_cost ?? 0) - cost) > 1e-6) continue;
-        if (pass === 0 && String(layer.purchase_id ?? "") !== purchaseId) continue;
-        const take = Math.min(Number(layer.quantity ?? 0), remaining);
-        layer.quantity = Number(layer.quantity ?? 0) - take;
-        remaining -= take;
-      }
+    for (const layer of work) {
+      if (remaining <= 1e-9) break;
+      if (String(layer.purchase_id ?? "") !== purchaseId) continue;
+      if (Math.abs(Number(layer.unit_cost ?? 0) - cost) > 1e-6) continue;
+      const take = Math.min(Number(layer.quantity ?? 0), remaining);
+      layer.quantity = Number(layer.quantity ?? 0) - take;
+      remaining -= take;
     }
+    if (remaining > 1e-9) throw new Error("The returned stock lot has already been used. The operation was not applied.");
   }
   return work.filter((layer: any) => Number(layer.quantity ?? 0) > 1e-9);
 }
