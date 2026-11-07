@@ -1334,7 +1334,7 @@ def _normalize_stock_accounting(
     remaining_balance_amount: float,
 ) -> tuple[str, float, float]:
     """Enforce one-field routing; Both/Split are the only multi-field choices."""
-    allowed = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both")
+    allowed = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "net_profit_to_remaining_balance")
     selected = target if target in allowed else "none"
     net_amount = round(float(net_profit_amount or 0), 2)
     balance_amount = round(float(remaining_balance_amount or 0), 2)
@@ -1342,7 +1342,7 @@ def _normalize_stock_accounting(
         return selected, net_amount, 0.0
     if selected == "remaining_balance":
         return selected, 0.0, balance_amount
-    if selected in ("both", "split_50_50"):
+    if selected in ("both", "split_50_50", "net_profit_to_remaining_balance"):
         return selected, net_amount, balance_amount
     return selected, 0.0, 0.0
 
