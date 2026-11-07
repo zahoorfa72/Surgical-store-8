@@ -764,7 +764,8 @@ async def _migrate_legacy_cost_layers() -> dict:
         await _save_cost_layers(pid, layers)
         migrated += 1
     return {"migrated": migrated, "reconciled": reconciled}
-\ndef _aggregate_item_quantities(items) -> dict:
+
+def _aggregate_item_quantities(items) -> dict:
     totals = {}
     for item in items:
         if item.quantity > 0:
