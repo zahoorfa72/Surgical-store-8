@@ -54,7 +54,7 @@ async function localOrFetch<T>(key: readonly unknown[], fetcher: () => Promise<T
 
 function startOfRange(range: string): Date | null {
   const now = new Date();
-  if (range === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (range === "today" || range === "day") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (range === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
   if (range === "year") return new Date(now.getFullYear(), 0, 1);
   if (range === "week") {
