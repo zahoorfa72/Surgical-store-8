@@ -3567,7 +3567,7 @@ def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
     # match the cashier's local calendar rather than UTC midnight.
     now = datetime.now(timezone.utc)
     local_now = now + timedelta(minutes=tz_offset_minutes)
-    if range_ == "today":
+    if range_ in ("today", "day"):
         return local_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
     if range_ == "week":
         start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
