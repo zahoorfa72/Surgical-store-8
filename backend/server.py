@@ -38,6 +38,11 @@ from pwdlib import PasswordHash
 from pydantic import BaseModel, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
+try:
+    from .finance_math import calculate_finance_totals
+except ImportError:
+    from finance_math import calculate_finance_totals
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
@@ -3910,21 +3915,44 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
         opening_total += float(opening_row.get("amount", 0) or 0)
     opening_purchase_budget = round(opening_total, 2)
     monthly_expenses_budget = round(float((budget_doc or {}).get("monthly_amount", 0) or 0), 2)
+
+    # Single tested calculation source for all server-side finance totals.
+    finance_totals = calculate_finance_totals(
+        sales=sales,
+        returns=returns,
+        expenses=expenses,
+        payments=payments,
+        stock_adjustments=adjustments_in_period,
+        opening_purchase_budget=opening_purchase_budget,
+        monthly_expenses_budget=monthly_expenses_budget,
+    )
+    gross_revenue = finance_totals["gross_revenue"]
+    sales_revenue = finance_totals["sales_revenue"]
+    returns_total = finance_totals["returns_total"]
+    returns_cogs = finance_totals["returns_cogs"]
+    revenue = finance_totals["revenue"]
+    gross_profit = finance_totals["gross_profit"]
+    gross_profit_before_lost_stock = gross_profit
+    cogs_goods = finance_totals["cogs_goods"]
+    cogs_expenses = finance_totals["cogs_expenses"]
+    operating_expenses = finance_totals["operating_expenses"]
+    personal_expenses = finance_totals["personal_expenses"]
+    cogs_total = round(cogs_goods + cogs_expenses, 2)
+    total_expenses = finance_totals["total_expenses"]
+    supplier_payments = finance_totals["supplier_payments"]
+    customer_receipts = finance_totals["customer_receipts"]
+    supplier_refunds = finance_totals["supplier_refunds"]
+    customer_refunds = finance_totals["customer_refunds"]
+    net_profit_adjustment = finance_totals["net_profit_adjustment"]
+    remaining_balance_adjustment = finance_totals["remaining_balance_adjustment"]
+    net_profit = finance_totals["net_profit"]
+    remaining_balance = finance_totals["remaining_balance"]
+
     # Operating expenses reduce Net Profit, not Remaining Balance.
     # Remaining Balance is a cash/budget calculation. Lost-stock transfers
     # may reduce reported Gross Profit, but must not manufacture cash by
     # increasing Remaining Balance. Use pre-transfer gross profit here.
-    remaining_balance = round(
-        revenue
-        - gross_profit_before_lost_stock
-        - cogs_expenses
-        - supplier_payments
-        + supplier_refunds
-        + opening_purchase_budget
-        + monthly_expenses_budget
-        + remaining_balance_adjustment,
-        2,
-    )
+    remaining_balance = finance_totals["remaining_balance"]
 
     purchase_total = round(sum(p.get("total", 0) for p in purchases), 2)
     purchase_returns_total = round(sum(r.get("refund_total", 0) for r in purchase_returns), 2)
@@ -3936,16 +3964,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cash_sales = round(sum(s.get("total", 0) for s in sales if not s.get("credit", False)), 2)
     cash_sale_returns = returns_total
     purchase_return_refunds = purchase_returns_total
-    net_profit = round(
-        gross_profit
-        - cogs_expenses
-        - personal_expenses
-        - operating_expenses
-        - automatic_lost_stock_deduction
-        + automatic_profit_stock_addition
-        + net_profit_adjustment,
-        2,
-    )
+    net_profit = finance_totals["net_profit"]
     opening_cash = opening_purchase_budget
 
     low_stock = [product_public(p).model_dump() for p in products
