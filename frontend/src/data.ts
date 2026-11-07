@@ -274,30 +274,6 @@ function localReport(range: string): ReportSummary {
   };
 }
 
-export function useInventoryAdjustments(enabled = true) {
-  return useQuery({
-    queryKey: ["inventory-adjustments"],
-    enabled,
-    queryFn: async () => {
-      if ((await getConnectionMode()) === "offline" || !(await online())) {
-        await loadLocalStockAdjustments();
-        return queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
-      }
-      try {
-        const remote = await apiRequest<any[]>("/inventory-adjustments?limit=1000");
-        const [lostRows, profitRows] = await Promise.all([
-          storage.getItem<any[]>("ssm.lost-products.v1", []),
-          storage.getItem<any[]>("ssm.profit-products.v1", []),
-        ]);
-        return uniqueStockAdjustmentRows([...(remote ?? []), ...(lostRows ?? []), ...(profitRows ?? [])]);
-      } catch {
-        await loadLocalStockAdjustments();
-        return queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
-      }
-    },
-  });
-}
-
 export function useProducts() {
   return useQuery({
     queryKey: qk.products,
