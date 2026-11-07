@@ -932,7 +932,7 @@ export default function Sell() {
             <Text style={styles.hint}>If the product is new and has zero stock, enable “Sell below zero stock” before saving the sale. Existing matching products are reused.</Text>
             <Pressable testID="save-new-sell-product" style={styles.createPartySaveBtn} onPress={createProductFromSell}>
               <MaterialDesignIcons name="package-variant-plus" size={20} color={colors.onBrandPrimary} />
-              <Text style={styles.saveText}>Create & Add to Sale</Text>
+              <Text style={styles.heldBtnText}>Create & Add to Sale</Text>
             </Pressable>
           </KeyboardAwareScrollView>
         </View>
@@ -945,11 +945,11 @@ export default function Sell() {
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 8 }}>
             <Pressable
               testID="create-customer-button"
-              style={styles.createPartyBtn}
+              style={styles.createPartySaveBtn}
               onPress={() => setCustomerCreateOpen(true)}
             >
               <MaterialDesignIcons name="account-plus" size={20} color={colors.onBrandPrimary} />
-              <Text style={styles.createPartyText}>+ Create new customer</Text>
+              <Text style={styles.heldBtnText}>+ Create new customer</Text>
             </Pressable>
             <Pressable
               testID="customer-walkin"
@@ -1135,6 +1135,7 @@ const useStyles = makeStyles((colors) => ({
   holdHint: { flex: 1, fontSize: 11, color: colors.muted },
   formLabel: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 4 },
   formInput: { backgroundColor: colors.surfaceTertiary, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 48, fontSize: 15, color: colors.onSurface },
+  formInputMulti: { minHeight: 84, height: 84, paddingTop: 12, textAlignVertical: "top" },
   hint: { fontSize: 11, color: colors.muted, lineHeight: 16 },
   createPartySaveBtn: { minHeight: 50, borderRadius: 12, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   heldBtn: { minHeight:52, paddingHorizontal:14, borderRadius:14, borderWidth:1, borderColor:colors.border, backgroundColor:colors.surface, flexDirection:"row", alignItems:"center", gap:6 },
