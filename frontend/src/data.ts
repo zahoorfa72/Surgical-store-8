@@ -348,7 +348,17 @@ export function useReport(range: string, enabled = true) {
   }});
 }
 export function useCustomers(range: string) {
-  return useQuery({ queryKey: qk.customers(range), queryFn: () => localOrFetch(qk.customers(range), () => apiRequest<CustomerRow[]>(`/reports/customers?range=${range}`), []) });
+  return useQuery({
+    queryKey: qk.customers(range),
+    queryFn: () => {
+      const tzOffsetMinutes = new Date().getTimezoneOffset();
+      return localOrFetch(
+        qk.customers(range),
+        () => apiRequest<CustomerRow[]>(`/reports/customers?range=${encodeURIComponent(range)}&tz_offset_minutes=${tzOffsetMinutes}`),
+        [],
+      );
+    },
+  });
 }
 export function useReturns() {
   return useQuery({ queryKey: qk.returns, queryFn: () => localOrFetch(qk.returns, () => apiRequest<ReturnRecord[]>("/returns"), []) });
@@ -393,7 +403,10 @@ function localInventoryUsage(range: "month" | "year" | "all"): InventoryUsageRow
     usage.set(product.id, { name: product.name, quantity: 0 });
   }
   for (const sale of sales) {
-    if (start && new Date(sale.created_at) < start) continue;
+    const saleBusinessDate = sale.transaction_date
+      ? new Date(sale.transaction_date + "T00:00:00")
+      : new Date(sale.created_at);
+    if (start && saleBusinessDate < start) continue;
     for (const item of sale.items ?? []) {
       const row = usage.get(item.product_id) ?? { name: item.name, quantity: 0 };
       row.quantity += Math.max(0, Number(item.quantity ?? 0));
