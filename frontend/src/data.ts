@@ -180,8 +180,10 @@ function localReport(range: string): ReportSummary {
     .filter((row) => row.purchase_cost > 0);
   const lostStockGrossProfitTransfer = lostStockTransfers.reduce((sum, row) => sum + row.purchase_cost, 0);
   const grossProfit = grossProfitBeforeLostStock - lostStockGrossProfitTransfer;
-  const automaticLostRows = periodAdjustments.filter((row) => row.adjustment_type === "lost_product" && String(row.accounting_target ?? "none") === "none");
-  const automaticProfitRows = periodAdjustments.filter((row) => row.adjustment_type === "profit_product" && String(row.accounting_target ?? "none") === "none");
+  // None and Inventory only are strictly inventory quantity/value adjustments.
+  // Do not add found-stock value to Net Profit or deduct lost-stock value from it.
+  const automaticLostRows: any[] = [];
+  const automaticProfitRows: any[] = [];
   const lostProductsNetProfitDeduction = automaticLostRows.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
   const profitProductsNetProfitAddition = automaticProfitRows.reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
   const stockAdjustmentDetail = (row: any, isLoss: boolean) => {
@@ -205,8 +207,8 @@ function localReport(range: string): ReportSummary {
   const operating = expenses.filter(e => e.bucket === "operating").reduce((n, e) => n + Number(e.amount ?? 0), 0);
   const lostProductsCost = periodAdjustments.filter((row) => row.adjustment_type === "lost_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? 0)), 0);
   const profitProductsValue = periodAdjustments.filter((row) => row.adjustment_type === "profit_product").reduce((sum, row) => sum + Math.max(0, Number(row.loss_cost ?? row.profit_value ?? 0)), 0);
-  // Default stock adjustments are posted automatically to Net Profit above.
-  // Explicit accounting routes and the Inventory only opt-out are handled here.
+  // Only explicitly selected accounting routes affect Net Profit or Remaining Balance.
+  // None remains inventory-only on both online and offline reports.
   const selectedAdjustments = periodAdjustments.filter((row) => {
     const target = String(row.accounting_target ?? "none");
     return target !== "none" && target !== "inventory_only" && ["split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance"].includes(target);
