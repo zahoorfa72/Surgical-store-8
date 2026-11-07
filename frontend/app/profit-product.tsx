@@ -86,7 +86,7 @@ export default function ProfitProductScreen() {
       try { remote = await apiRequest<ProfitRow[]>("/inventory-adjustments?limit=500"); } catch {}
       if (!active) return;
       const productName = (id: string) => products.find((p) => p.id === id)?.name ?? "Product";
-      queryClient.setQueryData(["inventory-adjustments"], [...(remote ?? []), ...(local ?? [])]);
+      queryClient.setQueryData(["inventory-adjustments"], mergeUniqueRows([...(remote ?? []), ...(local ?? [])]));
       const rows = [...(remote ?? []).filter((r) => r.adjustment_type === "profit_product").map((r) => ({ ...r, product_name: productName(r.product_id) })), ...(local ?? [])];
       setHistory(mergeUniqueRows(rows).sort((a,b) => String(b.created_at || b.date).localeCompare(String(a.created_at || a.date))));
     })();
