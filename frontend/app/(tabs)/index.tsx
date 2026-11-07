@@ -7,7 +7,7 @@ import { getAppNotifications } from "@/src/notification-center";
 import { notifyLowStock } from "@/src/low-stock-notifications";
 
 import { useAuth } from "@/src/auth";
-import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget, useInventoryAdjustments } from "@/src/data";
+import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
@@ -177,6 +177,15 @@ export default function Dashboard() {
     range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: allTimeReport } = useReport("all", !cashier);
+  const balanceDetailReportRange = balanceFromDate && balanceToDate
+    ? `date-range:${balanceFromDate}:${balanceToDate}`
+    : balanceFromDate ? `date-range:${balanceFromDate}:`
+    : balanceToDate ? `date-range::${balanceToDate}`
+    : "all";
+  const { data: balanceDetailReport } = useReport(
+    balanceDetailReportRange,
+    financeDetailsOpen === "balance" && !cashier,
+  );
   const { data: dayClose, isLoading: dayCloseLoading, refetch: refetchDayClose, isRefetching: dayCloseRefreshing } = useDayClose(range);
   const { data: sales = [], refetch: refetchSales } = useSales();
   const { data: purchases = [], refetch: refetchPurchases } = usePurchases();
@@ -225,18 +234,16 @@ export default function Dashboard() {
   const openingBudgetForBalanceRange = (budget?.opening_transactions ?? [])
     .filter((entry: any) => inBalanceRange(entry.date))
     .reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0);
-  const balanceDayAdjustment = inventoryAdjustments
-    .filter((row: any) => inBalanceRange(row.date ? String(row.date) + "T00:00:00" : row.created_at))
-    .filter((row: any) => ["remaining_balance", "both", "split_50_50"].includes(String(row.accounting_target ?? "none")))
-    .reduce((sum: number, row: any) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
   const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
   const balanceDayRemaining =
     balanceDayRevenue - balanceDayGrossProfit - balanceDayCogsExpense
     - balanceSupplierPayments + balanceSupplierRefunds
-    + openingBudgetForBalanceRange + monthlyExpensesBudget + balanceDayAdjustment;
-  // The all-dates view must use the report's canonical all-time calculation,
-  // so it cannot drift from the dashboard headline.
-  const balanceSelectedRemaining = !selectedBalanceFrom && !selectedBalanceTo ? balanceAllTime : balanceDayRemaining;
+    + openingBudgetForBalanceRange + monthlyExpensesBudget;
+  // Use the same canonical report calculation for a custom range. This includes
+  // all matching, explicitly routed stock adjustments (not a capped local list).
+  const balanceSelectedReport = !selectedBalanceFrom && !selectedBalanceTo ? allTimeReport : balanceDetailReport;
+  const balanceSelectedRemaining = Number(balanceSelectedReport?.remaining_balance ?? balanceDayRemaining);
+  const balanceSelectedAdjustment = Number(balanceSelectedReport?.remaining_balance_adjustment ?? 0);
   const inSelectedReport = (iso?: string) => {
     if (!iso) return false;
     const d = new Date(iso);
@@ -626,6 +633,7 @@ export default function Dashboard() {
                       <PLRow label="Supplier refunds" value={"+ " + money(displayFinanceAmount(balanceSupplierRefunds, fakeFinanceDisplay))} muted />
                       <PLRow label="Opening purchase budget" value={"+ " + money(displayFinanceAmount(openingBudgetForBalanceRange, fakeFinanceDisplay))} muted />
                       <PLRow label="Monthly expenses budget" value={"+ " + money(displayFinanceAmount(monthlyExpensesBudget, fakeFinanceDisplay))} muted />
+                      {balanceSelectedAdjustment !== 0 && <PLRow label="Admin-selected Remaining Balance adjustment" value={(balanceSelectedAdjustment > 0 ? "+ " : "- ") + money(displayFinanceAmount(Math.abs(balanceSelectedAdjustment), fakeFinanceDisplay))} muted />}
                       <View style={styles.plDivider} />
                       <PLRow label="Remaining balance" value={money(displayFinanceAmount(balanceSelectedRemaining, fakeFinanceDisplay))} bold tone={balanceSelectedRemaining >= 0 ? "success" : "error"} />
                       <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.divider }}>
