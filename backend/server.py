@@ -2999,6 +2999,9 @@ async def create_return(body: ReturnIn, user: Staff):
             "cost_layers_used": return_layers,
             "line_total": line_total,
         })
+        # Advance by product so duplicate lines in one request cannot return the
+        # same sold units or the same FIFO lot twice.
+        already[it.product_id] = already.get(it.product_id, 0.0) + float(it.quantity)
 
     if not items:
         raise HTTPException(status_code=400, detail="Select at least one item to return")
@@ -3533,50 +3536,63 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
 # Reports
 # ---------------------------------------------------------------------------
 def range_end(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
-    """Exclusive UTC end boundary for a local calendar period."""
+    """Exclusive UTC end boundary for a local calendar period.
+
+    The client sends JavaScript Date.getTimezoneOffset(): local time is UTC
+    minus this value, and a local boundary converts back to UTC by adding it.
+    """
     now_utc = datetime.now(timezone.utc)
-    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    local_now = now_utc - timedelta(minutes=tz_offset_minutes)
     local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     if range_ in ("today", "day"):
-        return local_midnight + timedelta(days=1) - timedelta(minutes=tz_offset_minutes)
+        return local_midnight + timedelta(days=1) + timedelta(minutes=tz_offset_minutes)
     if range_ == "week":
         local_start = local_midnight - timedelta(days=local_midnight.weekday())
-        return local_start + timedelta(days=7) - timedelta(minutes=tz_offset_minutes)
+        return local_start + timedelta(days=7) + timedelta(minutes=tz_offset_minutes)
     if range_ == "month":
         if local_midnight.month == 12:
             next_month = datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc)
         else:
             next_month = datetime(local_midnight.year, local_midnight.month + 1, 1, tzinfo=timezone.utc)
-        return next_month - timedelta(minutes=tz_offset_minutes)
+        return next_month + timedelta(minutes=tz_offset_minutes)
     if range_ == "year":
-        return datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(minutes=tz_offset_minutes)
+        return datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
     if range_.startswith("month:"):
         local_month = datetime.strptime(range_.split(":", 1)[1], "%Y-%m").replace(tzinfo=timezone.utc)
         if local_month.month == 12:
             next_month = datetime(local_month.year + 1, 1, 1, tzinfo=timezone.utc)
         else:
             next_month = datetime(local_month.year, local_month.month + 1, 1, tzinfo=timezone.utc)
-        return next_month - timedelta(minutes=tz_offset_minutes)
+        return next_month + timedelta(minutes=tz_offset_minutes)
     if range_.startswith("year:"):
         year = int(range_.split(":", 1)[1])
-        return datetime(year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(minutes=tz_offset_minutes)
+        return datetime(year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
     return None
 
 
 def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
-    # Convert the device local calendar boundary to UTC so Today/Week/Month
-    # match the cashier's local calendar rather than UTC midnight.
+    """Inclusive UTC start boundary for a local calendar period."""
     now = datetime.now(timezone.utc)
-    local_now = now + timedelta(minutes=tz_offset_minutes)
+    local_now = now - timedelta(minutes=tz_offset_minutes)
     if range_ in ("today", "day"):
-        return local_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
+        local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return local_start + timedelta(minutes=tz_offset_minutes)
     if range_ == "week":
-        start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return start - timedelta(days=start.weekday()) - timedelta(minutes=tz_offset_minutes)
+        local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        local_start -= timedelta(days=local_start.weekday())
+        return local_start + timedelta(minutes=tz_offset_minutes)
     if range_ == "month":
-        return local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
+        local_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return local_start + timedelta(minutes=tz_offset_minutes)
     if range_ == "year":
-        return local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=tz_offset_minutes)
+        local_start = local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return local_start + timedelta(minutes=tz_offset_minutes)
+    if range_.startswith("month:"):
+        local_month = datetime.strptime(range_.split(":", 1)[1], "%Y-%m").replace(tzinfo=timezone.utc)
+        return local_month + timedelta(minutes=tz_offset_minutes)
+    if range_.startswith("year:"):
+        year = int(range_.split(":", 1)[1])
+        return datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=tz_offset_minutes)
     return None  # all
 
 
