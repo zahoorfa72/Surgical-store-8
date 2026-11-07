@@ -624,7 +624,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         return { ...row, returned_items: returnedItems, pending: true };
       };
       queryClient.setQueryData<any>(["purchase", purchaseId], (row) => apply(row));
-      queryClient.setQueryData<any[]>(["purchases"], (rows) => (rows ?? []).map((row) => apply(row)));
+      queryClient.setQueryData<any[]>(["purchases"], (rows) => (rows ?? []).map((row: any) => apply(row)));
     };
     if (method === "PUT" && id) {
       validatePurchaseReturnQuantities(body.items ?? []);
