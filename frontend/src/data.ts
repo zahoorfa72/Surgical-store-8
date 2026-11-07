@@ -311,7 +311,7 @@ export function usePurchases() {
 export function usePurchase(id: string) {
   return useQuery({
     queryKey: qk.purchase(id), enabled: !!id,
-    queryFn: () => localOrFetch(qk.purchase(id), () => apiRequest<Purchase>(`/purchases/${id}`), queryClient.getQueryData<Purchase>(qk.purchases)?.find(p => p.id === id) as Purchase),
+    queryFn: () => localOrFetch(qk.purchase(id), () => apiRequest<Purchase>(`/purchases/${id}`), queryClient.getQueryData<Purchase[]>(qk.purchases)?.find((p: Purchase) => p.id === id) as Purchase),
   });
 }
 export function usePayments(partyId?: string) {
