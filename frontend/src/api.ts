@@ -347,7 +347,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     }
   } else if (entity === "returns") {
     const allReturns = queryClient.getQueryData<any[]>(["returns"]) ?? [];
-    const old = method === "PUT" && id ? allReturns.find((r) => r.id === id) : undefined;
+    const old = (method === "PUT" || method === "DELETE") && id ? allReturns.find((r) => r.id === id) : undefined;
     const sale = body.sale_id
       ? (queryClient.getQueryData<any>(["sale", body.sale_id]) ??
          (queryClient.getQueryData<any[]>(["sales"]) ?? []).find((row) => row.id === body.sale_id))
