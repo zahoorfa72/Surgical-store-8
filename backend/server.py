@@ -3427,11 +3427,15 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     net_profit_adjustment = 0.0
     remaining_balance_adjustment = 0.0
     for adjustment in adjustments_in_period:
-        # Stock-only rows have no P&L or balance effect.
+        # None/inventory-only rows never affect finance. Lost/profit product
+        # adjustments are stock movements, not cash movements: even if an old
+        # row contains a legacy balance amount, never add it to cash balance.
         if adjustment.get("accounting_target", "none") in ("none", "inventory_only"):
             continue
+        adjustment_type = adjustment.get("adjustment_type")
         net_profit_adjustment += float(adjustment.get("net_profit_adjustment", 0) or 0)
-        remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
+        if adjustment_type not in ("lost_product", "profit_product"):
+            remaining_balance_adjustment += float(adjustment.get("remaining_balance_adjustment", 0) or 0)
     net_profit_adjustment = round(net_profit_adjustment, 2)
     remaining_balance_adjustment = round(remaining_balance_adjustment, 2)
 
@@ -3474,9 +3478,12 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     opening_purchase_budget = round(opening_total, 2)
     monthly_expenses_budget = round(float((budget_doc or {}).get("monthly_amount", 0) or 0), 2)
     # Operating expenses reduce Net Profit, not Remaining Balance.
+    # Remaining Balance is a cash/budget calculation. Lost-stock transfers
+    # may reduce reported Gross Profit, but must not manufacture cash by
+    # increasing Remaining Balance. Use pre-transfer gross profit here.
     remaining_balance = round(
         revenue
-        - gross_profit
+        - gross_profit_before_lost_stock
         - cogs_expenses
         - supplier_payments
         + supplier_refunds
