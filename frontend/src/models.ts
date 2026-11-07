@@ -6,6 +6,8 @@ export type Product = {
   id: string;
   name: string;
   barcode: string;
+  sku?: string | null;
+  category?: string | null;
   quantity: number;
   purchase_price: number;
   sale_price: number;
