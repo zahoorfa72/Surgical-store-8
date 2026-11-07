@@ -351,8 +351,27 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     const sale = body.sale_id
       ? (queryClient.getQueryData<any>(["sale", body.sale_id]) ??
          (queryClient.getQueryData<any[]>(["sales"]) ?? []).find((row) => row.id === body.sale_id))
-      : (old?.sale_id ? queryClient.getQueryData<any>(["sale", old.sale_id]) : null);
+      : (old?.sale_id ? (queryClient.getQueryData<any>(["sale", old.sale_id]) ?? (queryClient.getQueryData<any[]>(["sales"]) ?? []).find((row) => row.id === old.sale_id)) : null);
     const saleId = String(body.sale_id ?? old?.sale_id ?? "");
+    const syncSaleReturnSummary = () => {
+      if (!saleId) return;
+      const rows = queryClient.getQueryData<any[]>(["returns"]) ?? [];
+      const returned_items: Record<string, number> = {};
+      let returned_total = 0;
+      for (const row of rows) {
+        if (String(row.sale_id) !== saleId || row.deleted) continue;
+        returned_total += Number(row.refund_total ?? 0);
+        for (const item of row.items ?? []) {
+          const pid = String(item.product_id);
+          returned_items[pid] = (returned_items[pid] ?? 0) + Number(item.quantity ?? 0);
+        }
+      }
+      const apply = (saleRow: any) => saleRow && saleRow.id === saleId
+        ? { ...saleRow, returned_items, returned_total: Math.round(returned_total * 100) / 100 }
+        : saleRow;
+      queryClient.setQueryData<any>(["sale", saleId], apply);
+      queryClient.setQueryData<any[]>(["sales"], (salesRows) => (salesRows ?? []).map((saleRow) => apply(saleRow)));
+    };
 
     const already: Record<string, number> = {};
     for (const row of allReturns) {
@@ -446,6 +465,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         pending: true,
       };
       queryClient.setQueryData<any[]>(["returns"], (rows) => (rows ?? []).map((row) => row.id === id ? next : row));
+      syncSaleReturnSummary();
       if (next.credit && next.customer_id) {
         const delta = refund_total - Number(old?.refund_total ?? 0);
         queryClient.setQueryData<any[]>(["parties", "customer"], (rows) => (rows ?? []).map((party) =>
@@ -471,18 +491,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         pending: true,
       };
       queryClient.setQueryData<any[]>(["returns"], (rows) => [rec, ...(rows ?? [])]);
-      queryClient.setQueryData<any>(["sale", body.sale_id], (oldSale) => {
-        if (!oldSale) return oldSale;
-        const returned_items = { ...(oldSale.returned_items ?? {}) };
-        for (const it of items) returned_items[it.product_id] = Number(returned_items[it.product_id] ?? 0) + Number(it.quantity ?? 0);
-        return { ...oldSale, returned_items, returned_total: Number(oldSale.returned_total ?? 0) + refund_total };
-      });
-      queryClient.setQueryData<any[]>(["sales"], (rows) => (rows ?? []).map((saleRow) => {
-        if (saleRow.id !== body.sale_id) return saleRow;
-        const returned_items = { ...(saleRow.returned_items ?? {}) };
-        for (const it of items) returned_items[it.product_id] = Number(returned_items[it.product_id] ?? 0) + Number(it.quantity ?? 0);
-        return { ...saleRow, returned_items, returned_total: Number(saleRow.returned_total ?? 0) + refund_total };
-      }));
+      syncSaleReturnSummary();
       queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((product: any) => {
         const matching = items.filter((it: any) => String(it.product_id) === String(product.id));
         if (!matching.length) return product;
@@ -504,6 +513,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     } else if (method === "DELETE" && id) {
       const row = old;
       queryClient.setQueryData<any[]>(["returns"], (rows) => (rows ?? []).filter((entry) => entry.id !== id));
+      syncSaleReturnSummary();
       if (row) {
         const rowQty: Record<string, number> = {};
         queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((product: any) => {
