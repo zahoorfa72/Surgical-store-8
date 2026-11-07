@@ -3523,6 +3523,37 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
 # ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
+def range_end(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
+    """Exclusive UTC end boundary for a local calendar period."""
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if range_ in ("today", "day"):
+        return local_midnight + timedelta(days=1) - timedelta(minutes=tz_offset_minutes)
+    if range_ == "week":
+        local_start = local_midnight - timedelta(days=local_midnight.weekday())
+        return local_start + timedelta(days=7) - timedelta(minutes=tz_offset_minutes)
+    if range_ == "month":
+        if local_midnight.month == 12:
+            next_month = datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            next_month = datetime(local_midnight.year, local_midnight.month + 1, 1, tzinfo=timezone.utc)
+        return next_month - timedelta(minutes=tz_offset_minutes)
+    if range_ == "year":
+        return datetime(local_midnight.year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(minutes=tz_offset_minutes)
+    if range_.startswith("month:"):
+        local_month = datetime.strptime(range_.split(":", 1)[1], "%Y-%m").replace(tzinfo=timezone.utc)
+        if local_month.month == 12:
+            next_month = datetime(local_month.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            next_month = datetime(local_month.year, local_month.month + 1, 1, tzinfo=timezone.utc)
+        return next_month - timedelta(minutes=tz_offset_minutes)
+    if range_.startswith("year:"):
+        year = int(range_.split(":", 1)[1])
+        return datetime(year + 1, 1, 1, tzinfo=timezone.utc) - timedelta(minutes=tz_offset_minutes)
+    return None
+
+
 def range_start(range_: str, tz_offset_minutes: int = 0) -> Optional[datetime]:
     # Convert the device local calendar boundary to UTC so Today/Week/Month
     # match the cashier's local calendar rather than UTC midnight.
@@ -3573,14 +3604,16 @@ async def report_inventory_usage(
             end = (local_to + timedelta(days=1) + timedelta(minutes=tz_offset_minutes)) if local_to else None
     except (ValueError, IndexError):
         raise HTTPException(status_code=400, detail="Invalid date range. Use YYYY-MM-DD.")
-    time_q = {"created_at": {}}
-    if start:
-        time_q["created_at"]["$gte"] = start.isoformat()
-    if end:
-        time_q["created_at"]["$lt"] = end.isoformat()
+    if end is None:
+        end = range_end(range, tz_offset_minutes)
+    time_q: dict = {}
+    if start or end:
+        time_q["created_at"] = {}
+        if start: time_q["created_at"]["$gte"] = start.isoformat()
+        if end: time_q["created_at"]["$lt"] = end.isoformat()
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **time_q,
+        **transaction_date_query(start, end, tz_offset_minutes),
     }).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
@@ -3668,9 +3701,15 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
             end = (local_to + timedelta(days=1) + timedelta(minutes=tz_offset_minutes)) if local_to else None
     except (ValueError, IndexError):
         raise HTTPException(status_code=400, detail="Invalid date range. Use YYYY-MM-DD or YYYY-MM.")
-    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
-    if end:
-        time_q["created_at"]["$lt"] = end.isoformat()
+    if end is None:
+        end = range_end(range, tz_offset_minutes)
+    time_q: dict = {}
+    if start or end:
+        time_q["created_at"] = {}
+        if start:
+            time_q["created_at"]["$gte"] = start.isoformat()
+        if end:
+            time_q["created_at"]["$lt"] = end.isoformat()
 
     # Returns/payments are dated when the cash movement happens. They must
     # therefore be filtered independently from the original sale/purchase;
@@ -3691,7 +3730,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     }).to_list(10000)
     purchases = await db.purchases.find({
         "deleted": {"$ne": True},
-        **time_q,
+        **transaction_date_query(start, end, tz_offset_minutes),
     }).to_list(10000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
     purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
@@ -3896,6 +3935,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     purchase_return_refunds = purchase_returns_total
     net_profit = round(
         gross_profit
+        - cogs_expenses
         - personal_expenses
         - operating_expenses
         - automatic_lost_stock_deduction
@@ -3964,10 +4004,15 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
 @api.get("/reports/customers")
 async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
-    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    end = range_end(range, tz_offset_minutes)
+    time_q: dict = {}
+    if start or end:
+        time_q["created_at"] = {}
+        if start: time_q["created_at"]["$gte"] = start.isoformat()
+        if end: time_q["created_at"]["$lt"] = end.isoformat()
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **time_q,
+        **transaction_date_query(start, end, tz_offset_minutes),
     }).to_list(20000)
     returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
     agg: dict = {}
@@ -3994,10 +4039,10 @@ async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int 
 @api.get("/reports/day-close")
 async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minutes: int = Query(0, ge=-840, le=840)):
     start = range_start(range, tz_offset_minutes)
-    time_q = {"created_at": {"$gte": start.isoformat()}} if start else {}
+    end = range_end(range, tz_offset_minutes)
     sales = await db.sales.find({
         "deleted": {"$ne": True},
-        **time_q,
+        **transaction_date_query(start, end, tz_offset_minutes),
     }).to_list(20000)
 
     def summarize(rows):
