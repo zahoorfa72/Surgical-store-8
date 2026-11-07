@@ -190,25 +190,12 @@ function localReport(range: string): ReportSummary {
   const storedSaleProfit = sales.reduce((n, s) => n + Number(s.profit ?? 0), 0);
   const storedReturnProfit = returns.reduce((n, r) => n + Number(r.refund_profit ?? 0), 0);
   const grossProfitBeforeLostStock = storedSaleProfit - storedReturnProfit;
-  const lostStockTransfers = periodAdjustments
-    .filter((row) => row.adjustment_type === "lost_product" && row.accounting_target === "gross_profit_to_remaining_balance")
-    .map((row) => {
-      const amount = Math.round(Math.abs(Number(row.gross_profit_adjustment || row.loss_cost || 0)) * 100) / 100;
-      const product = products.find((item) => item.id === String(row.product_id || ""));
-      return {
-        product_id: String(row.product_id || ""),
-        product_name: product?.name ?? row.product_name ?? "Product",
-        date: String(row.date || row.created_at || "").slice(0, 10),
-        quantity: Math.abs(Number(row.delta ?? 0)),
-        reason: String(row.reason || ""),
-        purchase_cost: amount,
-        gross_profit_deduction: amount,
-        remaining_balance_addition: amount,
-      };
-    })
-    .filter((row) => row.purchase_cost > 0);
-  const lostStockGrossProfitTransfer = lostStockTransfers.reduce((sum, row) => sum + row.purchase_cost, 0);
-  const grossProfit = grossProfitBeforeLostStock - lostStockGrossProfitTransfer;
+  // Lost/profit stock movements do not rewrite Gross Profit. Any admin-selected
+  // effect is routed only through its explicitly selected Net Profit and/or
+  // Remaining Balance adjustment fields below.
+  const lostStockTransfers: any[] = [];
+  const lostStockGrossProfitTransfer = 0;
+  const grossProfit = grossProfitBeforeLostStock;
   // None and Inventory only are strictly inventory quantity/value adjustments.
   // Do not add found-stock value to Net Profit or deduct lost-stock value from it.
   const automaticLostRows: any[] = [];
@@ -240,14 +227,13 @@ function localReport(range: string): ReportSummary {
   // None remains inventory-only on both online and offline reports.
   const selectedAdjustments = periodAdjustments.filter((row) => {
     const target = String(row.accounting_target ?? "none");
-    return target !== "none" && target !== "inventory_only" && ["split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance"].includes(target);
+    return target !== "none" && target !== "inventory_only" &&
+      ["split_50_50", "net_profit", "remaining_balance", "both"].includes(target);
   });
+  // Each route changes only the amount stored for that field. None/Inventory
+  // only are excluded above; Both/Split are the only deliberate multi-field routes.
   const netProfitAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.net_profit_adjustment ?? 0), 0);
-  // Stock adjustments are non-cash movements and cannot increase/decrease the
-  // Remaining Balance, even if a legacy row retained a stale routed amount.
-  const remainingBalanceAdjustment = selectedAdjustments
-    .filter((row) => row.adjustment_type !== "lost_product" && row.adjustment_type !== "profit_product")
-    .reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
+  const remainingBalanceAdjustment = selectedAdjustments.reduce((sum, row) => sum + Number(row.remaining_balance_adjustment ?? 0), 0);
   const revenue = salesRevenue - returnsTotal;
   // Cash movement is the actual amount field only. Adjustment is a
   // non-cash settlement/discount and must not be counted as money in hand.
@@ -272,11 +258,12 @@ function localReport(range: string): ReportSummary {
     personal_expenses: personal, gross_profit: grossProfit, gross_profit_before_lost_stock: grossProfitBeforeLostStock, lost_stock_gross_profit_transfer: lostStockGrossProfitTransfer, lost_stock_remaining_balance_addition: lostStockGrossProfitTransfer, lost_stock_transfers: lostStockTransfers, operating_expenses: operating, lost_products_cost: lostProductsCost, profit_products_value: profitProductsValue, lost_products_net_profit_deduction: lostProductsNetProfitDeduction, profit_products_net_profit_addition: profitProductsNetProfitAddition, lost_products_net_profit_details: lostProductsNetProfitDetails, profit_products_net_profit_details: profitProductsNetProfitDetails,
     total_expenses: cogsExpenses + operating + personal + lostProductsNetProfitDeduction,
     supplier_payments: supplierPayments, customer_receipts: customerReceipts,
+    net_profit_adjustment: netProfitAdjustment,
+    remaining_balance_adjustment: remainingBalanceAdjustment,
     // Remaining Balance excludes operating expenses; they reduce Net Profit instead.
     // Preserve the other agreed balance components and budget attribution.
     remaining_balance:
-      // Stock loss can reduce accounting Gross Profit, but it is not cash.
-      revenue - grossProfitBeforeLostStock - supplierPayments - cogsExpenses + supplierRefunds
+      revenue - grossProfit - supplierPayments - cogsExpenses + supplierRefunds
       + openingBudgetForRange + Number(budget.monthly_amount ?? 0) + remainingBalanceAdjustment,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
@@ -285,6 +272,30 @@ function localReport(range: string): ReportSummary {
     product_count: products.length,
     low_stock: products.filter(p => Number(p.quantity ?? 0) <= Number(p.low_stock_threshold ?? 0)),
   };
+}
+
+export function useInventoryAdjustments(enabled = true) {
+  return useQuery({
+    queryKey: ["inventory-adjustments"],
+    enabled,
+    queryFn: async () => {
+      if ((await getConnectionMode()) === "offline" || !(await online())) {
+        await loadLocalStockAdjustments();
+        return queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
+      }
+      try {
+        const remote = await apiRequest<any[]>("/inventory-adjustments?limit=1000");
+        const [lostRows, profitRows] = await Promise.all([
+          storage.getItem<any[]>("ssm.lost-products.v1", []),
+          storage.getItem<any[]>("ssm.profit-products.v1", []),
+        ]);
+        return uniqueStockAdjustmentRows([...(remote ?? []), ...(lostRows ?? []), ...(profitRows ?? [])]);
+      } catch {
+        await loadLocalStockAdjustments();
+        return queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
+      }
+    },
+  });
 }
 
 export function useProducts() {
