@@ -157,7 +157,10 @@ function localReport(range: string): ReportSummary {
   const sales = customPeriod
     ? saleRows.filter((sale) => matchesDate(sale.transaction_date ?? sale.created_at))
     : saleRows.filter((sale) => inRange(sale.transaction_date ?? sale.created_at, range));
-  const purchases = filterRows(queryClient.getQueryData<Purchase[]>(qk.purchases) ?? []);
+  const purchaseRows = queryClient.getQueryData<Purchase[]>(qk.purchases) ?? [];
+  const purchases = customPeriod
+    ? purchaseRows.filter((purchase) => matchesDate(purchase.transaction_date ?? purchase.created_at))
+    : purchaseRows.filter((purchase) => inRange(purchase.transaction_date ?? purchase.created_at, range));
   const returns = filterRows(queryClient.getQueryData<ReturnRecord[]>(qk.returns) ?? []);
   const purchaseReturns = filterRows(queryClient.getQueryData<any[]>(qk.purchaseReturns) ?? []);
   const expenseRows = queryClient.getQueryData<Expense[]>(qk.expenses(undefined)) ?? [];
@@ -264,7 +267,7 @@ function localReport(range: string): ReportSummary {
       + openingBudgetForRange + Number(budget.monthly_amount ?? 0) + remainingBalanceAdjustment,
 
     units_sold: sales.reduce((n, s) => n + s.items.reduce((m, i) => m + Number(i.quantity ?? 0), 0), 0),
-    net_profit: grossProfit - personal - operating - lostProductsNetProfitDeduction + profitProductsNetProfitAddition + netProfitAdjustment,
+    net_profit: grossProfit - cogsExpenses - personal - operating - lostProductsNetProfitDeduction + profitProductsNetProfitAddition + netProfitAdjustment,
     transactions: sales.length, purchase_total: purchaseTotal, purchase_gross: purchaseGross, purchase_returns_total: purchaseReturnsTotal, inventory_value: inventoryValue,
     product_count: products.length,
     low_stock: products.filter(p => Number(p.quantity ?? 0) <= Number(p.low_stock_threshold ?? 0)),
