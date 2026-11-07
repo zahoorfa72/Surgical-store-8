@@ -950,12 +950,53 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["sales"], (old) => (old ?? []).filter((s) => s.id !== id));
       queryClient.removeQueries({ queryKey: ["sale", id] });
       if (sale) {
-        // Restore only the net stock still out (sold − already returned).
-        queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
-          const sold=(sale.items??[]).filter((x:any)=>x.product_id===p.id).reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
-          const back=Number(returnedQty[p.id] ?? 0);
-          const net=sold-back;
-          return net ? {...p,quantity:Number(p.quantity??0)+net}:p;
+        // Restore only the net units still out and their exact original FIFO lots.
+        // Returned units were already put back into stock, so do not add those lots twice.
+        queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((product: any) => {
+          const pid = String(product.id);
+          const saleItems = (sale.items ?? []).filter((item: any) => String(item.product_id) === pid);
+          if (!saleItems.length) return product;
+          const returnedItems = linkedReturns.flatMap((row: any) =>
+            (row.items ?? []).filter((item: any) => String(item.product_id) === pid)
+          );
+          const soldQty = saleItems.reduce((sum: number, item: any) => sum + Number(item.quantity ?? 0), 0);
+          const returned = Math.min(soldQty, Number(returnedQty[pid] ?? 0));
+          const restoreQty = Math.max(0, soldQty - returned);
+          if (restoreQty <= 1e-9) return product;
+
+          let originalLots: any[] = [];
+          for (const item of saleItems) {
+            const lots = Array.isArray(item.cost_layers_used) && item.cost_layers_used.length
+              ? item.cost_layers_used
+              : [{ quantity: Number(item.quantity ?? 0), unit_cost: Number(item.purchase_price ?? 0), purchase_id: null }];
+            originalLots.push(...lots);
+          }
+          for (const returnedItem of returnedItems) {
+            const returnedLots = Array.isArray(returnedItem.cost_layers_used) && returnedItem.cost_layers_used.length
+              ? returnedItem.cost_layers_used
+              : [{ quantity: Number(returnedItem.quantity ?? 0), unit_cost: Number(returnedItem.purchase_price ?? 0), purchase_id: null }];
+            originalLots = removeCostLayerComposition(originalLots, returnedLots);
+          }
+          const remainingLots = originalLots.length
+            ? originalLots
+            : [{ quantity: restoreQty, unit_cost: Number(saleItems[0]?.purchase_price ?? 0), purchase_id: null }];
+          let layers = ensureCostLayers(product);
+          for (const lot of remainingLots) {
+            layers = appendCostLayer(
+              layers,
+              Number(lot.quantity ?? 0),
+              Number(lot.unit_cost ?? 0),
+              lot.purchase_id ?? null,
+            );
+          }
+          const nextQty = Number(product.quantity ?? 0) + restoreQty;
+          return {
+            ...product,
+            quantity: nextQty,
+            cost_layers: ensureCostLayers({ ...product, quantity: nextQty, cost_layers: layers }),
+            updated_at: now(),
+            pending: true,
+          };
         }));
         if (sale.customer_id) {
           let delta = 0;
