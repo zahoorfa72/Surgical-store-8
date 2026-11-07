@@ -333,82 +333,184 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       keys.forEach((k) => queryClient.setQueryData<any[]>(k, (old) => (old ?? []).filter((e) => e.id !== id)));
     }
   } else if (entity === "returns") {
-    if (method === "PUT" && id) {
-      const old = (queryClient.getQueryData<any[]>(["returns"]) ?? []).find((r) => r.id === id);
-      const sale = body.sale_id ? queryClient.getQueryData<any>(["sale", body.sale_id]) : null;
-      if (old) {
-        queryClient.setQueryData<any[]>(["products"], (list) => (list ?? []).map((p) => {
-          const oldIt = (old.items ?? []).find((x:any) => x.product_id === p.id);
-          const newIt = (body.items ?? []).find((x:any) => x.product_id === p.id);
-          const undo = Number(oldIt?.quantity ?? 0);
-          const add = Number(newIt?.quantity ?? 0);
-          return (oldIt || newIt) ? { ...p, quantity: Number(p.quantity ?? 0) - undo + add } : p;
-        }));
+    const allReturns = queryClient.getQueryData<any[]>(["returns"]) ?? [];
+    const old = method === "PUT" && id ? allReturns.find((r) => r.id === id) : undefined;
+    const sale = body.sale_id
+      ? (queryClient.getQueryData<any>(["sale", body.sale_id]) ??
+         (queryClient.getQueryData<any[]>(["sales"]) ?? []).find((row) => row.id === body.sale_id))
+      : (old?.sale_id ? queryClient.getQueryData<any>(["sale", old.sale_id]) : null);
+    const saleId = String(body.sale_id ?? old?.sale_id ?? "");
+
+    const already: Record<string, number> = {};
+    for (const row of allReturns) {
+      if (row.sale_id !== saleId || row.id === id || row.deleted) continue;
+      for (const item of row.items ?? []) {
+        const pid = String(item.product_id);
+        already[pid] = (already[pid] ?? 0) + Number(item.quantity ?? 0);
       }
-      const refund_total = (body.items ?? []).reduce((sum:number,it:any) => {
-        const si = sale?.items?.find((x:any) => x.product_id === it.product_id);
-        return sum + Number(si?.unit_price ?? it.unit_price ?? 0) * Number(it.quantity ?? 0);
-      },0);
+    }
+
+    const usedInThisReturn: Record<string, number> = {};
+    const items = (body.items ?? []).filter((it: any) => Number(it.quantity ?? 0) > 0).map((it: any) => {
+      const saleItem = sale?.items?.find((x: any) => x.product_id === it.product_id);
+      const qty = Number(it.quantity ?? 0);
+      const pid = String(it.product_id);
+      const originalLayers = Array.isArray(saleItem?.cost_layers_used) && saleItem.cost_layers_used.length
+        ? saleItem.cost_layers_used
+        : [{
+            quantity: Number(saleItem?.quantity ?? qty),
+            unit_cost: Number(saleItem?.purchase_price ?? it.purchase_price ?? 0),
+            purchase_id: null,
+          }];
+      const skip = (already[pid] ?? 0) + (usedInThisReturn[pid] ?? 0);
+      const costLayersUsed = sliceCostLayers(originalLayers, skip, qty);
+      usedInThisReturn[pid] = (usedInThisReturn[pid] ?? 0) + qty;
+      const lineCogs = Math.round(costLayersUsed.reduce(
+        (sum: number, layer: any) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0,
+      ) * 100) / 100;
+      const unitPrice = Number(saleItem?.unit_price ?? it.unit_price ?? 0);
+      return {
+        ...it,
+        name: saleItem?.name ?? it.name ?? "Item",
+        quantity: qty,
+        unit_price: unitPrice,
+        purchase_price: qty > 0 ? lineCogs / qty : 0,
+        cost_layers_used: costLayersUsed,
+        line_cogs: lineCogs,
+        line_total: Math.round(qty * unitPrice * 100) / 100,
+      };
+    });
+    const refund_total = Math.round(items.reduce((sum: number, it: any) => sum + Number(it.line_total ?? 0), 0) * 100) / 100;
+    const refund_cogs = Math.round(items.reduce((sum: number, it: any) => sum + Number(it.line_cogs ?? 0), 0) * 100) / 100;
+    const refund_profit = Math.round((refund_total - refund_cogs) * 100) / 100;
+
+    if (method === "PUT" && id) {
+      // Reverse the old return's exact stock lots, then add the replacement
+      // return's lots. This mirrors the server's return edit calculation.
+      const oldQty: Record<string, number> = {};
+      for (const item of old?.items ?? []) {
+        const pid = String(item.product_id);
+        oldQty[pid] = (oldQty[pid] ?? 0) + Number(item.quantity ?? 0);
+      }
+      const newQty: Record<string, number> = {};
+      for (const item of items) {
+        const pid = String(item.product_id);
+        newQty[pid] = (newQty[pid] ?? 0) + Number(item.quantity ?? 0);
+      }
+      const nextProducts = (queryClient.getQueryData<any[]>(["products"]) ?? []).map((product: any) => {
+        const pid = String(product.id);
+        if (!(pid in oldQty) && !(pid in newQty)) return product;
+        let layers = ensureCostLayers(product);
+        for (const oldItem of (old?.items ?? []).filter((x: any) => String(x.product_id) === pid)) {
+          const oldLayers = Array.isArray(oldItem.cost_layers_used) && oldItem.cost_layers_used.length
+            ? oldItem.cost_layers_used
+            : [{ quantity: Number(oldItem.quantity ?? 0), unit_cost: Number(oldItem.purchase_price ?? 0), purchase_id: null }];
+          layers = removeCostLayerComposition(layers, oldLayers);
+        }
+        for (const newItem of items.filter((x: any) => String(x.product_id) === pid)) {
+          const newLayers = newItem.cost_layers_used?.length
+            ? newItem.cost_layers_used
+            : [{ quantity: Number(newItem.quantity ?? 0), unit_cost: Number(newItem.purchase_price ?? 0), purchase_id: null }];
+          for (const lot of newLayers) {
+            layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null);
+          }
+        }
+        return {
+          ...product,
+          quantity: Number(product.quantity ?? 0) - (oldQty[pid] ?? 0) + (newQty[pid] ?? 0),
+          cost_layers: layers,
+          updated_at: now(),
+          pending: true,
+        };
+      });
+      queryClient.setQueryData<any[]>(["products"], nextProducts);
       const next = {
-        ...(old ?? {}), ...body, id, refund_total,
+        ...(old ?? {}), ...body, id, sale_id: saleId, items,
+        refund_total, refund_cogs, refund_profit,
         customer_id: sale?.customer_id ?? old?.customer_id ?? null,
         credit: !!(sale?.credit ?? old?.credit),
-        items: body.items ?? old?.items ?? [], pending: true
+        created_at: old?.created_at ?? now(),
+        pending: true,
       };
-      queryClient.setQueryData<any[]>(["returns"], (oldRows) => (oldRows ?? []).map((r) => r.id === id ? next : r));
+      queryClient.setQueryData<any[]>(["returns"], (rows) => (rows ?? []).map((row) => row.id === id ? next : row));
       if (next.credit && next.customer_id) {
         const delta = refund_total - Number(old?.refund_total ?? 0);
-        queryClient.setQueryData<any[]>(["parties","customer"], (oldRows) => (oldRows ?? []).map((p) =>
-          p.id === next.customer_id ? { ...p, balance: Number(p.balance ?? 0) - delta } : p
+        queryClient.setQueryData<any[]>(["parties", "customer"], (rows) => (rows ?? []).map((party) =>
+          party.id === next.customer_id ? { ...party, balance: Number(party.balance ?? 0) - delta } : party
         ));
       }
     } else if (method === "POST") {
-      const sale = body.sale_id ? queryClient.getQueryData<any>(["sale", body.sale_id]) : null;
-      const items = (body.items ?? []).map((it: any) => {
-        const si = sale?.items?.find((x: any) => x.product_id === it.product_id);
-        const qty = Number(it.quantity ?? 0);
-        const unitPrice = Number(si?.unit_price ?? it.unit_price ?? 0);
-        const purchasePrice = Number(si?.purchase_price ?? 0);
-        return { ...it, name: si?.name ?? "Item", unit_price: unitPrice, purchase_price: purchasePrice, line_total: Math.round(qty * unitPrice * 100) / 100 };
-      });
-      const refund_total = items.reduce((sum: number, it: any) => sum + Number(it.line_total ?? 0), 0);
-      const refund_cogs = items.reduce((sum: number, it: any) => sum + Number(it.quantity ?? 0) * Number(it.purchase_price ?? 0), 0);
-      const rec = { id: tempId, ref_no: `OFFLINE-RET-${tempId.split("-").pop()}`, sale_id: body.sale_id, customer_id: sale?.customer_id ?? null, credit: !!sale?.credit, invoice_no: sale?.invoice_no ?? "—", customer_name: sale?.customer_name ?? "Walk-in", items, refund_total, refund_cogs, refund_profit: refund_total - refund_cogs, reason: body.reason ?? "", user_name: "", created_at: now(), pending: true };
-      queryClient.setQueryData<any[]>(["returns"], (old) => [rec, ...(old ?? [])]);
-      queryClient.setQueryData<any>(["sale", body.sale_id], (old) => {
-        if (!old) return old;
-        const returned_items = { ...(old.returned_items ?? {}) };
+      const rec = {
+        id: tempId,
+        ref_no: `OFFLINE-RET-${tempId.split("-").pop()}`,
+        sale_id: body.sale_id,
+        customer_id: sale?.customer_id ?? null,
+        credit: !!sale?.credit,
+        invoice_no: sale?.invoice_no ?? "—",
+        customer_name: sale?.customer_name ?? "Walk-in",
+        items,
+        refund_total,
+        refund_cogs,
+        refund_profit,
+        reason: body.reason ?? "",
+        user_name: "",
+        created_at: now(),
+        pending: true,
+      };
+      queryClient.setQueryData<any[]>(["returns"], (rows) => [rec, ...(rows ?? [])]);
+      queryClient.setQueryData<any>(["sale", body.sale_id], (oldSale) => {
+        if (!oldSale) return oldSale;
+        const returned_items = { ...(oldSale.returned_items ?? {}) };
         for (const it of items) returned_items[it.product_id] = Number(returned_items[it.product_id] ?? 0) + Number(it.quantity ?? 0);
-        return { ...old, returned_items, returned_total: Number(old.returned_total ?? 0) + refund_total };
+        return { ...oldSale, returned_items, returned_total: Number(oldSale.returned_total ?? 0) + refund_total };
       });
-      queryClient.setQueryData<any[]>(["sales"], (old) => (old ?? []).map((s) => {
-        if (s.id !== body.sale_id) return s;
-        const returned_items = { ...(s.returned_items ?? {}) };
+      queryClient.setQueryData<any[]>(["sales"], (rows) => (rows ?? []).map((saleRow) => {
+        if (saleRow.id !== body.sale_id) return saleRow;
+        const returned_items = { ...(saleRow.returned_items ?? {}) };
         for (const it of items) returned_items[it.product_id] = Number(returned_items[it.product_id] ?? 0) + Number(it.quantity ?? 0);
-        return { ...s, returned_items, returned_total: Number(s.returned_total ?? 0) + refund_total };
+        return { ...saleRow, returned_items, returned_total: Number(saleRow.returned_total ?? 0) + refund_total };
+      }));
+      queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((product: any) => {
+        const matching = items.filter((it: any) => String(it.product_id) === String(product.id));
+        if (!matching.length) return product;
+        let layers = ensureCostLayers(product);
+        let qty = 0;
+        for (const it of matching) {
+          qty += Number(it.quantity ?? 0);
+          for (const lot of it.cost_layers_used ?? []) {
+            layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null);
+          }
+        }
+        return { ...product, quantity: Number(product.quantity ?? 0) + qty, cost_layers: layers, updated_at: now(), pending: true };
       }));
       if (sale?.customer_id && sale?.credit) {
-        queryClient.setQueryData<any[]>(["parties", "customer"], (old) => (old ?? []).map((p) =>
-          p.id === sale.customer_id ? { ...p, balance: Number(p.balance ?? 0) - refund_total } : p
+        queryClient.setQueryData<any[]>(["parties", "customer"], (rows) => (rows ?? []).map((party) =>
+          party.id === sale.customer_id ? { ...party, balance: Number(party.balance ?? 0) - refund_total } : party
         ));
       }
-      queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
-        const it = items.find((x: any) => x.product_id === p.id);
-        if (!it) return p;
-        const layers = appendCostLayer(ensureCostLayers(p), Number(it.quantity || 0), Number(it.purchase_price || 0), null);
-        return { ...p, quantity: p.quantity + Number(it.quantity || 0), cost_layers: layers };
-      }));
     } else if (method === "DELETE" && id) {
-      const row = (queryClient.getQueryData<any[]>(["returns"]) ?? []).find((r) => r.id === id);
-      queryClient.setQueryData<any[]>(["returns"], (old) => (old ?? []).filter((r) => r.id !== id));
+      const row = old;
+      queryClient.setQueryData<any[]>(["returns"], (rows) => (rows ?? []).filter((entry) => entry.id !== id));
       if (row) {
-        queryClient.setQueryData<any[]>(["products"], (old) => (old ?? []).map((p) => {
-          const it = (row.items ?? []).find((x: any) => x.product_id === p.id);
-          return it ? { ...p, quantity: p.quantity - Number(it.quantity || 0) } : p;
+        const rowQty: Record<string, number> = {};
+        queryClient.setQueryData<any[]>(["products"], (rows) => (rows ?? []).map((product: any) => {
+          const matching = (row.items ?? []).filter((it: any) => String(it.product_id) === String(product.id));
+          if (!matching.length) return product;
+          let layers = ensureCostLayers(product);
+          let qty = 0;
+          for (const it of matching) {
+            qty += Number(it.quantity ?? 0);
+            const usedLayers = Array.isArray(it.cost_layers_used) && it.cost_layers_used.length
+              ? it.cost_layers_used
+              : [{ quantity: Number(it.quantity ?? 0), unit_cost: Number(it.purchase_price ?? 0), purchase_id: null }];
+            layers = removeCostLayerComposition(layers, usedLayers);
+          }
+          rowQty[String(product.id)] = qty;
+          return { ...product, quantity: Number(product.quantity ?? 0) - qty, cost_layers: layers, updated_at: now(), pending: true };
         }));
         if (row.customer_id && row.credit) {
-          queryClient.setQueryData<any[]>(["parties", "customer"], (old) => (old ?? []).map((p) =>
-            p.id === row.customer_id ? { ...p, balance: Number(p.balance ?? 0) + Number(row.refund_total ?? 0) } : p
+          queryClient.setQueryData<any[]>(["parties", "customer"], (rows) => (rows ?? []).map((party) =>
+            party.id === row.customer_id ? { ...party, balance: Number(party.balance ?? 0) + Number(row.refund_total ?? 0) } : party
           ));
         }
       }
