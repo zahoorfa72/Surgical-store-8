@@ -1299,7 +1299,7 @@ async def create_inventory_adjustment(body: InventoryAdjustmentIn, user: Staff):
         existing_adjustment = await db.inventory_adjustments.find_one({"client_id": body.client_id, "deleted": {"$ne": True}})
         if existing_adjustment:
             existing_adjustment["id"] = oid(existing_adjustment["_id"])
-            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "cost_layers_used", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at")},
+            return {"ok": True, "adjustment": {k: existing_adjustment.get(k) for k in ("id", "product_id", "product_name", "delta", "reason", "adjustment_type", "date", "loss_cost", "cost_layers_used", "net_profit_adjustment", "remaining_balance_adjustment", "gross_profit_adjustment", "accounting_target", "client_id", "user_name", "created_at", "edited_at")},
                     "product": product_public(product)}
     current = float(product.get("quantity", 0) or 0)
     if -delta > current + 1e-9:
@@ -1466,7 +1466,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
             "client_id": fresh.get("client_id"),
             "user_name": fresh.get("user_name", ""),
             "created_at": fresh.get("created_at", ""),
-            "edited_at": fresh.get("edited_at", ""),
+        "edited_at": fresh.get("edited_at", ""),
         }}
 
     # First calculate the old entry's reversal without writing it. If the new
