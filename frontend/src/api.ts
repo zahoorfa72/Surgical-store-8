@@ -394,8 +394,13 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
             unit_cost: Number(saleItem?.purchase_price ?? it.purchase_price ?? 0),
             purchase_id: null,
           }];
+      if (!saleItem) throw new Error("This product is not part of the selected sale.");
       const skip = (already[pid] ?? 0) + (usedInThisReturn[pid] ?? 0);
+      const returnable = Math.max(0, Number(saleItem.quantity ?? 0) - skip);
+      if (qty > returnable + 1e-9) throw new Error(`Only ${returnable} unit(s) remain available to return.`);
       const costLayersUsed = sliceCostLayers(originalLayers, skip, qty);
+      const coveredQty = costLayersUsed.reduce((sum: number, layer: any) => sum + Number(layer.quantity ?? 0), 0);
+      if (Math.abs(coveredQty - qty) > 1e-6) throw new Error("The sale's original cost lots cannot cover this return. No stock was changed.");
       usedInThisReturn[pid] = (usedInThisReturn[pid] ?? 0) + qty;
       const lineCogs = Math.round(costLayersUsed.reduce(
         (sum: number, layer: any) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0,
@@ -572,6 +577,31 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           line_total: Math.round(qty * unitCost * 100) / 100,
         };
       });
+    const validatePurchaseReturnQuantities = (inputItems: any[]) => {
+      if (!purchase) throw new Error("The original purchase is not available offline.");
+      const alreadyReturned: Record<string, number> = {};
+      for (const row of existingRows) {
+        if (String(row.purchase_id) !== purchaseId || row.id === id || row.deleted) continue;
+        for (const item of row.items ?? []) {
+          const pid = String(item.product_id);
+          alreadyReturned[pid] = (alreadyReturned[pid] ?? 0) + Number(item.quantity ?? 0);
+        }
+      }
+      const purchased: Record<string, number> = {};
+      for (const item of purchase.items ?? []) {
+        const pid = String(item.product_id);
+        purchased[pid] = (purchased[pid] ?? 0) + Number(item.quantity ?? 0);
+      }
+      const requested: Record<string, number> = {};
+      for (const item of inputItems ?? []) {
+        const pid = String(item.product_id);
+        requested[pid] = (requested[pid] ?? 0) + Number(item.quantity ?? 0);
+      }
+      for (const [pid, qty] of Object.entries(requested)) {
+        const remaining = Math.max(0, Number(purchased[pid] ?? 0) - Number(alreadyReturned[pid] ?? 0));
+        if (qty > remaining + 1e-9) throw new Error(`Only ${remaining} unit(s) from this purchase remain returnable.`);
+      }
+    };
     const quantityTotals = (rows: any[]) => (rows ?? []).reduce((totals: Record<string, number>, item: any) => {
       const pid = String(item.product_id);
       totals[pid] = (totals[pid] ?? 0) + Number(item.quantity ?? 0);
@@ -597,6 +627,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["purchases"], (rows) => (rows ?? []).map((row) => apply(row)));
     };
     if (method === "PUT" && id) {
+      validatePurchaseReturnQuantities(body.items ?? []);
       const items = makeItems(body.items ?? []);
       const refund_total = Math.round(items.reduce((sum: number, item: any) => sum + Number(item.line_total ?? 0), 0) * 100) / 100;
       const previousItems = old?.items ?? [];
@@ -668,6 +699,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         ));
       }
     } else if (method === "POST") {
+      validatePurchaseReturnQuantities(body.items ?? []);
       const items = makeItems(body.items ?? []);
       const refund_total = Math.round(items.reduce((sum: number, item: any) => sum + Number(item.line_total ?? 0), 0) * 100) / 100;
       const rec = {
@@ -1010,8 +1042,10 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         }));
         if (sale.customer_id) {
           let delta = 0;
-          if (sale.credit) delta -= Number(sale.total ?? 0);
-          delta += refundSum; // undo the balance the returns had removed
+          if (sale.credit) {
+            delta -= Number(sale.total ?? 0);
+            delta += refundSum; // reverse the credit refunds that were posted for this credit sale
+          }
           if (delta) queryClient.setQueryData<any[]>(["parties","customer"], rows => (rows??[]).map((p:any)=>p.id===sale.customer_id?{...p,balance:Number(p.balance??0)+delta}:p));
         }
       }
