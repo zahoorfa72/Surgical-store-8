@@ -1424,6 +1424,49 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
     if not old_product:
         raise HTTPException(status_code=404, detail="Product for this adjustment was not found")
 
+    # A reason/date/accounting-only edit must never reverse and re-add stock.
+    # This also allows editing metadata on an entry whose units have since been sold.
+    old_delta = float(old.get("delta", 0) or 0)
+    if old_pid == new_pid and abs(old_delta - float(body.delta)) <= 1e-9:
+        allowed_targets = ("none", "inventory_only", "split_50_50", "net_profit", "remaining_balance", "both", "gross_profit_to_remaining_balance")
+        target_name = body.accounting_target if body.accounting_target in allowed_targets else "none"
+        net_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.net_profit_adjustment or 0), 2)
+        balance_adjustment = 0.0 if target_name in ("none", "inventory_only") else round(float(body.remaining_balance_adjustment or 0), 2)
+        cost = round(float(old.get("loss_cost", 0) or 0), 2)
+        gross_adjustment = -cost if target_name == "gross_profit_to_remaining_balance" and body.adjustment_type == "lost_product" else 0.0
+        await db.inventory_adjustments.update_one(
+            {"_id": ObjectId(adjustment_id)},
+            {"$set": {
+                "reason": body.reason.strip(),
+                "date": body.date or now_iso()[:10],
+                "net_profit_adjustment": net_adjustment,
+                "remaining_balance_adjustment": balance_adjustment,
+                "gross_profit_adjustment": gross_adjustment,
+                "accounting_target": target_name,
+                "edited_at": now_iso(),
+                "edited_by": _.get("name", ""),
+            }},
+        )
+        fresh = await db.inventory_adjustments.find_one({"_id": ObjectId(adjustment_id)})
+        return {"ok": True, "adjustment": {
+            "id": oid(fresh["_id"]),
+            "product_id": fresh["product_id"],
+            "product_name": fresh.get("product_name", ""),
+            "delta": fresh["delta"],
+            "reason": fresh["reason"],
+            "adjustment_type": fresh["adjustment_type"],
+            "date": fresh["date"],
+            "loss_cost": fresh["loss_cost"],
+            "cost_layers_used": fresh.get("cost_layers_used", []),
+            "net_profit_adjustment": fresh.get("net_profit_adjustment", 0),
+            "remaining_balance_adjustment": fresh.get("remaining_balance_adjustment", 0),
+            "gross_profit_adjustment": fresh.get("gross_profit_adjustment", 0),
+            "accounting_target": fresh.get("accounting_target", "none"),
+            "client_id": fresh.get("client_id"),
+            "user_name": fresh.get("user_name", ""),
+            "created_at": fresh.get("created_at", ""),
+        }}
+
     # First calculate the old entry's reversal without writing it. If the new
     # quantity is invalid, the original stock and adjustment record stay intact.
     restored_old_qty, restored_old_layers = await _reversed_inventory_adjustment_state(old, old_product)
