@@ -345,7 +345,24 @@ export default function Sell() {
   const onSearchTextChange = (value: string) => {
     voiceNeedsConfirmationRef.current = null;
     handledSearchAddRef.current = null;
+    setVoiceMessage("");
+    setVoiceTranscript("");
     setSearch(value);
+  };
+
+  const addSearchSuggestion = (product: Product, quantity: number) => {
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      toast("Enter a whole quantity greater than zero", "error");
+      return;
+    }
+    const normalized = normalizeSellSearch(search);
+    // If the suggestion is tapped before the exact-name debounce finishes,
+    // mark it handled so the same item/quantity is never added twice.
+    handledSearchAddRef.current = `${normalized}:${product.id}:${quantity}`;
+    voiceNeedsConfirmationRef.current = null;
+    addToCart(product, quantity);
+    setVoiceMessage(`Added ${quantity} × ${product.name} to the cart.`);
+    toast(`Added ${quantity} × ${product.name}`, "success");
   };
 
   const addExactSearchMatch = (query: string, quantity: number, allowSku = true) => {
@@ -526,8 +543,9 @@ export default function Sell() {
         best.product.sku,
         best.product.barcode,
       ].some((value) => normalizeSellSearch(String(value ?? "")) === normalizedQuery);
+      const exactUnambiguous = exactIdentity && (!secondBest || secondBest.score < 1);
       const decisive = !!best && (
-        exactIdentity ||
+        exactUnambiguous ||
         (best.score >= 0.9 && (!secondBest || best.score - secondBest.score >= 0.1))
       );
       if (decisive && best) {
@@ -902,7 +920,7 @@ export default function Sell() {
                   <Pressable
                     testID={`inc-${item.id}`}
                     style={styles.stepBtn}
-                    onPress={() => setQty(item.id, line.quantity + (requestedQuantity || 1))}
+                    onPress={() => addSearchSuggestion(item, requestedQuantity)}
                     disabled={requestedQuantity === 0}
                     accessibilityLabel={`Add ${requestedQuantity} more ${item.name}`}
                   >
@@ -913,7 +931,7 @@ export default function Sell() {
                 <Pressable
                   testID={`add-${item.id}`}
                   style={[styles.addBtn, requestedQuantity === 0 && { opacity: 0.45 }]}
-                  onPress={() => addToCart(item, requestedQuantity)}
+                  onPress={() => addSearchSuggestion(item, requestedQuantity)}
                   disabled={requestedQuantity === 0}
                   accessibilityLabel={`Add ${requestedQuantity} ${item.name} to cart`}
                 >
