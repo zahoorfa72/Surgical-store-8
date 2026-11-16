@@ -826,6 +826,7 @@ export default function Sell() {
       }
     });
     return () => {
+      const wasVoiceRunning = voiceActiveRef.current || voiceStartPendingRef.current;
       startSubscription.remove();
       endSubscription.remove();
       resultSubscription.remove();
@@ -840,7 +841,7 @@ export default function Sell() {
       if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
       voiceRestartTimerRef.current = null;
       voiceFinishTimerRef.current = null;
-      if (voiceActiveRef.current) {
+      if (wasVoiceRunning) {
         try { ExpoSpeechRecognitionModule.abort(); } catch { /* Route may already be closing. */ }
       }
     };
