@@ -43,6 +43,18 @@
       ],
       "expo-font",
       "expo-image",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Surgical Store to use the microphone for voice item entry.",
+          "speechRecognitionPermission": "Allow Surgical Store to recognize spoken stock item names.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.tts",
+            "com.google.android.as"
+          ]
+        }
+      ],
       "expo-secure-store",
       "expo-web-browser",
       "expo-status-bar",

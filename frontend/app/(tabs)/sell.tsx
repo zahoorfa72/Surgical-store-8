@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -28,6 +28,8 @@ import { EmptyState, Loader, ScreenHeader, money, todayIsoDate, useToast } from 
 import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
+import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
+import { getSafeCartQuantity, normalizeSellSearch, parseVoiceProductCommand, rankVoiceProductMatches } from "@/src/utils/sell-voice";
 
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number; kitNames?: string[] };
 type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean; transactionDate?: string };
@@ -48,6 +50,15 @@ export default function Sell() {
   const { data: customers } = useParties("customer");
 
   const [search, setSearch] = useState("");
+  const [searchQuantity, setSearchQuantity] = useState("1");
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceMessage, setVoiceMessage] = useState("");
+  const [voiceLanguage, setVoiceLanguage] = useState<"en-US" | "ur-PK">("en-US");
+  const voiceResultHandled = useRef(false);
+  const voiceActiveRef = useRef(false);
+  const voiceNeedsConfirmationRef = useRef<string | null>(null);
+  const handledSearchAddRef = useRef<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [transactionDate, setTransactionDate] = useState(todayIsoDate());
   const [productKits, setProductKits] = useState<ProductKit[]>([]);
@@ -101,11 +112,17 @@ export default function Sell() {
     }
   };
 
-  const filtered = useMemo(() => fuzzyFilter(
-    products ?? [],
-    search,
-    [(p) => p.name, (p) => p.sku, (p) => p.barcode],
-  ), [products, search]);
+  const filtered = useMemo(() => {
+    const query = search.trim();
+    if (!query) return products ?? [];
+    if (normalizeSellSearch(query).length < 3) return [];
+    return fuzzyFilter(
+      products ?? [],
+      query,
+      [(p) => p.name, (p) => p.sku, (p) => p.barcode],
+      { limit: 80, threshold: 0.38 },
+    );
+  }, [products, search]);
 
   const cartMap = useMemo(() => new Map(cart.map((c) => [c.id, c])), [cart]);
   const subtotal = cart.reduce((s, c) => s + c.quantity * c.unit_price, 0);
@@ -302,17 +319,263 @@ export default function Sell() {
     toast(kit.name + " added to cart. Stock will change only after the sale is completed.", "success");
   };
 
-  const addToCart = (p: Product) => {
-    // Let staff build the full cart even when stock is zero/negative.
-    // Checkout still enforces the explicit "Allow out-of-stock / negative stock sale" permission.
+  const addToCart = useCallback((p: Product, quantity = 1) => {
+    // Typed, scanned, and spoken additions all update the same product line.
+    const addQuantity = Number.isSafeInteger(quantity) && quantity > 0
+      ? Math.min(quantity, 1_000_000)
+      : 1;
     setCart((prev) => {
       const found = prev.find((c) => c.id === p.id);
       if (found) {
-        return prev.map((c) => (c.id === p.id ? { ...c, quantity: c.quantity + 1, stock: Number(p.quantity ?? 0) } : c));
+        return prev.map((c) => (c.id === p.id
+          ? { ...c, quantity: c.quantity + addQuantity, stock: Number(p.quantity ?? 0) }
+          : c));
       }
-      return [...prev, { id: p.id, name: p.name, stock: Number(p.quantity ?? 0), quantity: 1, unit_price: Number(p.sale_price ?? 0), threshold: p.low_stock_threshold }];
+      return [...prev, {
+        id: p.id,
+        name: p.name,
+        stock: Number(p.quantity ?? 0),
+        quantity: addQuantity,
+        unit_price: Number(p.sale_price ?? 0),
+        threshold: p.low_stock_threshold,
+      }];
     });
+  }, []);
+
+  const onSearchTextChange = (value: string) => {
+    voiceNeedsConfirmationRef.current = null;
+    handledSearchAddRef.current = null;
+    setSearch(value);
   };
+
+  const addExactSearchMatch = (query: string, quantity: number, allowSku = true) => {
+    const normalized = normalizeSellSearch(query);
+    if (!normalized || quantity <= 0) return false;
+    const matches = (products ?? []).filter((product) => {
+      const values = allowSku
+        ? [product.name, product.sku, product.barcode]
+        : [product.name];
+      return values.some((value) => normalizeSellSearch(String(value ?? "")) === normalized);
+    });
+    if (matches.length !== 1) return false;
+
+    const product = matches[0];
+    const addKey = `${normalized}:${product.id}:${quantity}`;
+    if (handledSearchAddRef.current !== addKey) {
+      handledSearchAddRef.current = addKey;
+      addToCart(product, quantity);
+      toast(`Added ${quantity} × ${product.name}`, "success");
+    }
+    setSearch("");
+    setSearchQuantity("1");
+    voiceNeedsConfirmationRef.current = null;
+    return true;
+  };
+
+  const submitProductSearch = () => {
+    const query = search.trim();
+    if (!query) return;
+    const quantity = getSafeCartQuantity(searchQuantity);
+    if (!quantity) {
+      toast("Enter a whole quantity greater than zero", "error");
+      return;
+    }
+    if (addExactSearchMatch(query, quantity)) return;
+    const normalized = normalizeSellSearch(query);
+    const exactNames = (products ?? []).filter(
+      (product) => normalizeSellSearch(product.name) === normalized,
+    );
+    if (exactNames.length > 1) {
+      toast("More than one stock item matches. Choose the correct suggestion below.", "info");
+      return;
+    }
+    toast("Choose a matching stock suggestion below to add it to the cart", "info");
+  };
+
+  // Finish-typing convenience: a unique, exact product name is added only
+  // after a short pause. Partial/fuzzy matches are never silently added.
+  useEffect(() => {
+    const normalized = normalizeSellSearch(search);
+    if (normalized.length < 3 || voiceNeedsConfirmationRef.current === normalized) return;
+    const quantity = getSafeCartQuantity(searchQuantity);
+    if (!quantity) return;
+    const exactNames = (products ?? []).filter(
+      (product) => normalizeSellSearch(product.name) === normalized,
+    );
+    if (exactNames.length !== 1) return;
+    const product = exactNames[0];
+    const addKey = `${normalized}:${product.id}:${quantity}`;
+    if (handledSearchAddRef.current === addKey) return;
+    const timeout = setTimeout(() => {
+      if (handledSearchAddRef.current === addKey) return;
+      handledSearchAddRef.current = addKey;
+      addToCart(product, quantity);
+      toast(`Added ${quantity} × ${product.name}`, "success");
+      setSearch("");
+      setSearchQuantity("1");
+    }, 700);
+    return () => clearTimeout(timeout);
+  }, [search, searchQuantity, products, addToCart, toast]);
+
+  const handleVoiceInput = async () => {
+    if (voiceActiveRef.current) {
+      try {
+        ExpoSpeechRecognitionModule.stop();
+      } catch {
+        voiceActiveRef.current = false;
+        setVoiceActive(false);
+      }
+      return;
+    }
+    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+      setVoiceMessage("Speech recognition is unavailable. Enable Google Speech Services on this device.");
+      toast("Speech recognition service is not available on this device", "error");
+      return;
+    }
+    try {
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceMessage("Microphone permission is required for voice item entry.");
+        toast("Allow microphone permission to use voice entry", "error");
+        return;
+      }
+      voiceResultHandled.current = false;
+      voiceNeedsConfirmationRef.current = null;
+      setVoiceTranscript("");
+      setVoiceMessage("Listening… say the stock item name followed by its quantity.");
+      const contextualStrings = Array.from(new Set(
+        (products ?? [])
+          .flatMap((product) => [product.name, product.sku ?? "", product.barcode ?? ""])
+          .map((value) => String(value).trim())
+          .filter((value) => value.length >= 2 && value.length <= 64),
+      )).slice(0, 100);
+      ExpoSpeechRecognitionModule.start({
+        lang: voiceLanguage,
+        interimResults: true,
+        continuous: false,
+        maxAlternatives: 5,
+        addsPunctuation: false,
+        contextualStrings,
+        androidIntentOptions: {
+          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 4000,
+          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 1800,
+          EXTRA_MASK_OFFENSIVE_WORDS: false,
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not start voice recognition";
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      setVoiceMessage(message);
+      toast(message, "error");
+    }
+  };
+
+  useEffect(() => {
+    const startSubscription = ExpoSpeechRecognitionModule.addListener("start", () => {
+      voiceActiveRef.current = true;
+      setVoiceActive(true);
+    });
+    const endSubscription = ExpoSpeechRecognitionModule.addListener("end", () => {
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+    });
+    const resultSubscription = ExpoSpeechRecognitionModule.addListener("result", (event) => {
+      const results = (event.results ?? [])
+        .map((result) => ({
+          transcript: String(result.transcript ?? "").trim(),
+          confidence: Number(result.confidence ?? 0),
+        }))
+        .filter((result) => result.transcript.length > 0);
+      if (!results.length) return;
+      if (!event.isFinal) {
+        setVoiceTranscript(results[0].transcript);
+        return;
+      }
+      if (voiceResultHandled.current) return;
+      voiceResultHandled.current = true;
+
+      const variants = results.map((result) => {
+        const exactNames = (products ?? []).filter(
+          (product) => normalizeSellSearch(product.name) === normalizeSellSearch(result.transcript),
+        );
+        const parsed = exactNames.length === 1
+          ? { query: result.transcript, quantity: 1 }
+          : parseVoiceProductCommand(result.transcript);
+        const matches = exactNames.length === 1
+          ? [{ product: exactNames[0], score: 1 }]
+          : rankVoiceProductMatches(parsed.query, products ?? []);
+        return { ...result, parsed, matches };
+      }).sort((a, b) =>
+        (b.matches[0]?.score ?? 0) - (a.matches[0]?.score ?? 0) ||
+        b.confidence - a.confidence,
+      );
+
+      const selected = variants[0];
+      if (!selected) return;
+      setVoiceTranscript(selected.transcript);
+      const best = selected.matches[0];
+      const secondBest = selected.matches[1];
+      if (!selected.parsed.query.trim()) {
+        setVoiceMessage("I heard a quantity, but not a product name. Say the item name and quantity.");
+        return;
+      }
+      const normalizedQuery = normalizeSellSearch(selected.parsed.query);
+      const exactIdentity = !!best && [
+        best.product.name,
+        best.product.sku,
+        best.product.barcode,
+      ].some((value) => normalizeSellSearch(String(value ?? "")) === normalizedQuery);
+      const decisive = !!best && (
+        exactIdentity ||
+        (best.score >= 0.9 && (!secondBest || best.score - secondBest.score >= 0.1))
+      );
+      if (decisive && best) {
+        addToCart(best.product, selected.parsed.quantity);
+        setVoiceMessage(`Added ${selected.parsed.quantity} × ${best.product.name} to the cart.`);
+        setSearch("");
+        setSearchQuantity("1");
+        voiceNeedsConfirmationRef.current = null;
+        handledSearchAddRef.current = null;
+        toast(`Added ${selected.parsed.quantity} × ${best.product.name}`, "success");
+        return;
+      }
+      voiceNeedsConfirmationRef.current = normalizedQuery;
+      setSearch(selected.parsed.query);
+      setSearchQuantity(String(selected.parsed.quantity));
+      if (best && best.score >= 0.34) {
+        setVoiceMessage(`Heard “${selected.transcript}”. Confirm the correct stock suggestion below; nothing has been added yet.`);
+      } else {
+        setVoiceMessage(`Heard “${selected.transcript}”, but no reliable stock match was found. Check the suggestions or type the item name.`);
+      }
+    });
+    const errorSubscription = ExpoSpeechRecognitionModule.addListener("error", (event) => {
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      const code = String(event.error ?? "unknown");
+      const message = code === "no-speech"
+        ? "No speech was detected. Tap the microphone and try again."
+        : code === "not-allowed"
+          ? "Microphone permission was denied. Allow it in Android Settings."
+          : code === "service-not-allowed" || code === "language-not-supported"
+            ? "The selected speech service or language is unavailable. Switch language or enable Google Speech Services."
+            : String(event.message || "Voice recognition failed. Please try again.");
+      setVoiceMessage(message);
+    });
+    return () => {
+      startSubscription.remove();
+      endSubscription.remove();
+      resultSubscription.remove();
+      errorSubscription.remove();
+      if (voiceActiveRef.current) {
+        try {
+          ExpoSpeechRecognitionModule.abort();
+        } catch {
+          // Native recognition can already be stopped during route cleanup.
+        }
+      }
+    };
+  }, [products, addToCart, toast]);
 
   // Checkout has its own add path: every inventory product, including zero/negative stock,
   // can be placed in the cart. The final checkout remains blocked until the below-zero box is enabled.
@@ -519,20 +782,66 @@ export default function Sell() {
           <TextInput
             testID="product-search-input"
             style={styles.searchInput}
-            placeholder="Search products"
+            placeholder="Search product, SKU or barcode"
             placeholderTextColor={colors.muted}
             value={search}
-            onChangeText={setSearch}
+            onChangeText={onSearchTextChange}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={submitProductSearch}
           />
         </View>
+        <Pressable
+          testID="voice-add-to-cart-button"
+          style={[styles.voiceBtn, voiceActive && styles.voiceBtnActive]}
+          onPress={handleVoiceInput}
+          accessibilityRole="button"
+          accessibilityLabel={voiceActive ? "Stop voice item entry" : "Add stock item by voice"}
+        >
+          <MaterialDesignIcons name={voiceActive ? "microphone-off" : "microphone"} size={22} color={colors.onBrandPrimary} />
+        </Pressable>
+      </View>
+      <View style={styles.searchActionRow}>
+        <Text style={styles.searchQuantityLabel}>ADD QTY</Text>
+        <TextInput
+          testID="sell-add-quantity-input"
+          style={styles.searchQtyInput}
+          value={searchQuantity}
+          onChangeText={setSearchQuantity}
+          keyboardType="number-pad"
+          maxLength={7}
+          selectTextOnFocus
+          placeholder="1"
+          placeholderTextColor={colors.muted}
+        />
+        <Text style={styles.searchHint}>Type 3+ letters, choose a match, or wait for an exact full-name match.</Text>
+        <Pressable
+          testID="voice-language-toggle"
+          style={styles.voiceLanguageBtn}
+          onPress={() => setVoiceLanguage((value) => value === "en-US" ? "ur-PK" : "en-US")}
+          disabled={voiceActive}
+          accessibilityLabel="Change voice recognition language"
+        >
+          <Text style={styles.voiceLanguageText}>{voiceLanguage === "en-US" ? "EN" : "UR"}</Text>
+        </Pressable>
         <Pressable testID="scan-to-cart-button" style={styles.scanBtn} onPress={() => setScanOpen(true)}>
-          <MaterialDesignIcons name="barcode-scan" size={24} color={colors.onBrandPrimary} />
+          <MaterialDesignIcons name="barcode-scan" size={22} color={colors.onBrandPrimary} />
         </Pressable>
         <Pressable testID="scan-order-image-sell-button" style={styles.scanOrderSellBtn} onPress={() => setOrderImageScanOpen(true)}>
-          <MaterialDesignIcons name="text-box-search-outline" size={21} color={colors.onBrandPrimary} />
+          <MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} />
           <Text style={styles.scanOrderSellText}>Scan order</Text>
         </Pressable>
       </View>
+      {!!voiceMessage && (
+        <View style={styles.voiceStatus} accessibilityLiveRegion="polite">
+          <MaterialDesignIcons name={voiceActive ? "microphone" : "text-recognition"} size={17} color={colors.brandPrimary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.voiceStatusText}>{voiceMessage}</Text>
+            {!!voiceTranscript && <Text style={styles.voiceTranscriptText}>Heard: {voiceTranscript}</Text>}
+          </View>
+        </View>
+      )}
 
       {productKits.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10, gap: 8, alignItems: "center" }} style={{ flexGrow: 0, minHeight: 76, maxHeight: 88, marginBottom: 6 }}>
@@ -550,23 +859,28 @@ export default function Sell() {
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 140, gap: 10 }}
         ListEmptyComponent={
-          <EmptyState
-            icon="package-variant"
-            title="No products"
-            message="Add products in Stock to start selling."
-            testID="sell-empty"
-          />
+          search.trim() && normalizeSellSearch(search).length < 3 ? (
+            <Text style={styles.searchEmptyHint}>Type at least 3 letters to see stock suggestions.</Text>
+          ) : (
+            <EmptyState
+              icon="package-variant"
+              title={search.trim() ? "No matching stock item" : "No products"}
+              message={search.trim() ? "Try a longer name, SKU, or barcode." : "Add products in Stock to start selling."}
+              testID="sell-empty"
+            />
+          )
         }
         renderItem={({ item }) => {
           const line = cartMap.get(item.id);
           const out = item.quantity <= 0;
           const low = !out && item.quantity <= item.low_stock_threshold;
+          const requestedQuantity = getSafeCartQuantity(searchQuantity);
           return (
             <View style={styles.prodRow} testID={`product-${item.id}`}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.prodName}>{item.name}</Text>
                 <Text style={styles.prodMeta}>
-                  {money(item.sale_price)} · {out ? "Out of stock" : `${item.quantity} in stock`}
+                  {money(item.sale_price)} · Stock {item.quantity} · Add {requestedQuantity}
                 </Text>
                 {low && (
                   <View style={styles.lowTagRow} testID={`low-stock-tag-${item.id}`}>
@@ -588,7 +902,9 @@ export default function Sell() {
                   <Pressable
                     testID={`inc-${item.id}`}
                     style={styles.stepBtn}
-                    onPress={() => setQty(item.id, line.quantity + 1)}
+                    onPress={() => setQty(item.id, line.quantity + (requestedQuantity || 1))}
+                    disabled={requestedQuantity === 0}
+                    accessibilityLabel={`Add ${requestedQuantity} more ${item.name}`}
                   >
                     <MaterialDesignIcons name="plus" size={18} color={colors.brandPrimary} />
                   </Pressable>
@@ -596,10 +912,13 @@ export default function Sell() {
               ) : (
                 <Pressable
                   testID={`add-${item.id}`}
-                  style={styles.addBtn}
-                  onPress={() => addToCart(item)}
+                  style={[styles.addBtn, requestedQuantity === 0 && { opacity: 0.45 }]}
+                  onPress={() => addToCart(item, requestedQuantity)}
+                  disabled={requestedQuantity === 0}
+                  accessibilityLabel={`Add ${requestedQuantity} ${item.name} to cart`}
                 >
-                  <MaterialDesignIcons name="cart-plus" size={20} color={colors.onBrandPrimary} />
+                  <MaterialDesignIcons name="cart-plus" size={18} color={colors.onBrandPrimary} />
+                  <Text style={styles.addBtnQuantity}>+{requestedQuantity}</Text>
                 </Pressable>
               )}
             </View>
@@ -1082,6 +1401,18 @@ const useStyles = makeStyles((colors) => ({
   },
   scanOrderSellText: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "900" },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
+  voiceBtn: { width: 46, height: 48, borderRadius: 12, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  voiceBtnActive: { backgroundColor: colors.error },
+  voiceLanguageBtn: { width: 38, height: 42, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  voiceLanguageText: { color: colors.onSurface, fontSize: 11, fontWeight: "900" },
+  searchActionRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 4, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 7 },
+  searchQuantityLabel: { color: colors.muted, fontSize: 10, fontWeight: "900" },
+  searchQtyInput: { width: 54, height: 36, textAlign: "center", borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, color: colors.onSurface, fontSize: 15, fontWeight: "900", paddingHorizontal: 6 },
+  searchHint: { flex: 1, color: colors.muted, fontSize: 10, lineHeight: 14 },
+  searchEmptyHint: { color: colors.muted, fontSize: 13, textAlign: "center", paddingVertical: 20, paddingHorizontal: 24 },
+  voiceStatus: { marginHorizontal: 16, marginTop: 4, marginBottom: 4, padding: 10, borderRadius: 10, backgroundColor: colors.brandTertiary, flexDirection: "row", alignItems: "center", gap: 8 },
+  voiceStatusText: { color: colors.onSurface, fontSize: 12, fontWeight: "700" },
+  voiceTranscriptText: { color: colors.muted, fontSize: 11, marginTop: 3 },
   prodRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1107,13 +1438,17 @@ const useStyles = makeStyles((colors) => ({
   },
   lowWarnText: { flex: 1, fontSize: 12.5, color: colors.warning, fontWeight: "600" },
   addBtn: {
-    width: 44,
+    minWidth: 62,
     height: 44,
+    paddingHorizontal: 8,
     borderRadius: 12,
     backgroundColor: colors.brandPrimary,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 4,
   },
+  addBtnQuantity: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "900" },
   stepper: { flexDirection: "row", alignItems: "center", gap: 6 },
   stepBtn: {
     width: 36,
