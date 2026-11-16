@@ -73,6 +73,7 @@ export default function Sell() {
   const voiceSessionOpenRef = useRef(false);
   const voiceDraftItemsRef = useRef<VoiceDraftItem[]>([]);
   const pendingVoiceInterimRef = useRef<string | null>(null);
+  const voiceStartPendingRef = useRef(false);
   const processVoiceResultsRef = useRef<(results: { transcript: string; confidence: number }[]) => void>(() => {});
   const voiceRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceFinishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -484,72 +485,73 @@ export default function Sell() {
 
   const processVoiceResults = (alternatives: { transcript: string; confidence: number }[]) => {
     if (!alternatives.length) return;
-      const variants = alternatives.map((result) => {
-        const exactNames = productsRef.current.filter(
-          (product) => normalizeSellSearch(product.name) === normalizeSellSearch(result.transcript),
-        );
-        const parsed = exactNames.length === 1
-          ? { query: result.transcript, quantity: 1 }
-          : parseVoiceProductCommand(result.transcript);
-        const matches = exactNames.length === 1
-          ? [{ product: exactNames[0], score: 1 }]
-          : rankVoiceProductMatches(parsed.query, productsRef.current);
-        return { ...result, parsed, matches };
-      }).sort((a, b) =>
-        (b.matches[0]?.score ?? 0) - (a.matches[0]?.score ?? 0) ||
-        b.confidence - a.confidence,
+    const variants = alternatives.map((result) => {
+      const exactNames = productsRef.current.filter(
+        (product) => normalizeSellSearch(product.name) === normalizeSellSearch(result.transcript),
       );
-      const selected = variants[0];
-      if (!selected) return;
+      const parsed = exactNames.length === 1
+        ? { query: result.transcript, quantity: 1 }
+        : parseVoiceProductCommand(result.transcript);
+      const matches = exactNames.length === 1
+        ? [{ product: exactNames[0], score: 1 }]
+        : rankVoiceProductMatches(parsed.query, productsRef.current);
+      return { ...result, parsed, matches };
+    }).sort((a, b) =>
+      (b.matches[0]?.score ?? 0) - (a.matches[0]?.score ?? 0) ||
+      b.confidence - a.confidence,
+    );
+    const selected = variants[0];
+    if (!selected) return;
 
-      const duplicateKey = normalizeSellSearch(selected.transcript);
-      const previousFinal = lastFinalTranscriptRef.current;
-      if (previousFinal?.key === duplicateKey && Date.now() - previousFinal.at < 1200) return;
-      lastFinalTranscriptRef.current = { key: duplicateKey, at: Date.now() };
+    const duplicateKey = normalizeSellSearch(selected.transcript);
+    const previousFinal = lastFinalTranscriptRef.current;
+    if (previousFinal?.key === duplicateKey && Date.now() - previousFinal.at < 1200) return;
+    lastFinalTranscriptRef.current = { key: duplicateKey, at: Date.now() };
 
-      setVoiceTranscript(selected.transcript);
-      const best = selected.matches[0];
-      const secondBest = selected.matches[1];
-      if (!selected.parsed.query.trim()) {
-        setVoiceMessage("I heard a quantity but no product name. Say the item name followed by its quantity.");
-        return;
-      }
-      const normalizedQuery = normalizeSellSearch(selected.parsed.query);
-      const exactIdentity = !!best && [
-        best.product.name,
-        best.product.sku,
-        best.product.barcode,
-      ].some((value) => normalizeSellSearch(String(value ?? "")) === normalizedQuery);
-      const exactUnambiguous = exactIdentity && (!secondBest || secondBest.score < 1);
-      const decisive = !!best && (
-        exactUnambiguous ||
-        (best.score >= 0.9 && (!secondBest || best.score - secondBest.score >= 0.1))
-      );
-      const candidates = selected.matches.slice(0, 4).map((match) => match.product);
-      const entry: VoiceDraftItem = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        transcript: selected.transcript,
-        name: decisive && best ? best.product.name : selected.parsed.query,
-        quantity: selected.parsed.quantity,
-        product: decisive && best ? best.product : null,
-        candidates: decisive ? [] : candidates,
-        needsConfirmation: !decisive,
-      };
-      queueVoiceDraftItem(entry);
-      if (entry.needsConfirmation) {
-        setVoiceMessage(candidates.length
-          ? `Heard “${selected.transcript}”. Choose the correct stock item for this quantity in the list below.`
-          : `Heard “${selected.transcript}”, but no stock match was found. Remove it or correct the product manually.`);
-      } else {
-        setVoiceMessage(`Recognized ${entry.name} × ${entry.quantity}. Keep speaking for the next item, or press Done.`);
-      }
-      setSearch("");
-      setSearchQuantity("1");
+    setVoiceTranscript(selected.transcript);
+    const best = selected.matches[0];
+    const secondBest = selected.matches[1];
+    if (!selected.parsed.query.trim()) {
+      setVoiceMessage("I heard a quantity but no product name. Say the item name followed by its quantity.");
+      return;
+    }
+    const normalizedQuery = normalizeSellSearch(selected.parsed.query);
+    const exactIdentity = !!best && [
+      best.product.name,
+      best.product.sku,
+      best.product.barcode,
+    ].some((value) => normalizeSellSearch(String(value ?? "")) === normalizedQuery);
+    const exactUnambiguous = exactIdentity && (!secondBest || secondBest.score < 1);
+    const decisive = !!best && (
+      exactUnambiguous ||
+      (best.score >= 0.9 && (!secondBest || best.score - secondBest.score >= 0.1))
+    );
+    const candidates = selected.matches.slice(0, 4).map((match) => match.product);
+    const entry: VoiceDraftItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      transcript: selected.transcript,
+      name: decisive && best ? best.product.name : selected.parsed.query,
+      quantity: selected.parsed.quantity,
+      product: decisive && best ? best.product : null,
+      candidates: decisive ? [] : candidates,
+      needsConfirmation: !decisive,
+    };
+    queueVoiceDraftItem(entry);
+    if (entry.needsConfirmation) {
+      setVoiceMessage(candidates.length
+        ? `Heard “${selected.transcript}”. Choose the correct stock item for this quantity in the list below.`
+        : `Heard “${selected.transcript}”, but no stock match was found. Remove it or correct the product manually.`);
+    } else {
+      setVoiceMessage(`Recognized ${entry.name} × ${entry.quantity}. Keep speaking for the next item, or press Done.`);
+    }
+    setSearch("");
+    setSearchQuantity("1");
   };
   processVoiceResultsRef.current = processVoiceResults;
 
   const startVoiceRecognitionSession = () => {
-    if (!voiceSessionActiveRef.current) return;
+    if (!voiceSessionActiveRef.current || voiceActiveRef.current || voiceStartPendingRef.current) return;
+    voiceStartPendingRef.current = true;
     try {
       const contextualStrings = Array.from(new Set(
         (products ?? [])
@@ -571,6 +573,7 @@ export default function Sell() {
         },
       });
     } catch (error: unknown) {
+      voiceStartPendingRef.current = false;
       voiceSessionActiveRef.current = false;
       voiceActiveRef.current = false;
       setVoiceActive(false);
@@ -581,6 +584,11 @@ export default function Sell() {
   startVoiceRecognitionRef.current = startVoiceRecognitionSession;
 
   const handleVoiceInput = async () => {
+    if (voiceStartPendingRef.current) return;
+    if (voiceRestartTimerRef.current) {
+      clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
     if (voiceSessionActiveRef.current && voiceActiveRef.current) return;
     if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
       setVoiceMessage("Speech recognition is unavailable. Enable Google Speech Services on this device.");
@@ -631,11 +639,12 @@ export default function Sell() {
   const cancelVoiceEntry = () => {
     voiceSessionActiveRef.current = false;
     voiceSessionOpenRef.current = false;
+    voiceStartPendingRef.current = false;
     if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
     if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
     voiceRestartTimerRef.current = null;
     voiceFinishTimerRef.current = null;
-    if (voiceActiveRef.current) {
+    if (voiceActiveRef.current || voiceStartPendingRef.current) {
       try { ExpoSpeechRecognitionModule.abort(); } catch { /* Recognition may already have stopped. */ }
     }
     voiceActiveRef.current = false;
@@ -649,9 +658,10 @@ export default function Sell() {
 
   const finishVoiceEntry = () => {
     voiceSessionActiveRef.current = false;
+    voiceStartPendingRef.current = false;
     if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
     voiceRestartTimerRef.current = null;
-    if (voiceActiveRef.current) {
+    if (voiceActiveRef.current || voiceStartPendingRef.current) {
       try { ExpoSpeechRecognitionModule.stop(); } catch { /* Recognition may already have stopped. */ }
     }
     voiceActiveRef.current = false;
@@ -720,11 +730,17 @@ export default function Sell() {
 
   useEffect(() => {
     const startSubscription = ExpoSpeechRecognitionModule.addListener("start", () => {
+      voiceStartPendingRef.current = false;
+      if (!voiceSessionActiveRef.current || !voiceSessionOpenRef.current) {
+        try { ExpoSpeechRecognitionModule.abort(); } catch { /* Session was closed before native start completed. */ }
+        return;
+      }
       voiceActiveRef.current = true;
       setVoiceActive(true);
       setVoiceMessage("Listening continuously. Say the next item and quantity, or press Done.");
     });
     const endSubscription = ExpoSpeechRecognitionModule.addListener("end", () => {
+      voiceStartPendingRef.current = false;
       voiceActiveRef.current = false;
       setVoiceActive(false);
       if (!voiceSessionActiveRef.current) return;
@@ -754,6 +770,7 @@ export default function Sell() {
       processVoiceResultsRef.current(results);
     });
     const errorSubscription = ExpoSpeechRecognitionModule.addListener("error", (event) => {
+      voiceStartPendingRef.current = false;
       voiceActiveRef.current = false;
       setVoiceActive(false);
       const code = String(event.error ?? "unknown");
@@ -779,6 +796,7 @@ export default function Sell() {
       voiceSessionActiveRef.current = false;
       voiceSessionOpenRef.current = false;
       pendingVoiceInterimRef.current = null;
+      voiceStartPendingRef.current = false;
       if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
       if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
       voiceRestartTimerRef.current = null;
