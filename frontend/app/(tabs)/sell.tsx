@@ -72,6 +72,8 @@ export default function Sell() {
   const voiceSessionActiveRef = useRef(false);
   const voiceSessionOpenRef = useRef(false);
   const voiceDraftItemsRef = useRef<VoiceDraftItem[]>([]);
+  const pendingVoiceInterimRef = useRef<string | null>(null);
+  const processVoiceResultsRef = useRef<(results: { transcript: string; confidence: number }[]) => void>(() => {});
   const voiceRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceFinishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFinalTranscriptRef = useRef<{ key: string; at: number } | null>(null);
@@ -480,197 +482,9 @@ export default function Sell() {
     updateVoiceDraftItems([...current, entry]);
   };
 
-  const startVoiceRecognitionSession = () => {
-    if (!voiceSessionActiveRef.current) return;
-    try {
-      const contextualStrings = Array.from(new Set(
-        (products ?? [])
-          .flatMap((product) => [product.name, product.sku ?? "", product.barcode ?? ""])
-          .map((value) => String(value).trim())
-          .filter((value) => value.length >= 2 && value.length <= 64),
-      )).slice(0, 100);
-      ExpoSpeechRecognitionModule.start({
-        lang: voiceLanguage,
-        interimResults: true,
-        continuous: true,
-        maxAlternatives: 5,
-        addsPunctuation: false,
-        contextualStrings,
-        androidIntentOptions: {
-          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 4000,
-          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 1800,
-          EXTRA_MASK_OFFENSIVE_WORDS: false,
-        },
-      });
-    } catch (error: unknown) {
-      voiceSessionActiveRef.current = false;
-      voiceActiveRef.current = false;
-      setVoiceActive(false);
-      const message = error instanceof Error ? error.message : "Could not continue voice recognition";
-      setVoiceMessage(message);
-    }
-  };
-  startVoiceRecognitionRef.current = startVoiceRecognitionSession;
-
-  const handleVoiceInput = async () => {
-    if (voiceSessionActiveRef.current && voiceActiveRef.current) return;
-    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
-      setVoiceMessage("Speech recognition is unavailable. Enable Google Speech Services on this device.");
-      toast("Speech recognition service is not available on this device", "error");
-      return;
-    }
-    try {
-      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!permission.granted) {
-        setVoiceMessage("Microphone permission is required for voice item entry.");
-        toast("Allow microphone permission to use voice entry", "error");
-        return;
-      }
-      if (!voiceSessionOpenRef.current) {
-        updateVoiceDraftItems([]);
-        setVoiceTranscript("");
-        lastFinalTranscriptRef.current = null;
-      }
-      voiceNeedsConfirmationRef.current = null;
-      voiceSessionActiveRef.current = true;
-      voiceSessionOpenRef.current = true;
-      setVoiceSessionOpen(true);
-      setVoiceMessage("Listening continuously. Say each product name and quantity; press Done when finished.");
-      startVoiceRecognitionRef.current();
-    } catch (error: unknown) {
-      voiceSessionActiveRef.current = false;
-      voiceActiveRef.current = false;
-      setVoiceActive(false);
-      const message = error instanceof Error ? error.message : "Could not start voice recognition";
-      setVoiceMessage(message);
-      toast(message, "error");
-    }
-  };
-
-  const confirmVoiceDraftItem = (entryId: string, product: Product) => {
-    const current = voiceDraftItemsRef.current;
-    const next = current.map((item) => item.id === entryId
-      ? { ...item, name: product.name, product, needsConfirmation: false }
-      : item);
-    updateVoiceDraftItems(next);
-  };
-
-  const removeVoiceDraftItem = (entryId: string) => {
-    updateVoiceDraftItems(voiceDraftItemsRef.current.filter((item) => item.id !== entryId));
-  };
-
-  const cancelVoiceEntry = () => {
-    voiceSessionActiveRef.current = false;
-    voiceSessionOpenRef.current = false;
-    if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
-    if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
-    voiceRestartTimerRef.current = null;
-    voiceFinishTimerRef.current = null;
-    if (voiceActiveRef.current) {
-      try { ExpoSpeechRecognitionModule.abort(); } catch { /* Recognition may already have stopped. */ }
-    }
-    voiceActiveRef.current = false;
-    setVoiceActive(false);
-    setVoiceSessionOpen(false);
-    updateVoiceDraftItems([]);
-    setVoiceTranscript("");
-    setVoiceMessage("Voice entry cancelled. Nothing was added to the cart.");
-  };
-
-  const finishVoiceEntry = () => {
-    voiceSessionActiveRef.current = false;
-    if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
-    voiceRestartTimerRef.current = null;
-    if (voiceActiveRef.current) {
-      try { ExpoSpeechRecognitionModule.stop(); } catch { /* Recognition may already have stopped. */ }
-    }
-    voiceActiveRef.current = false;
-    setVoiceActive(false);
-
-    // Let stop() flush its final transcript before checking the staged list.
-    if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
-    voiceFinishTimerRef.current = setTimeout(() => {
-      voiceFinishTimerRef.current = null;
-      const draft = voiceDraftItemsRef.current;
-      if (!draft.length) {
-        setVoiceMessage("No products were recognized. Resume listening or cancel this session.");
-        return;
-      }
-      const unresolved = draft.filter((item) => !item.product || item.needsConfirmation);
-      if (unresolved.length) {
-        setVoiceMessage(`Please confirm or remove ${unresolved.length} uncertain item(s), then press Done again. Nothing has been added yet.`);
-        toast("Confirm the uncertain voice items before adding them", "error");
-        return;
-      }
-
-      setCart((previous) => {
-        let next = [...previous];
-        for (const entry of draft) {
-          if (!entry.product) continue;
-          const product = entry.product;
-          const found = next.find((line) => line.id === product.id);
-          if (found) {
-            next = next.map((line) => line.id === product.id
-              ? { ...line, quantity: line.quantity + entry.quantity, stock: Number(product.quantity ?? 0) }
-              : line);
-          } else {
-            next.push({
-              id: product.id,
-              name: product.name,
-              stock: Number(product.quantity ?? 0),
-              quantity: entry.quantity,
-              unit_price: Number(product.sale_price ?? 0),
-              threshold: product.low_stock_threshold,
-            });
-          }
-        }
-        return next;
-      });
-      const summary = draft.map((item) => `${item.name} × ${item.quantity}`).join(", ");
-      updateVoiceDraftItems([]);
-      voiceSessionOpenRef.current = false;
-      setVoiceSessionOpen(false);
-      setVoiceTranscript("");
-      setVoiceMessage(`Added to cart: ${summary}`);
-      setSearch("");
-      setSearchQuantity("1");
-      voiceNeedsConfirmationRef.current = null;
-      handledSearchAddRef.current = null;
-      toast(`Added ${draft.length} voice item(s) to cart`, "success");
-    }, 500);
-  };
-
-  useEffect(() => {
-    const startSubscription = ExpoSpeechRecognitionModule.addListener("start", () => {
-      voiceActiveRef.current = true;
-      setVoiceActive(true);
-      setVoiceMessage("Listening continuously. Say the next item and quantity, or press Done.");
-    });
-    const endSubscription = ExpoSpeechRecognitionModule.addListener("end", () => {
-      voiceActiveRef.current = false;
-      setVoiceActive(false);
-      if (!voiceSessionActiveRef.current) return;
-      if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
-      voiceRestartTimerRef.current = setTimeout(() => {
-        voiceRestartTimerRef.current = null;
-        startVoiceRecognitionRef.current();
-      }, 500);
-    });
-    const resultSubscription = ExpoSpeechRecognitionModule.addListener("result", (event) => {
-      const results = (event.results ?? [])
-        .map((result) => ({
-          transcript: String(result.transcript ?? "").trim(),
-          confidence: Number(result.confidence ?? 0),
-        }))
-        .filter((result) => result.transcript.length > 0);
-      if (!results.length) return;
-      if (!event.isFinal) {
-        setVoiceTranscript(results[0].transcript);
-        return;
-      }
-      if (!voiceSessionOpenRef.current) return;
-
-      const variants = results.map((result) => {
+  const processVoiceResults = (alternatives: { transcript: string; confidence: number }[]) => {
+    if (!alternatives.length) return;
+      const variants = alternatives.map((result) => {
         const exactNames = productsRef.current.filter(
           (product) => normalizeSellSearch(product.name) === normalizeSellSearch(result.transcript),
         );
@@ -731,6 +545,213 @@ export default function Sell() {
       }
       setSearch("");
       setSearchQuantity("1");
+  };
+  processVoiceResultsRef.current = processVoiceResults;
+
+  const startVoiceRecognitionSession = () => {
+    if (!voiceSessionActiveRef.current) return;
+    try {
+      const contextualStrings = Array.from(new Set(
+        (products ?? [])
+          .flatMap((product) => [product.name, product.sku ?? "", product.barcode ?? ""])
+          .map((value) => String(value).trim())
+          .filter((value) => value.length >= 2 && value.length <= 64),
+      )).slice(0, 100);
+      ExpoSpeechRecognitionModule.start({
+        lang: voiceLanguage,
+        interimResults: true,
+        continuous: true,
+        maxAlternatives: 5,
+        addsPunctuation: false,
+        contextualStrings,
+        androidIntentOptions: {
+          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 4000,
+          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 1800,
+          EXTRA_MASK_OFFENSIVE_WORDS: false,
+        },
+      });
+    } catch (error: unknown) {
+      voiceSessionActiveRef.current = false;
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      const message = error instanceof Error ? error.message : "Could not continue voice recognition";
+      setVoiceMessage(message);
+    }
+  };
+  startVoiceRecognitionRef.current = startVoiceRecognitionSession;
+
+  const handleVoiceInput = async () => {
+    if (voiceSessionActiveRef.current && voiceActiveRef.current) return;
+    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+      setVoiceMessage("Speech recognition is unavailable. Enable Google Speech Services on this device.");
+      toast("Speech recognition service is not available on this device", "error");
+      return;
+    }
+    try {
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceMessage("Microphone permission is required for voice item entry.");
+        toast("Allow microphone permission to use voice entry", "error");
+        return;
+      }
+      if (!voiceSessionOpenRef.current) {
+        updateVoiceDraftItems([]);
+        pendingVoiceInterimRef.current = null;
+        setVoiceTranscript("");
+        lastFinalTranscriptRef.current = null;
+      }
+      voiceNeedsConfirmationRef.current = null;
+      voiceSessionActiveRef.current = true;
+      voiceSessionOpenRef.current = true;
+      setVoiceSessionOpen(true);
+      setVoiceMessage("Listening continuously. Say each product name and quantity; press Done when finished.");
+      startVoiceRecognitionRef.current();
+    } catch (error: unknown) {
+      voiceSessionActiveRef.current = false;
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      const message = error instanceof Error ? error.message : "Could not start voice recognition";
+      setVoiceMessage(message);
+      toast(message, "error");
+    }
+  };
+
+  const confirmVoiceDraftItem = (entryId: string, product: Product) => {
+    const current = voiceDraftItemsRef.current;
+    const next = current.map((item) => item.id === entryId
+      ? { ...item, name: product.name, product, needsConfirmation: false }
+      : item);
+    updateVoiceDraftItems(next);
+  };
+
+  const removeVoiceDraftItem = (entryId: string) => {
+    updateVoiceDraftItems(voiceDraftItemsRef.current.filter((item) => item.id !== entryId));
+  };
+
+  const cancelVoiceEntry = () => {
+    voiceSessionActiveRef.current = false;
+    voiceSessionOpenRef.current = false;
+    if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+    if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
+    voiceRestartTimerRef.current = null;
+    voiceFinishTimerRef.current = null;
+    if (voiceActiveRef.current) {
+      try { ExpoSpeechRecognitionModule.abort(); } catch { /* Recognition may already have stopped. */ }
+    }
+    voiceActiveRef.current = false;
+    setVoiceActive(false);
+    setVoiceSessionOpen(false);
+    updateVoiceDraftItems([]);
+    pendingVoiceInterimRef.current = null;
+    setVoiceTranscript("");
+    setVoiceMessage("Voice entry cancelled. Nothing was added to the cart.");
+  };
+
+  const finishVoiceEntry = () => {
+    voiceSessionActiveRef.current = false;
+    if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+    voiceRestartTimerRef.current = null;
+    if (voiceActiveRef.current) {
+      try { ExpoSpeechRecognitionModule.stop(); } catch { /* Recognition may already have stopped. */ }
+    }
+    voiceActiveRef.current = false;
+    setVoiceActive(false);
+
+    // Android continuous recognition can sometimes drop the final result when
+    // stop() is called. Preserve the latest live transcript and use it only if
+    // no final result replaced it before this guarded fallback runs.
+    if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
+    voiceFinishTimerRef.current = setTimeout(() => {
+      voiceFinishTimerRef.current = null;
+      const pendingInterim = pendingVoiceInterimRef.current;
+      if (pendingInterim && voiceSessionOpenRef.current) {
+        processVoiceResultsRef.current([{ transcript: pendingInterim, confidence: 0 }]);
+        pendingVoiceInterimRef.current = null;
+      }
+      const draft = voiceDraftItemsRef.current;
+      if (!draft.length) {
+        setVoiceMessage("No products were recognized. Resume listening or cancel this session.");
+        return;
+      }
+      const unresolved = draft.filter((item) => !item.product || item.needsConfirmation);
+      if (unresolved.length) {
+        setVoiceMessage(`Please confirm or remove ${unresolved.length} uncertain item(s), then press Done again. Nothing has been added yet.`);
+        toast("Confirm the uncertain voice items before adding them", "error");
+        return;
+      }
+
+      setCart((previous) => {
+        let next = [...previous];
+        for (const entry of draft) {
+          if (!entry.product) continue;
+          const product = entry.product;
+          const found = next.find((line) => line.id === product.id);
+          if (found) {
+            next = next.map((line) => line.id === product.id
+              ? { ...line, quantity: line.quantity + entry.quantity, stock: Number(product.quantity ?? 0) }
+              : line);
+          } else {
+            next.push({
+              id: product.id,
+              name: product.name,
+              stock: Number(product.quantity ?? 0),
+              quantity: entry.quantity,
+              unit_price: Number(product.sale_price ?? 0),
+              threshold: product.low_stock_threshold,
+            });
+          }
+        }
+        return next;
+      });
+      const summary = draft.map((item) => `${item.name} × ${item.quantity}`).join(", ");
+      updateVoiceDraftItems([]);
+      pendingVoiceInterimRef.current = null;
+      voiceSessionOpenRef.current = false;
+      setVoiceSessionOpen(false);
+      setVoiceTranscript("");
+      setVoiceMessage(`Added to cart: ${summary}`);
+      setSearch("");
+      setSearchQuantity("1");
+      voiceNeedsConfirmationRef.current = null;
+      handledSearchAddRef.current = null;
+      toast(`Added ${draft.length} voice item(s) to cart`, "success");
+    }, 900);
+  };
+
+  useEffect(() => {
+    const startSubscription = ExpoSpeechRecognitionModule.addListener("start", () => {
+      voiceActiveRef.current = true;
+      setVoiceActive(true);
+      setVoiceMessage("Listening continuously. Say the next item and quantity, or press Done.");
+    });
+    const endSubscription = ExpoSpeechRecognitionModule.addListener("end", () => {
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      if (!voiceSessionActiveRef.current) return;
+      if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = setTimeout(() => {
+        voiceRestartTimerRef.current = null;
+        startVoiceRecognitionRef.current();
+      }, 500);
+    });
+    const resultSubscription = ExpoSpeechRecognitionModule.addListener("result", (event) => {
+      const results = (event.results ?? [])
+        .map((result) => ({
+          transcript: String(result.transcript ?? "").trim(),
+          confidence: Number(result.confidence ?? 0),
+        }))
+        .filter((result) => result.transcript.length > 0);
+      if (!results.length) return;
+      if (!event.isFinal) {
+        const transcript = results[0].transcript;
+        if (voiceSessionOpenRef.current) pendingVoiceInterimRef.current = transcript;
+        setVoiceTranscript(transcript);
+        return;
+      }
+      if (!voiceSessionOpenRef.current) return;
+
+      pendingVoiceInterimRef.current = null;
+      processVoiceResultsRef.current(results);
     });
     const errorSubscription = ExpoSpeechRecognitionModule.addListener("error", (event) => {
       voiceActiveRef.current = false;
@@ -757,6 +778,7 @@ export default function Sell() {
       errorSubscription.remove();
       voiceSessionActiveRef.current = false;
       voiceSessionOpenRef.current = false;
+      pendingVoiceInterimRef.current = null;
       if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
       if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
       voiceRestartTimerRef.current = null;
