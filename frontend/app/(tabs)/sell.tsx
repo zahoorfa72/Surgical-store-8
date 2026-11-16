@@ -68,8 +68,10 @@ export default function Sell() {
   const [voiceLanguage, setVoiceLanguage] = useState<"en-US" | "ur-PK">("en-US");
   const voiceActiveRef = useRef(false);
   const voiceSessionActiveRef = useRef(false);
+  const voiceSessionOpenRef = useRef(false);
   const voiceDraftItemsRef = useRef<VoiceDraftItem[]>([]);
   const voiceRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceFinishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFinalTranscriptRef = useRef<{ key: string; at: number } | null>(null);
   const startVoiceRecognitionRef = useRef<() => void>(() => {});
   const voiceNeedsConfirmationRef = useRef<string | null>(null);
@@ -522,13 +524,14 @@ export default function Sell() {
         toast("Allow microphone permission to use voice entry", "error");
         return;
       }
-      if (!voiceSessionOpen) {
+      if (!voiceSessionOpenRef.current) {
         updateVoiceDraftItems([]);
         setVoiceTranscript("");
         lastFinalTranscriptRef.current = null;
       }
       voiceNeedsConfirmationRef.current = null;
       voiceSessionActiveRef.current = true;
+      voiceSessionOpenRef.current = true;
       setVoiceSessionOpen(true);
       setVoiceMessage("Listening continuously. Say each product name and quantity; press Done when finished.");
       startVoiceRecognitionRef.current();
@@ -556,8 +559,11 @@ export default function Sell() {
 
   const cancelVoiceEntry = () => {
     voiceSessionActiveRef.current = false;
+    voiceSessionOpenRef.current = false;
     if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+    if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
     voiceRestartTimerRef.current = null;
+    voiceFinishTimerRef.current = null;
     if (voiceActiveRef.current) {
       try { ExpoSpeechRecognitionModule.abort(); } catch { /* Recognition may already have stopped. */ }
     }
@@ -579,51 +585,57 @@ export default function Sell() {
     voiceActiveRef.current = false;
     setVoiceActive(false);
 
-    const draft = voiceDraftItemsRef.current;
-    if (!draft.length) {
-      setVoiceMessage("No products were recognized. Resume listening or cancel this session.");
-      return;
-    }
-    const unresolved = draft.filter((item) => !item.product || item.needsConfirmation);
-    if (unresolved.length) {
-      setVoiceMessage(`Please confirm or remove ${unresolved.length} uncertain item(s), then press Done again. Nothing has been added yet.`);
-      toast("Confirm the uncertain voice items before adding them", "error");
-      return;
-    }
-
-    setCart((previous) => {
-      let next = [...previous];
-      for (const entry of draft) {
-        if (!entry.product) continue;
-        const product = entry.product;
-        const found = next.find((line) => line.id === product.id);
-        if (found) {
-          next = next.map((line) => line.id === product.id
-            ? { ...line, quantity: line.quantity + entry.quantity, stock: Number(product.quantity ?? 0) }
-            : line);
-        } else {
-          next.push({
-            id: product.id,
-            name: product.name,
-            stock: Number(product.quantity ?? 0),
-            quantity: entry.quantity,
-            unit_price: Number(product.sale_price ?? 0),
-            threshold: product.low_stock_threshold,
-          });
-        }
+    // Let stop() flush its final transcript before checking the staged list.
+    if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
+    voiceFinishTimerRef.current = setTimeout(() => {
+      voiceFinishTimerRef.current = null;
+      const draft = voiceDraftItemsRef.current;
+      if (!draft.length) {
+        setVoiceMessage("No products were recognized. Resume listening or cancel this session.");
+        return;
       }
-      return next;
-    });
-    const summary = draft.map((item) => `${item.name} × ${item.quantity}`).join(", ");
-    updateVoiceDraftItems([]);
-    setVoiceSessionOpen(false);
-    setVoiceTranscript("");
-    setVoiceMessage(`Added to cart: ${summary}`);
-    setSearch("");
-    setSearchQuantity("1");
-    voiceNeedsConfirmationRef.current = null;
-    handledSearchAddRef.current = null;
-    toast(`Added ${draft.length} voice item(s) to cart`, "success");
+      const unresolved = draft.filter((item) => !item.product || item.needsConfirmation);
+      if (unresolved.length) {
+        setVoiceMessage(`Please confirm or remove ${unresolved.length} uncertain item(s), then press Done again. Nothing has been added yet.`);
+        toast("Confirm the uncertain voice items before adding them", "error");
+        return;
+      }
+
+      setCart((previous) => {
+        let next = [...previous];
+        for (const entry of draft) {
+          if (!entry.product) continue;
+          const product = entry.product;
+          const found = next.find((line) => line.id === product.id);
+          if (found) {
+            next = next.map((line) => line.id === product.id
+              ? { ...line, quantity: line.quantity + entry.quantity, stock: Number(product.quantity ?? 0) }
+              : line);
+          } else {
+            next.push({
+              id: product.id,
+              name: product.name,
+              stock: Number(product.quantity ?? 0),
+              quantity: entry.quantity,
+              unit_price: Number(product.sale_price ?? 0),
+              threshold: product.low_stock_threshold,
+            });
+          }
+        }
+        return next;
+      });
+      const summary = draft.map((item) => `${item.name} × ${item.quantity}`).join(", ");
+      updateVoiceDraftItems([]);
+      voiceSessionOpenRef.current = false;
+      setVoiceSessionOpen(false);
+      setVoiceTranscript("");
+      setVoiceMessage(`Added to cart: ${summary}`);
+      setSearch("");
+      setSearchQuantity("1");
+      voiceNeedsConfirmationRef.current = null;
+      handledSearchAddRef.current = null;
+      toast(`Added ${draft.length} voice item(s) to cart`, "success");
+    }, 500);
   };
 
   useEffect(() => {
@@ -654,7 +666,7 @@ export default function Sell() {
         setVoiceTranscript(results[0].transcript);
         return;
       }
-      if (!voiceSessionActiveRef.current) return;
+      if (!voiceSessionOpenRef.current) return;
 
       const variants = results.map((result) => {
         const exactNames = (products ?? []).filter(
@@ -742,8 +754,11 @@ export default function Sell() {
       resultSubscription.remove();
       errorSubscription.remove();
       voiceSessionActiveRef.current = false;
+      voiceSessionOpenRef.current = false;
       if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+      if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
       voiceRestartTimerRef.current = null;
+      voiceFinishTimerRef.current = null;
       if (voiceActiveRef.current) {
         try { ExpoSpeechRecognitionModule.abort(); } catch { /* Route may already be closing. */ }
       }
