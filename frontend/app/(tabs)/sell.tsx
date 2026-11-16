@@ -144,7 +144,7 @@ export default function Sell() {
       products ?? [],
       query,
       [(p) => p.name, (p) => p.sku, (p) => p.barcode],
-      { limit: 80, threshold: 0.38 },
+      { limit: 8, threshold: 0.38 },
     );
   }, [products, search]);
 
@@ -388,20 +388,37 @@ export default function Sell() {
     addToCart(product, quantity);
     setVoiceMessage(`Added ${quantity} × ${product.name} to the cart.`);
     toast(`Added ${quantity} × ${product.name}`, "success");
+    setSearch("");
+    setSearchQuantity("1");
+    voiceNeedsConfirmationRef.current = null;
+  };
+
+  const findUniqueQuickSearchMatch = (query: string) => {
+    const normalized = normalizeSellSearch(query);
+    if (normalized.length < 3) return null;
+    const matches = (products ?? []).filter((product) => {
+      const fields = [product.name, product.sku, product.barcode]
+        .map((value) => normalizeSellSearch(String(value ?? "")))
+        .filter(Boolean);
+      return fields.some((field) =>
+        field.startsWith(normalized) ||
+        field.split(" ").some((word) => word.startsWith(normalized)),
+      );
+    });
+    return matches.length === 1 ? matches[0] : null;
   };
 
   const addExactSearchMatch = (query: string, quantity: number, allowSku = true) => {
     const normalized = normalizeSellSearch(query);
     if (!normalized || quantity <= 0) return false;
-    const matches = (products ?? []).filter((product) => {
+    const exactMatches = (products ?? []).filter((product) => {
       const values = allowSku
         ? [product.name, product.sku, product.barcode]
         : [product.name];
       return values.some((value) => normalizeSellSearch(String(value ?? "")) === normalized);
     });
-    if (matches.length !== 1) return false;
-
-    const product = matches[0];
+    const product = exactMatches.length === 1 ? exactMatches[0] : findUniqueQuickSearchMatch(query);
+    if (!product) return false;
     const addKey = `${normalized}:${product.id}:${quantity}`;
     if (handledSearchAddRef.current !== addKey) {
       handledSearchAddRef.current = addKey;
@@ -423,29 +440,22 @@ export default function Sell() {
       return;
     }
     if (addExactSearchMatch(query, quantity)) return;
-    const normalized = normalizeSellSearch(query);
-    const exactNames = (products ?? []).filter(
-      (product) => normalizeSellSearch(product.name) === normalized,
-    );
-    if (exactNames.length > 1) {
-      toast("More than one stock item matches. Choose the correct suggestion below.", "info");
+    if (filtered.length) {
+      toast("Choose the correct stock suggestion below. Quantity is ready to add.", "info");
       return;
     }
-    toast("Choose a matching stock suggestion below to add it to the cart", "info");
+    toast("No matching stock item was found. Try a longer name, SKU, or barcode.", "error");
   };
 
-  // Finish-typing convenience: a unique, exact product name is added only
-  // after a short pause. Partial/fuzzy matches are never silently added.
+  // A unique 3+ character name/SKU prefix is quick-added after typing pauses.
+  // Ambiguous searches stay visible as suggestions and are never auto-selected.
   useEffect(() => {
     const normalized = normalizeSellSearch(search);
     if (normalized.length < 3 || voiceNeedsConfirmationRef.current === normalized) return;
     const quantity = getSafeCartQuantity(searchQuantity);
     if (!quantity) return;
-    const exactNames = (products ?? []).filter(
-      (product) => normalizeSellSearch(product.name) === normalized,
-    );
-    if (exactNames.length !== 1) return;
-    const product = exactNames[0];
+    const product = findUniqueQuickSearchMatch(search);
+    if (!product) return;
     const addKey = `${normalized}:${product.id}:${quantity}`;
     if (handledSearchAddRef.current === addKey) return;
     const timeout = setTimeout(() => {
@@ -455,7 +465,8 @@ export default function Sell() {
       toast(`Added ${quantity} × ${product.name}`, "success");
       setSearch("");
       setSearchQuantity("1");
-    }, 700);
+      voiceNeedsConfirmationRef.current = null;
+    }, 900);
     return () => clearTimeout(timeout);
   }, [search, searchQuantity, products, addToCart, toast]);
 
@@ -1037,6 +1048,7 @@ export default function Sell() {
             autoCorrect={false}
             returnKeyType="done"
             onSubmitEditing={submitProductSearch}
+            blurOnSubmit
           />
         </View>
         <Pressable
@@ -1051,36 +1063,43 @@ export default function Sell() {
         </Pressable>
       </View>
       <View style={styles.searchActionRow}>
-        <Text style={styles.searchQuantityLabel}>ADD QTY</Text>
-        <TextInput
-          testID="sell-add-quantity-input"
-          style={styles.searchQtyInput}
-          value={searchQuantity}
-          onChangeText={setSearchQuantity}
-          keyboardType="number-pad"
-          maxLength={7}
-          selectTextOnFocus
-          placeholder="1"
-          placeholderTextColor={colors.muted}
-        />
-        <Text style={styles.searchHint}>Type 3+ letters, choose a match, or wait for an exact full-name match.</Text>
-        <Pressable
-          testID="voice-language-toggle"
-          style={styles.voiceLanguageBtn}
-          onPress={() => setVoiceLanguage((value) => value === "en-US" ? "ur-PK" : "en-US")}
-          disabled={voiceSessionOpen}
-          accessibilityLabel="Change voice recognition language"
-        >
-          <Text style={styles.voiceLanguageText}>{voiceLanguage === "en-US" ? "EN" : "UR"}</Text>
-        </Pressable>
-        <Pressable testID="scan-to-cart-button" style={styles.scanBtn} onPress={() => setScanOpen(true)}>
-          <MaterialDesignIcons name="barcode-scan" size={22} color={colors.onBrandPrimary} />
-        </Pressable>
-        <Pressable testID="scan-order-image-sell-button" style={styles.scanOrderSellBtn} onPress={() => setOrderImageScanOpen(true)}>
-          <MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} />
-          <Text style={styles.scanOrderSellText}>Scan order</Text>
-        </Pressable>
+        <View style={styles.searchQuantityGroup}>
+          <Text style={styles.searchQuantityLabel}>ADD QTY</Text>
+          <TextInput
+            testID="sell-add-quantity-input"
+            style={styles.searchQtyInput}
+            value={searchQuantity}
+            onChangeText={setSearchQuantity}
+            keyboardType="number-pad"
+            returnKeyType="done"
+            onSubmitEditing={submitProductSearch}
+            blurOnSubmit
+            maxLength={7}
+            selectTextOnFocus
+            placeholder="1"
+            placeholderTextColor={colors.muted}
+          />
+        </View>
+        <View style={styles.searchToolsGroup}>
+          <Pressable
+            testID="voice-language-toggle"
+            style={styles.voiceLanguageBtn}
+            onPress={() => setVoiceLanguage((value) => value === "en-US" ? "ur-PK" : "en-US")}
+            disabled={voiceActive}
+            accessibilityLabel="Change voice recognition language"
+          >
+            <Text style={styles.voiceLanguageText}>{voiceLanguage === "en-US" ? "EN" : "UR"}</Text>
+          </Pressable>
+          <Pressable testID="scan-to-cart-button" style={styles.scanBtn} onPress={() => setScanOpen(true)}>
+            <MaterialDesignIcons name="barcode-scan" size={22} color={colors.onBrandPrimary} />
+          </Pressable>
+          <Pressable testID="scan-order-image-sell-button" style={styles.scanOrderSellBtn} onPress={() => setOrderImageScanOpen(true)}>
+            <MaterialDesignIcons name="text-box-search-outline" size={20} color={colors.onBrandPrimary} />
+            <Text style={styles.scanOrderSellText}>Scan order</Text>
+          </Pressable>
+        </View>
       </View>
+      <Text style={styles.searchHint}>Search 3+ letters, set quantity, then tap a match or press Done.</Text>
       {!!voiceMessage && (
         <View style={styles.voiceStatus} accessibilityLiveRegion="polite">
           <MaterialDesignIcons name={voiceActive ? "microphone" : "text-recognition"} size={17} color={colors.brandPrimary} />
@@ -1176,7 +1195,12 @@ export default function Sell() {
       <FlatList
         data={filtered}
         keyExtractor={(p) => p.id}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         contentContainerStyle={{ padding: 16, paddingBottom: 140, gap: 10 }}
+        ListHeaderComponent={search.trim() && normalizeSellSearch(search).length >= 3 ? (
+          <Text style={styles.searchResultsHeader}>Matching stock items · {filtered.length} suggestion(s)</Text>
+        ) : null}
         ListEmptyComponent={
           search.trim() && normalizeSellSearch(search).length < 3 ? (
             <Text style={styles.searchEmptyHint}>Type at least 3 letters to see stock suggestions.</Text>
@@ -1724,10 +1748,13 @@ const useStyles = makeStyles((colors) => ({
   voiceBtnActive: { backgroundColor: colors.error },
   voiceLanguageBtn: { width: 38, height: 42, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   voiceLanguageText: { color: colors.onSurface, fontSize: 11, fontWeight: "900" },
-  searchActionRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 4, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 7 },
-  searchQuantityLabel: { color: colors.muted, fontSize: 10, fontWeight: "900" },
-  searchQtyInput: { width: 54, height: 36, textAlign: "center", borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, color: colors.onSurface, fontSize: 15, fontWeight: "900", paddingHorizontal: 6 },
-  searchHint: { flex: 1, color: colors.muted, fontSize: 10, lineHeight: 14 },
+  searchActionRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 2, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", columnGap: 10, rowGap: 8 },
+  searchQuantityGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  searchToolsGroup: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8, marginLeft: "auto" },
+  searchQuantityLabel: { color: colors.muted, fontSize: 11, fontWeight: "900" },
+  searchQtyInput: { width: 58, height: 42, textAlign: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, color: colors.onSurface, fontSize: 16, fontWeight: "900", paddingHorizontal: 6 },
+  searchHint: { marginHorizontal: 18, marginTop: 1, marginBottom: 5, color: colors.muted, fontSize: 11, lineHeight: 15 },
+  searchResultsHeader: { color: colors.muted, fontSize: 12, fontWeight: "800", marginBottom: 2, marginTop: 2 },
   searchEmptyHint: { color: colors.muted, fontSize: 13, textAlign: "center", paddingVertical: 20, paddingHorizontal: 24 },
   voiceStatus: { marginHorizontal: 16, marginTop: 4, marginBottom: 4, padding: 10, borderRadius: 10, backgroundColor: colors.brandTertiary, flexDirection: "row", alignItems: "center", gap: 8 },
   voiceStatusText: { color: colors.onSurface, fontSize: 12, fontWeight: "700" },
