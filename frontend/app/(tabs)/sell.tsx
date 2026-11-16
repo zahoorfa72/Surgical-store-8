@@ -34,6 +34,15 @@ import { getSafeCartQuantity, normalizeSellSearch, parseVoiceProductCommand, ran
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number; kitNames?: string[] };
 type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean; transactionDate?: string };
 type ProductKit = { id: string; name: string; components: { product_id: string; quantity: number }[] };
+type VoiceDraftItem = {
+  id: string;
+  transcript: string;
+  name: string;
+  quantity: number;
+  product: Product | null;
+  candidates: Product[];
+  needsConfirmation: boolean;
+};
 
 export default function Sell() {
   const styles = useStyles();
@@ -52,11 +61,17 @@ export default function Sell() {
   const [search, setSearch] = useState("");
   const [searchQuantity, setSearchQuantity] = useState("1");
   const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceSessionOpen, setVoiceSessionOpen] = useState(false);
+  const [voiceDraftItems, setVoiceDraftItems] = useState<VoiceDraftItem[]>([]);
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceMessage, setVoiceMessage] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState<"en-US" | "ur-PK">("en-US");
-  const voiceResultHandled = useRef(false);
   const voiceActiveRef = useRef(false);
+  const voiceSessionActiveRef = useRef(false);
+  const voiceDraftItemsRef = useRef<VoiceDraftItem[]>([]);
+  const voiceRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFinalTranscriptRef = useRef<{ key: string; at: number } | null>(null);
+  const startVoiceRecognitionRef = useRef<() => void>(() => {});
   const voiceNeedsConfirmationRef = useRef<string | null>(null);
   const handledSearchAddRef = useRef<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -435,16 +450,66 @@ export default function Sell() {
     return () => clearTimeout(timeout);
   }, [search, searchQuantity, products, addToCart, toast]);
 
-  const handleVoiceInput = async () => {
-    if (voiceActiveRef.current) {
-      try {
-        ExpoSpeechRecognitionModule.stop();
-      } catch {
-        voiceActiveRef.current = false;
-        setVoiceActive(false);
+  const updateVoiceDraftItems = (next: VoiceDraftItem[]) => {
+    voiceDraftItemsRef.current = next;
+    setVoiceDraftItems(next);
+  };
+
+  const queueVoiceDraftItem = (entry: VoiceDraftItem) => {
+    const current = voiceDraftItemsRef.current;
+    if (entry.product && !entry.needsConfirmation) {
+      const existingIndex = current.findIndex(
+        (item) => item.product?.id === entry.product?.id && !item.needsConfirmation,
+      );
+      if (existingIndex >= 0) {
+        const next = [...current];
+        const existing = next[existingIndex];
+        next[existingIndex] = {
+          ...existing,
+          quantity: Math.min(1_000_000, existing.quantity + entry.quantity),
+          transcript: `${existing.transcript} · ${entry.transcript}`,
+        };
+        updateVoiceDraftItems(next);
+        return;
       }
-      return;
     }
+    updateVoiceDraftItems([...current, entry]);
+  };
+
+  const startVoiceRecognitionSession = () => {
+    if (!voiceSessionActiveRef.current) return;
+    try {
+      const contextualStrings = Array.from(new Set(
+        (products ?? [])
+          .flatMap((product) => [product.name, product.sku ?? "", product.barcode ?? ""])
+          .map((value) => String(value).trim())
+          .filter((value) => value.length >= 2 && value.length <= 64),
+      )).slice(0, 100);
+      ExpoSpeechRecognitionModule.start({
+        lang: voiceLanguage,
+        interimResults: true,
+        continuous: true,
+        maxAlternatives: 5,
+        addsPunctuation: false,
+        contextualStrings,
+        androidIntentOptions: {
+          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 4000,
+          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 1800,
+          EXTRA_MASK_OFFENSIVE_WORDS: false,
+        },
+      });
+    } catch (error: unknown) {
+      voiceSessionActiveRef.current = false;
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      const message = error instanceof Error ? error.message : "Could not continue voice recognition";
+      setVoiceMessage(message);
+    }
+  };
+  startVoiceRecognitionRef.current = startVoiceRecognitionSession;
+
+  const handleVoiceInput = async () => {
+    if (voiceSessionActiveRef.current && voiceActiveRef.current) return;
     if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
       setVoiceMessage("Speech recognition is unavailable. Enable Google Speech Services on this device.");
       toast("Speech recognition service is not available on this device", "error");
@@ -457,46 +522,125 @@ export default function Sell() {
         toast("Allow microphone permission to use voice entry", "error");
         return;
       }
-      voiceResultHandled.current = false;
+      if (!voiceSessionOpen) {
+        updateVoiceDraftItems([]);
+        setVoiceTranscript("");
+        lastFinalTranscriptRef.current = null;
+      }
       voiceNeedsConfirmationRef.current = null;
-      setVoiceTranscript("");
-      setVoiceMessage("Listening… say the stock item name followed by its quantity.");
-      const contextualStrings = Array.from(new Set(
-        (products ?? [])
-          .flatMap((product) => [product.name, product.sku ?? "", product.barcode ?? ""])
-          .map((value) => String(value).trim())
-          .filter((value) => value.length >= 2 && value.length <= 64),
-      )).slice(0, 100);
-      ExpoSpeechRecognitionModule.start({
-        lang: voiceLanguage,
-        interimResults: true,
-        continuous: false,
-        maxAlternatives: 5,
-        addsPunctuation: false,
-        contextualStrings,
-        androidIntentOptions: {
-          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 4000,
-          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 1800,
-          EXTRA_MASK_OFFENSIVE_WORDS: false,
-        },
-      });
+      voiceSessionActiveRef.current = true;
+      setVoiceSessionOpen(true);
+      setVoiceMessage("Listening continuously. Say each product name and quantity; press Done when finished.");
+      startVoiceRecognitionRef.current();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Could not start voice recognition";
+      voiceSessionActiveRef.current = false;
       voiceActiveRef.current = false;
       setVoiceActive(false);
+      const message = error instanceof Error ? error.message : "Could not start voice recognition";
       setVoiceMessage(message);
       toast(message, "error");
     }
+  };
+
+  const confirmVoiceDraftItem = (entryId: string, product: Product) => {
+    const current = voiceDraftItemsRef.current;
+    const next = current.map((item) => item.id === entryId
+      ? { ...item, name: product.name, product, needsConfirmation: false }
+      : item);
+    updateVoiceDraftItems(next);
+  };
+
+  const removeVoiceDraftItem = (entryId: string) => {
+    updateVoiceDraftItems(voiceDraftItemsRef.current.filter((item) => item.id !== entryId));
+  };
+
+  const cancelVoiceEntry = () => {
+    voiceSessionActiveRef.current = false;
+    if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+    voiceRestartTimerRef.current = null;
+    if (voiceActiveRef.current) {
+      try { ExpoSpeechRecognitionModule.abort(); } catch { /* Recognition may already have stopped. */ }
+    }
+    voiceActiveRef.current = false;
+    setVoiceActive(false);
+    setVoiceSessionOpen(false);
+    updateVoiceDraftItems([]);
+    setVoiceTranscript("");
+    setVoiceMessage("Voice entry cancelled. Nothing was added to the cart.");
+  };
+
+  const finishVoiceEntry = () => {
+    voiceSessionActiveRef.current = false;
+    if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+    voiceRestartTimerRef.current = null;
+    if (voiceActiveRef.current) {
+      try { ExpoSpeechRecognitionModule.stop(); } catch { /* Recognition may already have stopped. */ }
+    }
+    voiceActiveRef.current = false;
+    setVoiceActive(false);
+
+    const draft = voiceDraftItemsRef.current;
+    if (!draft.length) {
+      setVoiceMessage("No products were recognized. Resume listening or cancel this session.");
+      return;
+    }
+    const unresolved = draft.filter((item) => !item.product || item.needsConfirmation);
+    if (unresolved.length) {
+      setVoiceMessage(`Please confirm or remove ${unresolved.length} uncertain item(s), then press Done again. Nothing has been added yet.`);
+      toast("Confirm the uncertain voice items before adding them", "error");
+      return;
+    }
+
+    setCart((previous) => {
+      let next = [...previous];
+      for (const entry of draft) {
+        if (!entry.product) continue;
+        const product = entry.product;
+        const found = next.find((line) => line.id === product.id);
+        if (found) {
+          next = next.map((line) => line.id === product.id
+            ? { ...line, quantity: line.quantity + entry.quantity, stock: Number(product.quantity ?? 0) }
+            : line);
+        } else {
+          next.push({
+            id: product.id,
+            name: product.name,
+            stock: Number(product.quantity ?? 0),
+            quantity: entry.quantity,
+            unit_price: Number(product.sale_price ?? 0),
+            threshold: product.low_stock_threshold,
+          });
+        }
+      }
+      return next;
+    });
+    const summary = draft.map((item) => `${item.name} × ${item.quantity}`).join(", ");
+    updateVoiceDraftItems([]);
+    setVoiceSessionOpen(false);
+    setVoiceTranscript("");
+    setVoiceMessage(`Added to cart: ${summary}`);
+    setSearch("");
+    setSearchQuantity("1");
+    voiceNeedsConfirmationRef.current = null;
+    handledSearchAddRef.current = null;
+    toast(`Added ${draft.length} voice item(s) to cart`, "success");
   };
 
   useEffect(() => {
     const startSubscription = ExpoSpeechRecognitionModule.addListener("start", () => {
       voiceActiveRef.current = true;
       setVoiceActive(true);
+      setVoiceMessage("Listening continuously. Say the next item and quantity, or press Done.");
     });
     const endSubscription = ExpoSpeechRecognitionModule.addListener("end", () => {
       voiceActiveRef.current = false;
       setVoiceActive(false);
+      if (!voiceSessionActiveRef.current) return;
+      if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = setTimeout(() => {
+        voiceRestartTimerRef.current = null;
+        startVoiceRecognitionRef.current();
+      }, 500);
     });
     const resultSubscription = ExpoSpeechRecognitionModule.addListener("result", (event) => {
       const results = (event.results ?? [])
@@ -510,8 +654,7 @@ export default function Sell() {
         setVoiceTranscript(results[0].transcript);
         return;
       }
-      if (voiceResultHandled.current) return;
-      voiceResultHandled.current = true;
+      if (!voiceSessionActiveRef.current) return;
 
       const variants = results.map((result) => {
         const exactNames = (products ?? []).filter(
@@ -528,14 +671,19 @@ export default function Sell() {
         (b.matches[0]?.score ?? 0) - (a.matches[0]?.score ?? 0) ||
         b.confidence - a.confidence,
       );
-
       const selected = variants[0];
       if (!selected) return;
+
+      const duplicateKey = normalizeSellSearch(selected.transcript);
+      const previousFinal = lastFinalTranscriptRef.current;
+      if (previousFinal?.key === duplicateKey && Date.now() - previousFinal.at < 1200) return;
+      lastFinalTranscriptRef.current = { key: duplicateKey, at: Date.now() };
+
       setVoiceTranscript(selected.transcript);
       const best = selected.matches[0];
       const secondBest = selected.matches[1];
       if (!selected.parsed.query.trim()) {
-        setVoiceMessage("I heard a quantity, but not a product name. Say the item name and quantity.");
+        setVoiceMessage("I heard a quantity but no product name. Say the item name followed by its quantity.");
         return;
       }
       const normalizedQuery = normalizeSellSearch(selected.parsed.query);
@@ -549,52 +697,58 @@ export default function Sell() {
         exactUnambiguous ||
         (best.score >= 0.9 && (!secondBest || best.score - secondBest.score >= 0.1))
       );
-      if (decisive && best) {
-        addToCart(best.product, selected.parsed.quantity);
-        setVoiceMessage(`Added ${selected.parsed.quantity} × ${best.product.name} to the cart.`);
-        setSearch("");
-        setSearchQuantity("1");
-        voiceNeedsConfirmationRef.current = null;
-        handledSearchAddRef.current = null;
-        toast(`Added ${selected.parsed.quantity} × ${best.product.name}`, "success");
-        return;
-      }
-      voiceNeedsConfirmationRef.current = normalizedQuery;
-      setSearch(selected.parsed.query);
-      setSearchQuantity(String(selected.parsed.quantity));
-      if (best && best.score >= 0.34) {
-        setVoiceMessage(`Heard “${selected.transcript}”. Confirm the correct stock suggestion below; nothing has been added yet.`);
+      const candidates = selected.matches.slice(0, 4).map((match) => match.product);
+      const entry: VoiceDraftItem = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        transcript: selected.transcript,
+        name: decisive && best ? best.product.name : selected.parsed.query,
+        quantity: selected.parsed.quantity,
+        product: decisive && best ? best.product : null,
+        candidates: decisive ? [] : candidates,
+        needsConfirmation: !decisive,
+      };
+      queueVoiceDraftItem(entry);
+      if (entry.needsConfirmation) {
+        setVoiceMessage(candidates.length
+          ? `Heard “${selected.transcript}”. Choose the correct stock item for this quantity in the list below.`
+          : `Heard “${selected.transcript}”, but no stock match was found. Remove it or correct the product manually.`);
       } else {
-        setVoiceMessage(`Heard “${selected.transcript}”, but no reliable stock match was found. Check the suggestions or type the item name.`);
+        setVoiceMessage(`Recognized ${entry.name} × ${entry.quantity}. Keep speaking for the next item, or press Done.`);
       }
+      setSearch("");
+      setSearchQuantity("1");
     });
     const errorSubscription = ExpoSpeechRecognitionModule.addListener("error", (event) => {
       voiceActiveRef.current = false;
       setVoiceActive(false);
       const code = String(event.error ?? "unknown");
       const message = code === "no-speech"
-        ? "No speech was detected. Tap the microphone and try again."
+        ? "No speech detected. The voice session will continue listening."
         : code === "not-allowed"
           ? "Microphone permission was denied. Allow it in Android Settings."
           : code === "service-not-allowed" || code === "language-not-supported"
-            ? "The selected speech service or language is unavailable. Switch language or enable Google Speech Services."
-            : String(event.message || "Voice recognition failed. Please try again.");
+            ? "Speech service or language is unavailable. Resume listening or switch language."
+            : String(event.message || "Voice recognition encountered an error. Resume listening or press Done.");
       setVoiceMessage(message);
+      if (code === "not-allowed" || code === "service-not-allowed" || code === "language-not-supported") {
+        voiceSessionActiveRef.current = false;
+        if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+        voiceRestartTimerRef.current = null;
+      }
     });
     return () => {
       startSubscription.remove();
       endSubscription.remove();
       resultSubscription.remove();
       errorSubscription.remove();
+      voiceSessionActiveRef.current = false;
+      if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
       if (voiceActiveRef.current) {
-        try {
-          ExpoSpeechRecognitionModule.abort();
-        } catch {
-          // Native recognition can already be stopped during route cleanup.
-        }
+        try { ExpoSpeechRecognitionModule.abort(); } catch { /* Route may already be closing. */ }
       }
     };
-  }, [products, addToCart, toast]);
+  }, [products]);
 
   // Checkout has its own add path: every inventory product, including zero/negative stock,
   // can be placed in the cart. The final checkout remains blocked until the below-zero box is enabled.
@@ -815,10 +969,11 @@ export default function Sell() {
           testID="voice-add-to-cart-button"
           style={[styles.voiceBtn, voiceActive && styles.voiceBtnActive]}
           onPress={handleVoiceInput}
+          disabled={voiceActive}
           accessibilityRole="button"
-          accessibilityLabel={voiceActive ? "Stop voice item entry" : "Add stock item by voice"}
+          accessibilityLabel={voiceActive ? "Voice item entry is listening" : voiceSessionOpen ? "Resume voice item entry" : "Start voice item entry"}
         >
-          <MaterialDesignIcons name={voiceActive ? "microphone-off" : "microphone"} size={22} color={colors.onBrandPrimary} />
+          <MaterialDesignIcons name={voiceActive ? "microphone" : "microphone"} size={22} color={colors.onBrandPrimary} />
         </Pressable>
       </View>
       <View style={styles.searchActionRow}>
@@ -839,7 +994,7 @@ export default function Sell() {
           testID="voice-language-toggle"
           style={styles.voiceLanguageBtn}
           onPress={() => setVoiceLanguage((value) => value === "en-US" ? "ur-PK" : "en-US")}
-          disabled={voiceActive}
+          disabled={voiceSessionOpen}
           accessibilityLabel="Change voice recognition language"
         >
           <Text style={styles.voiceLanguageText}>{voiceLanguage === "en-US" ? "EN" : "UR"}</Text>
@@ -858,6 +1013,77 @@ export default function Sell() {
           <View style={{ flex: 1 }}>
             <Text style={styles.voiceStatusText}>{voiceMessage}</Text>
             {!!voiceTranscript && <Text style={styles.voiceTranscriptText}>Heard: {voiceTranscript}</Text>}
+          </View>
+        </View>
+      )}
+      {voiceSessionOpen && (
+        <View style={styles.voiceSessionCard} testID="voice-session-results">
+          <View style={styles.voiceSessionHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.voiceSessionTitle}>Voice item list · {voiceDraftItems.length}</Text>
+              <Text style={styles.voiceSessionHint}>
+                {voiceActive ? "Microphone is on. Say the next item and quantity." : "Listening is paused. Confirm matches, resume, or press Done."}
+              </Text>
+            </View>
+            <View style={[styles.voiceListeningDot, voiceActive && styles.voiceListeningDotActive]} />
+          </View>
+          {voiceDraftItems.length === 0 ? (
+            <Text style={styles.voiceNoItems}>No items recognized yet. Say “Special towel 2”, then continue with the next product.</Text>
+          ) : (
+            <ScrollView style={styles.voiceDraftList} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              {voiceDraftItems.map((entry, index) => (
+                <View key={entry.id} style={styles.voiceDraftRow} testID={`voice-draft-${index}`}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.voiceDraftName} numberOfLines={2}>{entry.name}</Text>
+                    <Text style={styles.voiceDraftQuantity}>Quantity: {entry.quantity}</Text>
+                    {entry.needsConfirmation && (
+                      <View style={styles.voiceCandidateList}>
+                        {entry.candidates.map((candidate) => (
+                          <Pressable
+                            key={candidate.id}
+                            testID={`confirm-voice-${entry.id}-${candidate.id}`}
+                            style={styles.voiceCandidateButton}
+                            onPress={() => confirmVoiceDraftItem(entry.id, candidate)}
+                          >
+                            <Text style={styles.voiceCandidateText}>{candidate.name} · Stock {candidate.quantity}</Text>
+                          </Pressable>
+                        ))}
+                        {!entry.candidates.length && <Text style={styles.voiceUnmatchedText}>No matching stock item</Text>}
+                      </View>
+                    )}
+                    {!!entry.transcript && <Text style={styles.voiceTranscriptText}>Heard: {entry.transcript}</Text>}
+                  </View>
+                  <Pressable
+                    testID={`remove-voice-draft-${entry.id}`}
+                    hitSlop={8}
+                    onPress={() => removeVoiceDraftItem(entry.id)}
+                    accessibilityLabel={`Remove ${entry.name} from voice list`}
+                  >
+                    <MaterialDesignIcons name="close-circle" size={20} color={colors.muted} />
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+          <View style={styles.voiceSessionActions}>
+            {!voiceActive && (
+              <Pressable testID="resume-voice-entry" style={styles.voiceResumeButton} onPress={handleVoiceInput}>
+                <MaterialDesignIcons name="microphone" size={18} color={colors.brandPrimary} />
+                <Text style={styles.voiceResumeText}>Resume</Text>
+              </Pressable>
+            )}
+            <Pressable testID="cancel-voice-entry" style={styles.voiceCancelButton} onPress={cancelVoiceEntry}>
+              <Text style={styles.voiceCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              testID="done-voice-entry"
+              style={[styles.voiceDoneButton, voiceDraftItems.length === 0 && { opacity: 0.45 }]}
+              onPress={finishVoiceEntry}
+              disabled={voiceDraftItems.length === 0}
+            >
+              <MaterialDesignIcons name="check-bold" size={18} color={colors.onBrandPrimary} />
+              <Text style={styles.voiceDoneText}>Done · Add to cart</Text>
+            </Pressable>
           </View>
         </View>
       )}
@@ -1432,6 +1658,28 @@ const useStyles = makeStyles((colors) => ({
   voiceStatus: { marginHorizontal: 16, marginTop: 4, marginBottom: 4, padding: 10, borderRadius: 10, backgroundColor: colors.brandTertiary, flexDirection: "row", alignItems: "center", gap: 8 },
   voiceStatusText: { color: colors.onSurface, fontSize: 12, fontWeight: "700" },
   voiceTranscriptText: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  voiceSessionCard: { marginHorizontal: 16, marginTop: 6, marginBottom: 4, padding: 12, borderRadius: 13, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.surfaceSecondary, gap: 9 },
+  voiceSessionHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  voiceSessionTitle: { color: colors.onSurface, fontSize: 13, fontWeight: "900" },
+  voiceSessionHint: { color: colors.muted, fontSize: 11, marginTop: 2 },
+  voiceListeningDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.muted },
+  voiceListeningDotActive: { backgroundColor: colors.error },
+  voiceNoItems: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  voiceDraftList: { maxHeight: 190 },
+  voiceDraftRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.border },
+  voiceDraftName: { color: colors.onSurface, fontSize: 13, fontWeight: "800" },
+  voiceDraftQuantity: { color: colors.brandPrimary, fontSize: 12, fontWeight: "900", marginTop: 3 },
+  voiceCandidateList: { gap: 5, marginTop: 7 },
+  voiceCandidateButton: { alignSelf: "flex-start", borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6, backgroundColor: colors.surface },
+  voiceCandidateText: { color: colors.brandPrimary, fontSize: 11, fontWeight: "800" },
+  voiceUnmatchedText: { color: colors.error, fontSize: 11, fontWeight: "700" },
+  voiceSessionActions: { flexDirection: "row", alignItems: "center", gap: 7 },
+  voiceResumeButton: { minHeight: 38, paddingHorizontal: 10, borderRadius: 9, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", gap: 5 },
+  voiceResumeText: { color: colors.brandPrimary, fontSize: 11, fontWeight: "900" },
+  voiceCancelButton: { minHeight: 38, paddingHorizontal: 10, borderRadius: 9, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
+  voiceCancelText: { color: colors.muted, fontSize: 11, fontWeight: "800" },
+  voiceDoneButton: { flex: 1, minHeight: 40, borderRadius: 9, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, backgroundColor: colors.brandPrimary },
+  voiceDoneText: { color: colors.onBrandPrimary, fontSize: 11, fontWeight: "900" },
   prodRow: {
     flexDirection: "row",
     alignItems: "center",
