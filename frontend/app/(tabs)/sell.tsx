@@ -62,6 +62,7 @@ export default function Sell() {
 
   const [search, setSearch] = useState("");
   const [searchQuantity, setSearchQuantity] = useState("1");
+  const searchQuantityTouchedRef = useRef(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceSessionOpen, setVoiceSessionOpen] = useState(false);
   const [voiceDraftItems, setVoiceDraftItems] = useState<VoiceDraftItem[]>([]);
@@ -390,6 +391,7 @@ export default function Sell() {
     toast(`Added ${quantity} × ${product.name}`, "success");
     setSearch("");
     setSearchQuantity("1");
+    searchQuantityTouchedRef.current = false;
     voiceNeedsConfirmationRef.current = null;
   };
 
@@ -427,6 +429,7 @@ export default function Sell() {
     }
     setSearch("");
     setSearchQuantity("1");
+    searchQuantityTouchedRef.current = false;
     voiceNeedsConfirmationRef.current = null;
     return true;
   };
@@ -454,8 +457,14 @@ export default function Sell() {
     if (normalized.length < 3 || voiceNeedsConfirmationRef.current === normalized) return;
     const quantity = getSafeCartQuantity(searchQuantity);
     if (!quantity) return;
+    const exactNameMatch = (products ?? []).filter(
+      (product) => normalizeSellSearch(product.name) === normalized,
+    );
     const product = findUniqueQuickSearchMatch(search);
     if (!product) return;
+    // A partial prefix waits for an edited quantity or the keyboard Done action;
+    // this gives the user time to enter the intended quantity instead of adding 1.
+    if (exactNameMatch.length !== 1 && !searchQuantityTouchedRef.current) return;
     const addKey = `${normalized}:${product.id}:${quantity}`;
     if (handledSearchAddRef.current === addKey) return;
     const timeout = setTimeout(() => {
@@ -465,6 +474,7 @@ export default function Sell() {
       toast(`Added ${quantity} × ${product.name}`, "success");
       setSearch("");
       setSearchQuantity("1");
+      searchQuantityTouchedRef.current = false;
       voiceNeedsConfirmationRef.current = null;
     }, 900);
     return () => clearTimeout(timeout);
@@ -748,6 +758,7 @@ export default function Sell() {
       setVoiceMessage(`Added to cart: ${summary}`);
       setSearch("");
       setSearchQuantity("1");
+      searchQuantityTouchedRef.current = false;
       voiceNeedsConfirmationRef.current = null;
       handledSearchAddRef.current = null;
       toast(`Added ${draft.length} voice item(s) to cart`, "success");
@@ -1069,7 +1080,10 @@ export default function Sell() {
             testID="sell-add-quantity-input"
             style={styles.searchQtyInput}
             value={searchQuantity}
-            onChangeText={setSearchQuantity}
+            onChangeText={(value) => {
+              searchQuantityTouchedRef.current = true;
+              setSearchQuantity(value);
+            }}
             keyboardType="number-pad"
             returnKeyType="done"
             onSubmitEditing={submitProductSearch}
