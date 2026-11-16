@@ -359,7 +359,8 @@ export default function Sell() {
     // If the suggestion is tapped before the exact-name debounce finishes,
     // mark it handled so the same item/quantity is never added twice.
     handledSearchAddRef.current = `${normalized}:${product.id}:${quantity}`;
-    voiceNeedsConfirmationRef.current = null;
+    // Keep this exact/partial query from firing the auto-add timer a second time.
+    voiceNeedsConfirmationRef.current = normalized;
     addToCart(product, quantity);
     setVoiceMessage(`Added ${quantity} × ${product.name} to the cart.`);
     toast(`Added ${quantity} × ${product.name}`, "success");
