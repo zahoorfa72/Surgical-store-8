@@ -73,6 +73,7 @@ export default function Sell() {
   const voiceSessionOpenRef = useRef(false);
   const voiceDraftItemsRef = useRef<VoiceDraftItem[]>([]);
   const pendingVoiceInterimRef = useRef<string | null>(null);
+  const voicePermissionPendingRef = useRef(false);
   const voiceStartPendingRef = useRef(false);
   const voiceStartRequestIdRef = useRef(0);
   const processVoiceResultsRef = useRef<(results: { transcript: string; confidence: number }[]) => void>(() => {});
@@ -585,7 +586,7 @@ export default function Sell() {
   startVoiceRecognitionRef.current = startVoiceRecognitionSession;
 
   const handleVoiceInput = async () => {
-    if (voiceStartPendingRef.current) return;
+    if (voicePermissionPendingRef.current || voiceStartPendingRef.current) return;
     if (voiceRestartTimerRef.current) {
       clearTimeout(voiceRestartTimerRef.current);
       voiceRestartTimerRef.current = null;
@@ -597,12 +598,12 @@ export default function Sell() {
       return;
     }
     const requestId = ++voiceStartRequestIdRef.current;
-    voiceStartPendingRef.current = true;
+    voicePermissionPendingRef.current = true;
     try {
       const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (requestId !== voiceStartRequestIdRef.current || !voiceStartPendingRef.current) return;
+      if (requestId !== voiceStartRequestIdRef.current || !voicePermissionPendingRef.current) return;
       if (!permission.granted) {
-        voiceStartPendingRef.current = false;
+        voicePermissionPendingRef.current = false;
         setVoiceMessage("Microphone permission is required for voice item entry.");
         toast("Allow microphone permission to use voice entry", "error");
         return;
@@ -613,7 +614,7 @@ export default function Sell() {
         setVoiceTranscript("");
         lastFinalTranscriptRef.current = null;
       }
-      voiceStartPendingRef.current = false;
+      voicePermissionPendingRef.current = false;
       voiceNeedsConfirmationRef.current = null;
       voiceSessionActiveRef.current = true;
       voiceSessionOpenRef.current = true;
@@ -622,7 +623,7 @@ export default function Sell() {
       startVoiceRecognitionRef.current();
     } catch (error: unknown) {
       if (requestId !== voiceStartRequestIdRef.current) return;
-      voiceStartPendingRef.current = false;
+      voicePermissionPendingRef.current = false;
       voiceSessionActiveRef.current = false;
       voiceActiveRef.current = false;
       setVoiceActive(false);
@@ -647,6 +648,7 @@ export default function Sell() {
   const cancelVoiceEntry = () => {
     const wasVoiceStarting = voiceStartPendingRef.current;
     voiceStartRequestIdRef.current += 1;
+    voicePermissionPendingRef.current = false;
     voiceSessionActiveRef.current = false;
     voiceSessionOpenRef.current = false;
     voiceStartPendingRef.current = false;
@@ -669,6 +671,7 @@ export default function Sell() {
   const finishVoiceEntry = () => {
     const wasVoiceStarting = voiceStartPendingRef.current;
     voiceStartRequestIdRef.current += 1;
+    voicePermissionPendingRef.current = false;
     voiceSessionActiveRef.current = false;
     voiceStartPendingRef.current = false;
     if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
@@ -809,6 +812,7 @@ export default function Sell() {
       voiceSessionOpenRef.current = false;
       pendingVoiceInterimRef.current = null;
       voiceStartPendingRef.current = false;
+      voicePermissionPendingRef.current = false;
       voiceStartRequestIdRef.current += 1;
       if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
       if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
