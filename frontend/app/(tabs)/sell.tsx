@@ -637,6 +637,7 @@ export default function Sell() {
   };
 
   const cancelVoiceEntry = () => {
+    const wasVoiceStarting = voiceStartPendingRef.current;
     voiceSessionActiveRef.current = false;
     voiceSessionOpenRef.current = false;
     voiceStartPendingRef.current = false;
@@ -644,7 +645,7 @@ export default function Sell() {
     if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
     voiceRestartTimerRef.current = null;
     voiceFinishTimerRef.current = null;
-    if (voiceActiveRef.current || voiceStartPendingRef.current) {
+    if (voiceActiveRef.current || wasVoiceStarting) {
       try { ExpoSpeechRecognitionModule.abort(); } catch { /* Recognition may already have stopped. */ }
     }
     voiceActiveRef.current = false;
@@ -657,11 +658,12 @@ export default function Sell() {
   };
 
   const finishVoiceEntry = () => {
+    const wasVoiceStarting = voiceStartPendingRef.current;
     voiceSessionActiveRef.current = false;
     voiceStartPendingRef.current = false;
     if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
     voiceRestartTimerRef.current = null;
-    if (voiceActiveRef.current || voiceStartPendingRef.current) {
+    if (voiceActiveRef.current || wasVoiceStarting) {
       try { ExpoSpeechRecognitionModule.stop(); } catch { /* Recognition may already have stopped. */ }
     }
     voiceActiveRef.current = false;
