@@ -57,6 +57,8 @@ export default function Sell() {
 
   const { data: products, isLoading } = useProducts();
   const { data: customers } = useParties("customer");
+  const productsRef = useRef<Product[]>(products ?? []);
+  productsRef.current = products ?? [];
 
   const [search, setSearch] = useState("");
   const [searchQuantity, setSearchQuantity] = useState("1");
@@ -669,7 +671,7 @@ export default function Sell() {
       if (!voiceSessionOpenRef.current) return;
 
       const variants = results.map((result) => {
-        const exactNames = (products ?? []).filter(
+        const exactNames = productsRef.current.filter(
           (product) => normalizeSellSearch(product.name) === normalizeSellSearch(result.transcript),
         );
         const parsed = exactNames.length === 1
@@ -677,7 +679,7 @@ export default function Sell() {
           : parseVoiceProductCommand(result.transcript);
         const matches = exactNames.length === 1
           ? [{ product: exactNames[0], score: 1 }]
-          : rankVoiceProductMatches(parsed.query, products ?? []);
+          : rankVoiceProductMatches(parsed.query, productsRef.current);
         return { ...result, parsed, matches };
       }).sort((a, b) =>
         (b.matches[0]?.score ?? 0) - (a.matches[0]?.score ?? 0) ||
@@ -763,7 +765,7 @@ export default function Sell() {
         try { ExpoSpeechRecognitionModule.abort(); } catch { /* Route may already be closing. */ }
       }
     };
-  }, [products]);
+  }, []);
 
   // Checkout has its own add path: every inventory product, including zero/negative stock,
   // can be placed in the cart. The final checkout remains blocked until the below-zero box is enabled.
