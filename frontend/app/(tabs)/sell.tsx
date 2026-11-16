@@ -74,6 +74,7 @@ export default function Sell() {
   const voiceDraftItemsRef = useRef<VoiceDraftItem[]>([]);
   const pendingVoiceInterimRef = useRef<string | null>(null);
   const voiceStartPendingRef = useRef(false);
+  const voiceStartRequestIdRef = useRef(0);
   const processVoiceResultsRef = useRef<(results: { transcript: string; confidence: number }[]) => void>(() => {});
   const voiceRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceFinishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -595,9 +596,13 @@ export default function Sell() {
       toast("Speech recognition service is not available on this device", "error");
       return;
     }
+    const requestId = ++voiceStartRequestIdRef.current;
+    voiceStartPendingRef.current = true;
     try {
       const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (requestId !== voiceStartRequestIdRef.current || !voiceStartPendingRef.current) return;
       if (!permission.granted) {
+        voiceStartPendingRef.current = false;
         setVoiceMessage("Microphone permission is required for voice item entry.");
         toast("Allow microphone permission to use voice entry", "error");
         return;
@@ -608,6 +613,7 @@ export default function Sell() {
         setVoiceTranscript("");
         lastFinalTranscriptRef.current = null;
       }
+      voiceStartPendingRef.current = false;
       voiceNeedsConfirmationRef.current = null;
       voiceSessionActiveRef.current = true;
       voiceSessionOpenRef.current = true;
@@ -615,6 +621,8 @@ export default function Sell() {
       setVoiceMessage("Listening continuously. Say each product name and quantity; press Done when finished.");
       startVoiceRecognitionRef.current();
     } catch (error: unknown) {
+      if (requestId !== voiceStartRequestIdRef.current) return;
+      voiceStartPendingRef.current = false;
       voiceSessionActiveRef.current = false;
       voiceActiveRef.current = false;
       setVoiceActive(false);
@@ -638,6 +646,7 @@ export default function Sell() {
 
   const cancelVoiceEntry = () => {
     const wasVoiceStarting = voiceStartPendingRef.current;
+    voiceStartRequestIdRef.current += 1;
     voiceSessionActiveRef.current = false;
     voiceSessionOpenRef.current = false;
     voiceStartPendingRef.current = false;
@@ -659,6 +668,7 @@ export default function Sell() {
 
   const finishVoiceEntry = () => {
     const wasVoiceStarting = voiceStartPendingRef.current;
+    voiceStartRequestIdRef.current += 1;
     voiceSessionActiveRef.current = false;
     voiceStartPendingRef.current = false;
     if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
@@ -799,6 +809,7 @@ export default function Sell() {
       voiceSessionOpenRef.current = false;
       pendingVoiceInterimRef.current = null;
       voiceStartPendingRef.current = false;
+      voiceStartRequestIdRef.current += 1;
       if (voiceRestartTimerRef.current) clearTimeout(voiceRestartTimerRef.current);
       if (voiceFinishTimerRef.current) clearTimeout(voiceFinishTimerRef.current);
       voiceRestartTimerRef.current = null;
