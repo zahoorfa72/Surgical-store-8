@@ -1671,13 +1671,16 @@ export function resetPasswordRequest(email: string, code: string, new_password: 
   return rawRequest("/auth/reset-password", { method: "POST", body: { email, code, new_password } });
 }
 
-export type StoreSettings = { store_name: string; has_logo: boolean; logo_version: number; pending_logo_uri?: string | null };
+export type StoreSettings = { store_name: string; has_logo: boolean; logo_version: number; search_to_add_enabled: boolean; pending_logo_uri?: string | null };
 
 export function getSettings() {
   return apiRequest<StoreSettings>("/settings");
 }
-export function updateSettingsRequest(store_name: string) {
-  return apiRequest<StoreSettings>("/settings", { method: "PUT", body: { store_name } });
+export function updateSettingsRequest(store_name?: string, search_to_add_enabled?: boolean) {
+  const body: { store_name?: string; search_to_add_enabled?: boolean } = {};
+  if (store_name !== undefined) body.store_name = store_name;
+  if (search_to_add_enabled !== undefined) body.search_to_add_enabled = search_to_add_enabled;
+  return apiRequest<StoreSettings>("/settings", { method: "PUT", body });
 }
 export function logoUrl(version: number): string {
   return `${base()}/settings/logo?v=${version}`;
