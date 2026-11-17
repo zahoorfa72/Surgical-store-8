@@ -29,7 +29,7 @@ import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { getSafeCartQuantity, normalizeSellSearch, parseVoiceProductCommand, rankVoiceProductMatches } from "@/src/utils/sell-voice";
+import { normalizeSellSearch, parseSellSearchEntry, parseVoiceProductCommand, rankVoiceProductMatches } from "@/src/utils/sell-voice";
 
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number; kitNames?: string[] };
 type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean; transactionDate?: string };
@@ -61,8 +61,6 @@ export default function Sell() {
   productsRef.current = products ?? [];
 
   const [search, setSearch] = useState("");
-  const [searchQuantity, setSearchQuantity] = useState("1");
-  const searchQuantityTouchedRef = useRef(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceSessionOpen, setVoiceSessionOpen] = useState(false);
   const [voiceDraftItems, setVoiceDraftItems] = useState<VoiceDraftItem[]>([]);
@@ -137,17 +135,14 @@ export default function Sell() {
     }
   };
 
+  const parsedSearch = useMemo(() => parseSellSearchEntry(search), [search]);
   const filtered = useMemo(() => {
-    const query = search.trim();
-    if (!query) return products ?? [];
-    if (normalizeSellSearch(query).length < 3) return [];
-    return fuzzyFilter(
-      products ?? [],
-      query,
-      [(p) => p.name, (p) => p.sku, (p) => p.barcode],
-      { limit: 8, threshold: 0.38 },
-    );
-  }, [products, search]);
+    if (!parsedSearch.query) return products ?? [];
+    if (parsedSearch.query.length < 3 || parsedSearch.invalidQuantity) return [];
+    return rankVoiceProductMatches(parsedSearch.query, products ?? [])
+      .slice(0, 8)
+      .map((match) => match.product);
+  }, [products, parsedSearch.query, parsedSearch.invalidQuantity]);
 
   const cartMap = useMemo(() => new Map(cart.map((c) => [c.id, c])), [cart]);
   const subtotal = cart.reduce((s, c) => s + c.quantity * c.unit_price, 0);
@@ -375,51 +370,40 @@ export default function Sell() {
     setSearch(value);
   };
 
-  const addSearchSuggestion = (product: Product, quantity: number) => {
-    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-      toast("Enter a whole quantity greater than zero", "error");
+  const addSearchSuggestion = (product: Product) => {
+    const { query, quantity, invalidQuantity } = parseSellSearchEntry(search);
+    if (invalidQuantity || !Number.isSafeInteger(quantity) || quantity <= 0) {
+      toast("Enter a valid whole quantity after the product name", "error");
       return;
     }
-    const normalized = normalizeSellSearch(search);
-    // If the suggestion is tapped before the exact-name debounce finishes,
-    // mark it handled so the same item/quantity is never added twice.
+    const normalized = normalizeSellSearch(query);
     handledSearchAddRef.current = `${normalized}:${product.id}:${quantity}`;
-    // Keep this exact/partial query from firing the auto-add timer a second time.
     voiceNeedsConfirmationRef.current = normalized;
     addToCart(product, quantity);
     setVoiceMessage(`Added ${quantity} × ${product.name} to the cart.`);
     toast(`Added ${quantity} × ${product.name}`, "success");
     setSearch("");
-    setSearchQuantity("1");
-    searchQuantityTouchedRef.current = false;
     voiceNeedsConfirmationRef.current = null;
   };
 
   const findUniqueQuickSearchMatch = (query: string) => {
     const normalized = normalizeSellSearch(query);
     if (normalized.length < 3) return null;
-    const matches = (products ?? []).filter((product) => {
-      const fields = [product.name, product.sku, product.barcode]
-        .map((value) => normalizeSellSearch(String(value ?? "")))
-        .filter(Boolean);
-      return fields.some((field) =>
-        field.startsWith(normalized) ||
-        field.split(" ").some((word) => word.startsWith(normalized)),
-      );
-    });
-    return matches.length === 1 ? matches[0] : null;
+    const matches = rankVoiceProductMatches(normalized, products ?? []);
+    return matches.length === 1 ? matches[0].product : null;
   };
 
-  const addExactSearchMatch = (query: string, quantity: number, allowSku = true) => {
+  const addExactSearchMatch = (query: string, quantity: number, allowPrefix = true) => {
     const normalized = normalizeSellSearch(query);
     if (!normalized || quantity <= 0) return false;
-    const exactMatches = (products ?? []).filter((product) => {
-      const values = allowSku
-        ? [product.name, product.sku, product.barcode]
-        : [product.name];
-      return values.some((value) => normalizeSellSearch(String(value ?? "")) === normalized);
-    });
-    const product = exactMatches.length === 1 ? exactMatches[0] : findUniqueQuickSearchMatch(query);
+    const exactMatches = (products ?? []).filter((product) =>
+      [product.name, product.sku, product.barcode].some(
+        (value) => normalizeSellSearch(String(value ?? "")) === normalized,
+      ),
+    );
+    const product = exactMatches.length === 1
+      ? exactMatches[0]
+      : allowPrefix ? findUniqueQuickSearchMatch(query) : null;
     if (!product) return false;
     const addKey = `${normalized}:${product.id}:${quantity}`;
     if (handledSearchAddRef.current !== addKey) {
@@ -428,44 +412,45 @@ export default function Sell() {
       toast(`Added ${quantity} × ${product.name}`, "success");
     }
     setSearch("");
-    setSearchQuantity("1");
-    searchQuantityTouchedRef.current = false;
     voiceNeedsConfirmationRef.current = null;
     return true;
   };
 
   const submitProductSearch = () => {
-    const query = search.trim();
-    if (!query) return;
-    const quantity = getSafeCartQuantity(searchQuantity);
-    if (!quantity) {
-      toast("Enter a whole quantity greater than zero", "error");
+    const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search);
+    if (!query) {
+      toast("Type a product name followed by its quantity, for example S tow 2.", "info");
       return;
     }
-    if (addExactSearchMatch(query, quantity)) return;
+    if (invalidQuantity) {
+      toast("Enter a whole quantity from 1 to 1,000,000 at the end of the search.", "error");
+      return;
+    }
+    if (addExactSearchMatch(query, quantity, hasQuantity)) return;
     if (filtered.length) {
-      toast("Choose the correct stock suggestion below. Quantity is ready to add.", "info");
+      toast(hasQuantity
+        ? "More than one item matches. Tap the correct suggestion below."
+        : "Add the quantity at the end, for example S tow 2, or choose a suggestion below.", "info");
       return;
     }
-    toast("No matching stock item was found. Try a longer name, SKU, or barcode.", "error");
+    toast("No matching stock item was found. Try another name, SKU, or barcode.", "error");
   };
 
-  // A unique 3+ character name/SKU prefix is quick-added after typing pauses.
-  // Ambiguous searches stay visible as suggestions and are never auto-selected.
+  // One command: "S tow 2". Partial prefixes wait for a trailing quantity;
+  // an exact full product name can still add one item by default.
   useEffect(() => {
-    const normalized = normalizeSellSearch(search);
-    if (normalized.length < 3 || voiceNeedsConfirmationRef.current === normalized) return;
-    const quantity = getSafeCartQuantity(searchQuantity);
-    if (!quantity) return;
-    const exactNameMatch = (products ?? []).filter(
-      (product) => normalizeSellSearch(product.name) === normalized,
+    const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search);
+    if (query.length < 3 || invalidQuantity || voiceNeedsConfirmationRef.current === query) return;
+    const exactMatches = (products ?? []).filter((product) =>
+      [product.name, product.sku, product.barcode].some(
+        (value) => normalizeSellSearch(String(value ?? "")) === query,
+      ),
     );
-    const product = findUniqueQuickSearchMatch(search);
+    const product = exactMatches.length === 1
+      ? exactMatches[0]
+      : hasQuantity ? findUniqueQuickSearchMatch(query) : null;
     if (!product) return;
-    // A partial prefix waits for an edited quantity or the keyboard Done action;
-    // this gives the user time to enter the intended quantity instead of adding 1.
-    if (exactNameMatch.length !== 1 && !searchQuantityTouchedRef.current) return;
-    const addKey = `${normalized}:${product.id}:${quantity}`;
+    const addKey = `${query}:${product.id}:${quantity}`;
     if (handledSearchAddRef.current === addKey) return;
     const timeout = setTimeout(() => {
       if (handledSearchAddRef.current === addKey) return;
@@ -473,12 +458,10 @@ export default function Sell() {
       addToCart(product, quantity);
       toast(`Added ${quantity} × ${product.name}`, "success");
       setSearch("");
-      setSearchQuantity("1");
-      searchQuantityTouchedRef.current = false;
       voiceNeedsConfirmationRef.current = null;
-    }, 900);
+    }, hasQuantity ? 700 : 900);
     return () => clearTimeout(timeout);
-  }, [search, searchQuantity, products, addToCart, toast]);
+  }, [search, products, addToCart, toast]);
 
   const updateVoiceDraftItems = (next: VoiceDraftItem[]) => {
     voiceDraftItemsRef.current = next;
@@ -757,8 +740,6 @@ export default function Sell() {
       setVoiceTranscript("");
       setVoiceMessage(`Added to cart: ${summary}`);
       setSearch("");
-      setSearchQuantity("1");
-      searchQuantityTouchedRef.current = false;
       voiceNeedsConfirmationRef.current = null;
       handledSearchAddRef.current = null;
       toast(`Added ${draft.length} voice item(s) to cart`, "success");
@@ -1052,7 +1033,7 @@ export default function Sell() {
           <TextInput
             testID="product-search-input"
             style={styles.searchInput}
-            placeholder="Search product, SKU or barcode"
+            placeholder="Search item and quantity, e.g. S tow 2"
             placeholderTextColor={colors.muted}
             value={search}
             onChangeText={onSearchTextChange}
@@ -1075,26 +1056,6 @@ export default function Sell() {
         </Pressable>
       </View>
       <View style={styles.searchActionRow}>
-        <View style={styles.searchQuantityGroup}>
-          <Text style={styles.searchQuantityLabel}>ADD QTY</Text>
-          <TextInput
-            testID="sell-add-quantity-input"
-            style={styles.searchQtyInput}
-            value={searchQuantity}
-            onChangeText={(value) => {
-              searchQuantityTouchedRef.current = true;
-              setSearchQuantity(value);
-            }}
-            keyboardType="number-pad"
-            returnKeyType="done"
-            onSubmitEditing={submitProductSearch}
-            blurOnSubmit
-            maxLength={7}
-            selectTextOnFocus
-            placeholder="1"
-            placeholderTextColor={colors.muted}
-          />
-        </View>
         <View style={styles.searchToolsGroup}>
           <Pressable
             testID="voice-language-toggle"
@@ -1114,7 +1075,7 @@ export default function Sell() {
           </Pressable>
         </View>
       </View>
-      <Text style={styles.searchHint}>Search 3+ letters, set quantity, then tap a match or press Done.</Text>
+      <Text style={styles.searchHint}>Type part of an item name, then its quantity (example: S tow 2). Press Done or pause to add.</Text>
       {!!voiceMessage && (
         <View style={styles.voiceStatus} accessibilityLiveRegion="polite">
           <MaterialDesignIcons name={voiceActive ? "microphone" : "text-recognition"} size={17} color={colors.brandPrimary} />
@@ -1217,7 +1178,7 @@ export default function Sell() {
           <Text style={styles.searchResultsHeader}>Matching stock items · {filtered.length} suggestion(s)</Text>
         ) : null}
         ListEmptyComponent={
-          search.trim() && normalizeSellSearch(search).length < 3 ? (
+          search.trim() && parsedSearch.query.length < 3 ? (
             <Text style={styles.searchEmptyHint}>Type at least 3 letters to see stock suggestions.</Text>
           ) : (
             <EmptyState
@@ -1232,7 +1193,7 @@ export default function Sell() {
           const line = cartMap.get(item.id);
           const out = item.quantity <= 0;
           const low = !out && item.quantity <= item.low_stock_threshold;
-          const requestedQuantity = getSafeCartQuantity(searchQuantity);
+          const requestedQuantity = parsedSearch.invalidQuantity ? 0 : parsedSearch.quantity;
           return (
             <View style={styles.prodRow} testID={`product-${item.id}`}>
               <View style={{ flex: 1 }}>
@@ -1260,7 +1221,7 @@ export default function Sell() {
                   <Pressable
                     testID={`inc-${item.id}`}
                     style={styles.stepBtn}
-                    onPress={() => addSearchSuggestion(item, requestedQuantity)}
+                    onPress={() => addSearchSuggestion(item)}
                     disabled={requestedQuantity === 0}
                     accessibilityLabel={`Add ${requestedQuantity} more ${item.name}`}
                   >
@@ -1271,7 +1232,7 @@ export default function Sell() {
                 <Pressable
                   testID={`add-${item.id}`}
                   style={[styles.addBtn, requestedQuantity === 0 && { opacity: 0.45 }]}
-                  onPress={() => addSearchSuggestion(item, requestedQuantity)}
+                  onPress={() => addSearchSuggestion(item)}
                   disabled={requestedQuantity === 0}
                   accessibilityLabel={`Add ${requestedQuantity} ${item.name} to cart`}
                 >
@@ -1763,11 +1724,8 @@ const useStyles = makeStyles((colors) => ({
   voiceBtnActive: { backgroundColor: colors.error },
   voiceLanguageBtn: { width: 38, height: 42, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   voiceLanguageText: { color: colors.onSurface, fontSize: 11, fontWeight: "900" },
-  searchActionRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 2, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", columnGap: 10, rowGap: 8 },
-  searchQuantityGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  searchActionRow: { marginHorizontal: 16, marginTop: 8, marginBottom: 2, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
   searchToolsGroup: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8, marginLeft: "auto" },
-  searchQuantityLabel: { color: colors.muted, fontSize: 11, fontWeight: "900" },
-  searchQtyInput: { width: 58, height: 42, textAlign: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, color: colors.onSurface, fontSize: 16, fontWeight: "900", paddingHorizontal: 6 },
   searchHint: { marginHorizontal: 18, marginTop: 1, marginBottom: 5, color: colors.muted, fontSize: 11, lineHeight: 15 },
   searchResultsHeader: { color: colors.muted, fontSize: 12, fontWeight: "800", marginBottom: 2, marginTop: 2 },
   searchEmptyHint: { color: colors.muted, fontSize: 13, textAlign: "center", paddingVertical: 20, paddingHorizontal: 24 },
