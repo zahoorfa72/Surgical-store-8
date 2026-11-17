@@ -15,6 +15,7 @@ import {
   setApiBaseOverride,
   updateSettingsRequest,
   uploadLogo,
+  updateSettingsRequest,
 } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
@@ -41,6 +42,7 @@ export default function Settings() {
   const [receiptFormat, setReceiptFormat] = useState<"thermal" | "a4">("thermal");
   const [receiptWidth, setReceiptWidth] = useState<56 | 72>(72);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+  const [searchToAddEnabled, setSearchToAddEnabled] = useState(true);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState("0");
   const [fakeFinanceDisplay, setFakeFinanceDisplayState] = useState(false);
@@ -52,7 +54,8 @@ export default function Settings() {
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
-  }, [settings?.store_name]);
+    if (typeof settings?.search_to_add_enabled === "boolean") setSearchToAddEnabled(settings.search_to_add_enabled);
+  }, [settings?.store_name, settings?.search_to_add_enabled]);
   useEffect(() => {
     setServerUrl(getApiBaseOverride() ?? "");
     void Promise.all([
@@ -226,6 +229,38 @@ export default function Settings() {
             />
             <View style={{ height: 12 }} />
             <PrimaryButton label="Save server URL" onPress={saveServerUrl} testID="save-server-url" />
+          </View>
+        )}
+
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Sell screen controls</Text>
+            <Text style={styles.cardHint}>Enable or hide item search on the Sell screen for everyone in this store.</Text>
+            <View style={styles.visibilityRow}>
+              <View style={styles.visibilityText}>
+                <Text style={styles.visibilityLabel}>Search to Add Items</Text>
+                <Text style={styles.visibilityHint}>OFF hides the item search field on all connected devices. Voice, barcode and order scanning remain available.</Text>
+              </View>
+              <Pressable
+                testID="search-to-add-items-toggle"
+                accessibilityRole="switch"
+                accessibilityState={{ checked: searchToAddEnabled }}
+                onPress={async () => {
+                  const next = !searchToAddEnabled;
+                  try {
+                    await updateSettingsRequest(undefined, next);
+                    setSearchToAddEnabled(next);
+                    await queryClient.invalidateQueries({ queryKey: qk.settings });
+                    toast(next ? "Sell item search enabled for this store" : "Sell item search disabled for this store", "success");
+                  } catch (e: any) {
+                    toast(e?.message || "Could not update Sell item search", "error");
+                  }
+                }}
+                style={[styles.visibilityToggle, searchToAddEnabled && styles.visibilityToggleOn]}
+              >
+                <View style={[styles.visibilityThumb, searchToAddEnabled && styles.visibilityThumbOn]} />
+              </Pressable>
+            </View>
           </View>
         )}
 
