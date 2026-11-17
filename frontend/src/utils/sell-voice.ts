@@ -40,7 +40,7 @@ const COMMAND_WORDS = new Set([
   "in", "into", "the", "cart", "product", "products", "for", "me",
   "now", "and",
 ]);
-const QUANTITY_MARKERS = new Set(["qty", "quantity", "qnty", "amount", "number"]);
+const QUANTITY_MARKERS = new Set(["q", "qty", "quantity", "qnty", "amount", "number"]);
 const UNIT_WORDS = new Set(["pc", "pcs", "piece", "pieces", "unit", "units", "item", "items"]);
 
 function normalizeDigits(value: string): string {
