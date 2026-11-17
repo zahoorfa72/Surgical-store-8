@@ -141,10 +141,6 @@ export default function Sell() {
     }
   };
 
-  useEffect(() => {
-    if (!searchToAddEnabled && search) setSearch("");
-  }, [searchToAddEnabled]);
-
   const parsedSearch = useMemo(() => parseSellSearchEntry(search), [search]);
   const filtered = useMemo(() => {
     if (!parsedSearch.query) return products ?? [];
@@ -427,6 +423,7 @@ export default function Sell() {
   };
 
   const submitProductSearch = () => {
+    if (!searchToAddEnabled) return;
     const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search);
     if (!query) {
       toast("Type a product name followed by its quantity, for example S tow 2.", "info");
@@ -449,6 +446,7 @@ export default function Sell() {
   // One command: "S tow 2". Partial prefixes wait for a trailing quantity;
   // an exact full product name can still add one item by default.
   useEffect(() => {
+    if (!searchToAddEnabled) return;
     const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search);
     if (query.length < 3 || invalidQuantity || voiceNeedsConfirmationRef.current === query) return;
     const exactMatches = (products ?? []).filter((product) =>
@@ -471,7 +469,7 @@ export default function Sell() {
       voiceNeedsConfirmationRef.current = null;
     }, hasQuantity ? 700 : 900);
     return () => clearTimeout(timeout);
-  }, [search, products, addToCart, toast]);
+  }, [search, products, addToCart, toast, searchToAddEnabled]);
 
   const updateVoiceDraftItems = (next: VoiceDraftItem[]) => {
     voiceDraftItemsRef.current = next;
@@ -1038,24 +1036,22 @@ export default function Sell() {
       <ScreenHeader title="Sell" subtitle="Add items to the cart" topInset={insets.top} showStatus />
 
       <View style={styles.searchRow}>
-        {searchToAddEnabled && (
-          <View style={styles.searchWrap}>
-            <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
-            <TextInput
-              testID="product-search-input"
-              style={styles.searchInput}
-              placeholder="Search item and quantity, e.g. S tow 2"
-              placeholderTextColor={colors.muted}
-              value={search}
-              onChangeText={onSearchTextChange}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={submitProductSearch}
-              blurOnSubmit
-            />
-          </View>
-        )}
+        <View style={styles.searchWrap}>
+          <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
+          <TextInput
+            testID="product-search-input"
+            style={styles.searchInput}
+            placeholder="Search item and quantity, e.g. S tow 2"
+            placeholderTextColor={colors.muted}
+            value={search}
+            onChangeText={onSearchTextChange}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={submitProductSearch}
+            blurOnSubmit
+          />
+        </View>
         <Pressable
           testID="voice-add-to-cart-button"
           style={[styles.voiceBtn, voiceActive && styles.voiceBtnActive]}
@@ -1166,22 +1162,22 @@ export default function Sell() {
       )}
 
       <FlatList
-        data={searchToAddEnabled ? filtered : (products ?? [])}
+        data={search.trim() ? filtered : (products ?? [])}
         keyExtractor={(p) => p.id}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={{ padding: 16, paddingBottom: 140, gap: 10 }}
-        ListHeaderComponent={searchToAddEnabled && search.trim() && normalizeSellSearch(search).length >= 3 ? (
+        ListHeaderComponent={search.trim() && normalizeSellSearch(search).length >= 3 ? (
           <Text style={styles.searchResultsHeader}>Matching stock items · {filtered.length} suggestion(s)</Text>
         ) : null}
         ListEmptyComponent={
-          searchToAddEnabled && search.trim() && parsedSearch.query.length < 3 ? (
+          search.trim() && parsedSearch.query.length < 3 ? (
             <Text style={styles.searchEmptyHint}>Type at least 3 letters to see stock suggestions.</Text>
           ) : (
             <EmptyState
               icon="package-variant"
-              title={searchToAddEnabled && search.trim() ? "No matching stock item" : "No products"}
-              message={searchToAddEnabled && search.trim() ? "Try a longer name, SKU, or barcode." : "Add products in Stock to start selling."}
+              title={search.trim() ? "No matching stock item" : "No products"}
+              message={search.trim() ? "Try a longer name, SKU, or barcode." : "Add products in Stock to start selling."}
               testID="sell-empty"
             />
           )
@@ -1190,7 +1186,7 @@ export default function Sell() {
           const line = cartMap.get(item.id);
           const out = item.quantity <= 0;
           const low = !out && item.quantity <= item.low_stock_threshold;
-          const requestedQuantity = searchToAddEnabled ? (parsedSearch.invalidQuantity ? 0 : parsedSearch.quantity) : 1;
+          const requestedQuantity = parsedSearch.invalidQuantity ? 0 : parsedSearch.quantity;
           return (
             <View style={styles.prodRow} testID={`product-${item.id}`}>
               <View style={{ flex: 1 }}>
