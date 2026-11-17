@@ -70,8 +70,8 @@ export function parseSellSearchEntry(value: string): ParsedSellSearchEntry {
   const normalized = normalizeDigits(String(value ?? ""))
     .normalize("NFKC")
     .trim()
-    .replace(/\\s+/g, " ");
-  const match = normalized.match(/^(.*?)\\s+([0-9]+)$/u);
+    .replace(/\s+/g, " ");
+  const match = normalized.match(/^(.*?)\s+([0-9]+)$/u);
   if (!match) {
     return {
       query: normalizeSellSearch(normalized),
