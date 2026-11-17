@@ -59,6 +59,10 @@ export default function Sell() {
   const { data: customers } = useParties("customer");
   const { data: storeSettings } = useSettings();
   const searchToAddEnabled = storeSettings?.search_to_add_enabled !== false;
+
+  useFocusEffect(useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: qk.settings });
+  }, [queryClient]));
   const productsRef = useRef<Product[]>(products ?? []);
   productsRef.current = products ?? [];
 
