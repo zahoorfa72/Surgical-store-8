@@ -335,7 +335,8 @@ class ResetIn(BaseModel):
 
 
 class SettingsIn(BaseModel):
-    store_name: str = Field(min_length=1, max_length=60)
+    store_name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    search_to_add_enabled: Optional[bool] = None
 
 
 # ----- Product models -----
@@ -4067,14 +4068,22 @@ async def get_settings():
         "store_name": doc.get("store_name", "Surgical Store"),
         "has_logo": bool(doc.get("logo_data") or doc.get("logo_path")),
         "logo_version": doc.get("logo_version", 0),
+        "search_to_add_enabled": doc.get("search_to_add_enabled", True),
     }
 
 
 @api.put("/settings")
 async def update_settings(body: SettingsIn, _: AdminOnly):
+    updates = {}
+    if body.store_name is not None:
+        updates["store_name"] = body.store_name.strip()
+    if body.search_to_add_enabled is not None:
+        updates["search_to_add_enabled"] = body.search_to_add_enabled
+    if not updates:
+        raise HTTPException(status_code=400, detail="No settings were provided")
     await db.settings.update_one(
         {"_id": "singleton"},
-        {"$set": {"store_name": body.store_name.strip()}},
+        {"$set": updates},
         upsert=True,
     )
     return await get_settings()
