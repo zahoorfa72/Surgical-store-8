@@ -57,6 +57,40 @@ export function normalizeSellSearch(value: unknown): string {
     .trim();
 }
 
+export type ParsedSellSearchEntry = {
+  query: string;
+  quantity: number;
+  hasQuantity: boolean;
+  invalidQuantity: boolean;
+};
+
+// Parse a trailing numeric quantity from a single typed Sell command.
+// Example: "S tow 2" becomes query "s tow" and quantity 2.
+export function parseSellSearchEntry(value: string): ParsedSellSearchEntry {
+  const normalized = normalizeDigits(String(value ?? ""))
+    .normalize("NFKC")
+    .trim()
+    .replace(/\\s+/g, " ");
+  const match = normalized.match(/^(.*?)\\s+([0-9]+)$/u);
+  if (!match) {
+    return {
+      query: normalizeSellSearch(normalized),
+      quantity: 1,
+      hasQuantity: false,
+      invalidQuantity: false,
+    };
+  }
+
+  const quantity = Number(match[2]);
+  const invalidQuantity = !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > 1_000_000;
+  return {
+    query: normalizeSellSearch(match[1]),
+    quantity: invalidQuantity ? 0 : quantity,
+    hasQuantity: true,
+    invalidQuantity,
+  };
+}
+
 function readQuantityAt(tokens: string[], index: number): { value: number; end: number } | null {
   const token = tokens[index];
   if (!token) return null;
@@ -179,7 +213,10 @@ function tokenMatchScore(query: string, name: string): number {
     let bestIndex = -1;
     let bestScore = 0;
     for (const index of available) {
-      const candidateScore = textSimilarity(queryToken, nameTokens[index]);
+      const candidateToken = nameTokens[index];
+      const candidateScore = candidateToken.startsWith(queryToken)
+        ? 0.72 + 0.28 * (queryToken.length / candidateToken.length)
+        : textSimilarity(queryToken, candidateToken);
       if (candidateScore > bestScore) {
         bestScore = candidateScore;
         bestIndex = index;
@@ -207,7 +244,13 @@ export function rankVoiceProductMatches<T extends VoiceCatalogItem>(
       const exactIdentity = normalizedQuery === name ||
         (sku.length > 0 && normalizedQuery === sku) ||
         (barcode.length > 0 && normalizedQuery === barcode);
-      const score = exactIdentity ? 1 : tokenMatchScore(normalizedQuery, name);
+      const score = exactIdentity
+        ? 1
+        : Math.max(
+          tokenMatchScore(normalizedQuery, name),
+          tokenMatchScore(normalizedQuery, sku),
+          tokenMatchScore(normalizedQuery, barcode),
+        );
       return { product, score, index };
     })
     .filter((row) => row.score >= 0.34)
