@@ -448,6 +448,6 @@ function localInventoryUsage(range: "month" | "year" | "all"): InventoryUsageRow
 }
 
 export function useSettings() {
-  return useQuery({ queryKey: qk.settings, queryFn: () => localOrFetch(qk.settings, () => getSettings(), { store_name: "Surgical Store", has_logo: false, logo_version: 0 }) });
+  return useQuery({ queryKey: qk.settings, queryFn: () => localOrFetch(qk.settings, () => getSettings(), { store_name: "Surgical Store", has_logo: false, logo_version: 0, search_to_add_enabled: true }) });
 }
 export type { StoreSettings };
