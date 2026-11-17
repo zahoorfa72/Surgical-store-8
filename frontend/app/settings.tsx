@@ -15,7 +15,6 @@ import {
   setApiBaseOverride,
   updateSettingsRequest,
   uploadLogo,
-  updateSettingsRequest,
 } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { Badge, ConfirmModal, Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
