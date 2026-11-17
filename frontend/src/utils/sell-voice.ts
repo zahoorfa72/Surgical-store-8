@@ -222,10 +222,9 @@ function tokenMatchScore(query: string, name: string): number {
         bestIndex = index;
       }
     }
-    if (bestIndex >= 0 && bestScore >= 0.62) {
-      score += bestScore;
-      available.delete(bestIndex);
-    }
+    if (bestIndex < 0 || bestScore < 0.62) return 0;
+    score += bestScore;
+    available.delete(bestIndex);
   }
   return score / Math.max(queryTokens.length, nameTokens.length);
 }
