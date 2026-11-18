@@ -388,7 +388,9 @@ export default function Sell() {
     addToCart(product, quantity);
     setVoiceMessage(`Added ${quantity} × ${product.name} to the cart.`);
     toast(`Added ${quantity} × ${product.name}`, "success");
-    setSearch("");
+    // With auto-add disabled, keep the query visible so more items/quantities
+    // can be added from the same suggestions without retyping.
+    if (searchToAddEnabled) setSearch("");
     voiceNeedsConfirmationRef.current = null;
   };
 

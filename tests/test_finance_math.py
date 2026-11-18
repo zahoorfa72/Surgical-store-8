@@ -3,7 +3,11 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
-from finance_math import calculate_finance_totals
+from finance_math import (
+    apply_customer_balance_transfers,
+    calculate_finance_totals,
+    signed_customer_balance_transfer,
+)
 
 
 class FinanceMathTests(unittest.TestCase):
@@ -82,6 +86,33 @@ class FinanceMathTests(unittest.TestCase):
         self.assertEqual(result["remaining_balance_adjustment"], 12.34)
         self.assertEqual(result["net_profit"], 9.66)
         self.assertEqual(result["remaining_balance"], 48.34)
+
+    def test_customer_transfer_keeps_receivable_and_credit_signs(self):
+        self.assertEqual(signed_customer_balance_transfer(8930, 2500), 2500)
+        self.assertEqual(signed_customer_balance_transfer(-8930, 2500), -2500)
+
+    def test_customer_transfer_rejects_zero_or_excess_amount(self):
+        with self.assertRaises(ValueError):
+            signed_customer_balance_transfer(0, 1)
+        with self.assertRaises(ValueError):
+            signed_customer_balance_transfer(100, 100.01)
+        with self.assertRaises(ValueError):
+            signed_customer_balance_transfer(100, 0)
+
+    def test_customer_balance_transfer_conserves_total_and_moves_credit(self):
+        receivables = apply_customer_balance_transfers(
+            {"from": 8930, "to": 150},
+            [{"from_party_id": "from", "to_party_id": "to", "balance_amount": 4000}],
+        )
+        self.assertEqual(receivables, {"from": 4930, "to": 4150})
+        self.assertEqual(sum(receivables.values()), 9080)
+
+        credits = apply_customer_balance_transfers(
+            {"from": -8930, "to": 150},
+            [{"from_party_id": "from", "to_party_id": "to", "balance_amount": -2500}],
+        )
+        self.assertEqual(credits, {"from": -6430, "to": -2350})
+        self.assertEqual(sum(credits.values()), -8780)
 
     def test_profit_product_and_lost_product_none_do_not_change_gross_profit(self):
         adjustments = [

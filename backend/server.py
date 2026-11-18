@@ -44,9 +44,17 @@ except ImportError:
     from report_dates import range_start, range_end
 
 try:
-    from .finance_math import calculate_finance_totals
+    from .finance_math import (
+        apply_customer_balance_transfers,
+        calculate_finance_totals,
+        signed_customer_balance_transfer,
+    )
 except ImportError:
-    from finance_math import calculate_finance_totals
+    from finance_math import (
+        apply_customer_balance_transfers,
+        calculate_finance_totals,
+        signed_customer_balance_transfer,
+    )
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -378,6 +386,13 @@ class PaymentIn(BaseModel):
     amount: float = Field(ge=0)
     adjustment: float = 0.0  # signed non-cash adjustment: positive reduces balance; negative increases it
     note: str = ""
+
+
+class CustomerBalanceTransferIn(BaseModel):
+    from_party_id: str
+    to_party_id: str
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    note: str = Field(default="", max_length=500)
 
 
 # ----- Budget model -----
@@ -1819,7 +1834,8 @@ async def _party_balances() -> dict:
             amt = float(pay.get("amount", 0) or 0)
             adjustment = float(pay.get("adjustment", 0) or 0)
             balances[pid] = balances.get(pid, 0.0) + amt - adjustment
-    return balances
+    transfers = await db.customer_balance_transfers.find({"deleted": {"$ne": True}}).to_list(20000)
+    return apply_customer_balance_transfers(balances, transfers)
 
 
 @api.get("/parties", response_model=List[PartyOut])
@@ -1979,6 +1995,80 @@ async def edit_payment(payment_id: str, body: PaymentIn, _: AdminOnly):
     update={"party_id":body.party_id,"party_name":party["name"],"party_type":party["type"],"kind":body.kind.value,"amount":round(body.amount,2),"adjustment":round(body.adjustment,2),"note":body.note,"edited_at":now_iso()}
     await db.payments.update_one({"_id": ObjectId(payment_id)}, {"$set": update})
     return payment_public(await db.payments.find_one({"_id": ObjectId(payment_id)}))
+
+
+# ---------------------------------------------------------------------------
+# Customer balance transfers (non-cash, signed customer ledger movements)
+# ---------------------------------------------------------------------------
+def customer_balance_transfer_public(doc: dict) -> dict:
+    signed_amount = round(float(doc.get("balance_amount", 0) or 0), 2)
+    return {
+        "id": oid(doc["_id"]),
+        "from_party_id": doc.get("from_party_id", ""),
+        "to_party_id": doc.get("to_party_id", ""),
+        "from_party_name": doc.get("from_party_name", ""),
+        "to_party_name": doc.get("to_party_name", ""),
+        "amount": round(abs(signed_amount), 2),
+        "balance_amount": signed_amount,
+        "balance_type": "receivable" if signed_amount > 0 else "customer_credit",
+        "source_balance_before": doc.get("source_balance_before"),
+        "source_balance_after": doc.get("source_balance_after"),
+        "destination_balance_before": doc.get("destination_balance_before"),
+        "destination_balance_after": doc.get("destination_balance_after"),
+        "note": doc.get("note", ""),
+        "user_name": doc.get("user_name", ""),
+        "created_at": doc.get("created_at", ""),
+    }
+
+
+@api.get("/customer-balance-transfers")
+async def list_customer_balance_transfers(_: Staff):
+    rows = await db.customer_balance_transfers.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(5000)
+    return [customer_balance_transfer_public(row) for row in rows]
+
+
+@api.post("/customer-balance-transfers", status_code=201)
+async def create_customer_balance_transfer(body: CustomerBalanceTransferIn, user: AdminOnly):
+    if not ObjectId.is_valid(body.from_party_id) or not ObjectId.is_valid(body.to_party_id):
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if body.from_party_id == body.to_party_id:
+        raise HTTPException(status_code=400, detail="Choose two different customers")
+
+    source = await db.parties.find_one({"_id": ObjectId(body.from_party_id), "deleted": {"$ne": True}})
+    destination = await db.parties.find_one({"_id": ObjectId(body.to_party_id), "deleted": {"$ne": True}})
+    if not source or source.get("type") != PartyType.customer.value:
+        raise HTTPException(status_code=404, detail="Source customer not found")
+    if not destination or destination.get("type") != PartyType.customer.value:
+        raise HTTPException(status_code=404, detail="Destination customer not found")
+
+    current_balances = await _party_balances()
+    source_before = round(float(current_balances.get(body.from_party_id, 0.0) or 0.0), 2)
+    destination_before = round(float(current_balances.get(body.to_party_id, 0.0) or 0.0), 2)
+    try:
+        signed_amount = signed_customer_balance_transfer(source_before, body.amount)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    doc = {
+        "from_party_id": body.from_party_id,
+        "to_party_id": body.to_party_id,
+        "from_party_name": source.get("name", ""),
+        "to_party_name": destination.get("name", ""),
+        "amount": round(float(body.amount), 2),
+        "balance_amount": signed_amount,
+        "balance_type": "receivable" if signed_amount > 0 else "customer_credit",
+        "source_balance_before": source_before,
+        "source_balance_after": round(source_before - signed_amount, 2),
+        "destination_balance_before": destination_before,
+        "destination_balance_after": round(destination_before + signed_amount, 2),
+        "note": body.note.strip(),
+        "user_name": user.get("name", user["email"]),
+        "deleted": False,
+        "created_at": now_iso(),
+    }
+    result = await db.customer_balance_transfers.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return customer_balance_transfer_public(doc)
 
 
 # ---------------------------------------------------------------------------

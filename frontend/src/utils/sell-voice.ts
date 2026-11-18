@@ -53,7 +53,7 @@ export function normalizeSellSearch(value: unknown): string {
   return normalizeDigits(String(value ?? ""))
     .toLocaleLowerCase()
     .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/[^\p{L}\p{N}\/]+/gu, " ")
     .trim();
 }
 
@@ -235,6 +235,27 @@ export function rankVoiceProductMatches<T extends VoiceCatalogItem>(
 ): RankedVoiceProductMatch<T>[] {
   const normalizedQuery = normalizeSellSearch(query);
   if (normalizedQuery.length < 2) return [];
+
+  // Slash-delimited catalogue codes (for example N/S and R/L) are distinct
+  // identifiers, not interchangeable fuzzy tokens. Match these against the
+  // product name prefix only so N/S can never pull an R/L line into the cart.
+  if (normalizedQuery.includes("/")) {
+    return products
+      .map((product, index) => ({
+        product,
+        index,
+        name: normalizeSellSearch(product.name),
+      }))
+      .filter((row) =>
+        row.name === normalizedQuery || row.name.startsWith(normalizedQuery + " "),
+      )
+      .map(({ product, name }) => ({
+        product,
+        score: name === normalizedQuery ? 1 : Math.min(0.98, normalizedQuery.length / name.length),
+      }))
+      .slice(0, 8);
+  }
+
   return products
     .map((product, index) => {
       const name = normalizeSellSearch(product.name);
@@ -243,9 +264,17 @@ export function rankVoiceProductMatches<T extends VoiceCatalogItem>(
       const exactIdentity = normalizedQuery === name ||
         (sku.length > 0 && normalizedQuery === sku) ||
         (barcode.length > 0 && normalizedQuery === barcode);
+      const directNameScore = name.startsWith(normalizedQuery)
+        ? 0.97
+        : name.includes(normalizedQuery) ? 0.86 : 0;
+      const directSkuScore = sku.startsWith(normalizedQuery) ? 0.94 : 0;
+      const directBarcodeScore = barcode.startsWith(normalizedQuery) ? 0.94 : 0;
       const score = exactIdentity
         ? 1
         : Math.max(
+          directNameScore,
+          directSkuScore,
+          directBarcodeScore,
           tokenMatchScore(normalizedQuery, name),
           tokenMatchScore(normalizedQuery, sku),
           tokenMatchScore(normalizedQuery, barcode),

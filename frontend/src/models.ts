@@ -43,6 +43,24 @@ export type Payment = {
   created_at: string;
 };
 
+export type CustomerBalanceTransfer = {
+  id: string;
+  from_party_id: string;
+  to_party_id: string;
+  from_party_name: string;
+  to_party_name: string;
+  amount: number;
+  balance_amount: number;
+  balance_type: "receivable" | "customer_credit";
+  source_balance_before?: number;
+  source_balance_after?: number;
+  destination_balance_before?: number;
+  destination_balance_after?: number;
+  note: string;
+  user_name: string;
+  created_at: string;
+};
+
 export type OpeningBudgetTransaction = { id: string; amount: number; date: string; note: string; created_at: string; updated_at?: string; pending?: boolean };
 export type Budget = { monthly_amount: number; opening_amount?: number; opening_transactions?: OpeningBudgetTransaction[]; spent_this_month: number; purchase_spent?: number; purchase_remaining?: number };
 

@@ -8,7 +8,7 @@ import NetInfo from "@react-native-community/netinfo";
 import { apiRequest, getConnectionMode, getSettings, StoreSettings } from "@/src/api";
 import { queryClient } from "@/src/query-client";
 import {
-  Budget, CustomerRow, DayClose, Expense, ExpenseBucket, Party, PartyType,
+  Budget, CustomerBalanceTransfer, CustomerRow, DayClose, Expense, ExpenseBucket, Party, PartyType,
   Payment, Product, Purchase, ReportSummary, ReturnRecord, Sale, InventoryUsageRow,
 } from "@/src/models";
 import { AppUser } from "@/src/api";
@@ -24,6 +24,7 @@ export const qk = {
   expenses: (bucket?: ExpenseBucket) => ["expenses", bucket ?? "all"] as const,
   purchases: ["purchases"] as const,
   payments: (partyId?: string) => ["payments", partyId ?? "all"] as const,
+  customerBalanceTransfers: ["customer-balance-transfers"] as const,
   budget: ["budget"] as const,
   returns: ["returns"] as const,
   purchaseReturns: ["purchase-returns"] as const,
@@ -316,6 +317,16 @@ export function usePurchase(id: string) {
 }
 export function usePayments(partyId?: string) {
   return useQuery({ queryKey: qk.payments(partyId), queryFn: () => localOrFetch(qk.payments(partyId), () => apiRequest<Payment[]>(`/payments${partyId ? `?party_id=${partyId}` : ""}`), []) });
+}
+export function useCustomerBalanceTransfers() {
+  return useQuery({
+    queryKey: qk.customerBalanceTransfers,
+    queryFn: () => localOrFetch(
+      qk.customerBalanceTransfers,
+      () => apiRequest<CustomerBalanceTransfer[]>("/customer-balance-transfers"),
+      [],
+    ),
+  });
 }
 export function useBudget() {
   return useQuery({ queryKey: qk.budget, queryFn: () => localOrFetch(qk.budget, () => apiRequest<Budget>("/budget"), { monthly_amount: 0, opening_amount: 0, opening_transactions: [], spent_this_month: 0 }) });

@@ -4,6 +4,7 @@ All amounts are rounded to two decimal places at report boundaries. Stock-only
 adjustments are not finance entries. A row can affect only the target field(s)
 explicitly named by accounting_target.
 """
+import math
 from typing import Any, Iterable, Mapping
 
 
@@ -105,3 +106,50 @@ def calculate_finance_totals(
         "net_profit": net_profit,
         "remaining_balance": remaining_balance,
     }
+
+
+
+def signed_customer_balance_transfer(source_balance: float, requested_amount: float) -> float:
+    """Return the signed amount to move out of a customer balance.
+
+    Positive customer balances are receivables; negative balances are credits
+    owed by the store. A transfer keeps that sign while moving the value.
+    """
+    try:
+        source = float(source_balance)
+        requested = float(requested_amount)
+    except (TypeError, ValueError):
+        raise ValueError("Transfer amount and source balance must be valid numbers")
+    if not math.isfinite(source) or not math.isfinite(requested):
+        raise ValueError("Transfer amount and source balance must be valid numbers")
+    amount = round(requested, 2)
+    available = round(abs(source), 2)
+    if amount <= 0:
+        raise ValueError("Transfer amount must be greater than zero")
+    if available <= 0:
+        raise ValueError("The source customer has no remaining balance or credit to transfer")
+    if amount > available:
+        raise ValueError("Transfer amount cannot exceed the source customer's remaining balance or credit")
+    return amount if source > 0 else -amount
+
+
+def apply_customer_balance_transfers(
+    balances: Mapping[str, float],
+    transfers: Iterable[Mapping[str, Any]],
+) -> dict[str, float]:
+    """Apply immutable source-to-destination customer balance ledger entries."""
+    result = {
+        str(party_id): round(_amount({"balance": balance}, "balance"), 2)
+        for party_id, balance in balances.items()
+    }
+    for transfer in transfers:
+        source_id = str(transfer.get("from_party_id") or "")
+        destination_id = str(transfer.get("to_party_id") or "")
+        if not source_id or not destination_id or source_id == destination_id:
+            continue
+        signed_amount = round(_amount(transfer, "balance_amount"), 2)
+        if signed_amount == 0:
+            continue
+        result[source_id] = round(result.get(source_id, 0.0) - signed_amount, 2)
+        result[destination_id] = round(result.get(destination_id, 0.0) + signed_amount, 2)
+    return result
