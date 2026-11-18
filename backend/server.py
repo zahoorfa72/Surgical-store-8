@@ -2079,7 +2079,9 @@ async def _validate_bill_payment_link(
             raise HTTPException(status_code=404, detail="Sales bill does not belong to this customer")
         if not bill.get("credit"):
             raise HTTPException(status_code=400, detail="Only credit sales can receive bill-linked customer installments")
-        base_due = max(0.0, float(bill.get("amount_due", bill.get("total", 0)) or 0))
+        sale_returns = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(1000)
+        returned_total = sum(float(row.get("refund_total", 0) or 0) for row in sale_returns)
+        base_due = max(0.0, float(bill.get("amount_due", bill.get("total", 0)) or 0) - returned_total)
         ref = str(bill.get("invoice_no") or body.sale_id)
         linked = await db.payments.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(10000)
     else:
