@@ -104,6 +104,7 @@ export default function Products() {
           : product.expiry_date ? [{ quantity: product.quantity, expiry_date: product.expiry_date, batch_number: "Product default" }] : currentLayers;
       for (const layer of layers) {
         const expiry = String(layer.expiry_date || "").slice(0, 10);
+        if (Number(layer.quantity ?? 0) <= 0) continue;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry) || expiry > endKey) continue;
         rows.push({
           product,
