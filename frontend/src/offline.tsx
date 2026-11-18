@@ -179,6 +179,8 @@ async function buildLocalPurchase(body: any, userName: string): Promise<Purchase
       quantity: it.quantity,
       unit_cost: it.unit_cost,
       line_total: Math.round(it.quantity * it.unit_cost * 100) / 100,
+      batch_number: it.batch_number ?? "",
+      expiry_date: it.expiry_date ?? null,
     };
   });
   const total = items.reduce((s: number, i: any) => s + i.line_total, 0);
@@ -209,7 +211,7 @@ function applyStockDelta(items: any[], sign: 1 | -1) {
         .filter((x: any) => Number(x?.quantity ?? 0) > 1e-9)
         .map((x: any) => ({ ...x, quantity: Number(x.quantity ?? 0) }));
       if (sign > 0) {
-        layers.push({ quantity: qty, unit_cost: Number(line.unit_cost ?? p.purchase_price ?? 0), purchase_id: null });
+        layers.push({ quantity: qty, unit_cost: Number(line.unit_cost ?? p.purchase_price ?? 0), purchase_id: null, batch_number: line.batch_number ?? "", expiry_date: line.expiry_date ?? null });
       } else {
         let remaining = Math.min(qty, Math.max(0, currentQty));
         for (let i = 0; i < layers.length && remaining > 1e-9; i += 1) {

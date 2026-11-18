@@ -9,7 +9,7 @@ import { Image } from "expo-image";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { apiRequest } from "@/src/api";
-import { useParties, usePayments, usePurchases, usePurchaseReturns, useCustomerBalanceTransfers, qk } from "@/src/data";
+import { useParties, usePayments, usePurchases, usePurchaseReturns, useCustomerBalanceTransfers, useSales, useReturns, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { CustomerBalanceTransfer, Party, Payment } from "@/src/models";
 import { ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, money, useToast } from "@/src/ui";
@@ -23,6 +23,8 @@ function sanitizeNonNegativeAmount(value: string): string {
   if (dot < 0) return cleaned;
   return cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "").slice(0, 2);
 }
+
+type BillOption = { id: string; ref: string; due: number; kind: "sale" | "purchase" };
 
 const TABS = [
   { key: "supplier", label: "Suppliers" },
@@ -44,6 +46,8 @@ export default function Payments() {
   const { data: customerBalanceTransfers } = useCustomerBalanceTransfers();
   const { data: purchases } = usePurchases();
   const { data: purchaseReturns } = usePurchaseReturns();
+  const { data: sales } = useSales();
+  const { data: salesReturns } = useReturns();
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
@@ -54,6 +58,8 @@ export default function Payments() {
   const safePayments = Array.isArray(payments) ? payments.filter(Boolean) : [];
   const safePurchases = Array.isArray(purchases) ? purchases.filter(Boolean) : [];
   const safePurchaseReturns = Array.isArray(purchaseReturns) ? purchaseReturns.filter(Boolean) : [];
+  const safeSales = Array.isArray(sales) ? sales.filter(Boolean) : [];
+  const safeSalesReturns = Array.isArray(salesReturns) ? salesReturns.filter(Boolean) : [];
   const safeBalanceTransfers = Array.isArray(customerBalanceTransfers)
     ? customerBalanceTransfers.filter(Boolean)
     : [];
@@ -71,6 +77,7 @@ export default function Payments() {
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; party_name: string } | null>(null);
   const [amount, setAmount] = useState("");
+  const [selectedBill, setSelectedBill] = useState<BillOption | null>(null);
   const [adjustment, setAdjustment] = useState("");
   const [note, setNote] = useState("");
   const [entryKind, setEntryKind] = useState<"pay" | "receive" | "supplier_refund" | "customer_refund">("pay");
@@ -159,6 +166,7 @@ export default function Payments() {
     setActive(p);
     const displayedBalance = balanceForParty(p);
     setAmount(displayedBalance > 0 ? String(Math.abs(displayedBalance)) : "");
+    setSelectedBill(null);
     setAdjustment("");
     setNote("");
     setReceiptPhoto(receiptPhotos[p.id] ?? null);
@@ -194,11 +202,14 @@ export default function Payments() {
       let saved: Payment;
       if (editingPayment) {
         saved = await apiRequest<Payment>(`/payments/${editingPayment.id}`, { method: "PUT", body: {
-          party_id: editingPayment.party_id, kind: editingPayment.kind, amount: amt, adjustment: adj, note: note.trim()
+          party_id: editingPayment.party_id, kind: editingPayment.kind, amount: amt, adjustment: adj, note: note.trim(),
+          sale_id: editingPayment.sale_id ?? null, purchase_id: editingPayment.purchase_id ?? null,
         }});
       } else {
         saved = await apiRequest<Payment>("/payments", { method: "POST", body: {
-          party_id: active!.id, kind: entryKind, amount: amt, adjustment: adj, note: note.trim()
+          party_id: active!.id, kind: entryKind, amount: amt, adjustment: adj, note: note.trim(),
+          sale_id: selectedBill?.kind === "sale" ? selectedBill.id : null,
+          purchase_id: selectedBill?.kind === "purchase" ? selectedBill.id : null,
         }});
       }
       if (saved?.id) {
@@ -210,7 +221,7 @@ export default function Payments() {
       if (!editingPayment) void addAppNotification(isSupplier ? "Supplier payment made" : "Customer payment received", `${active!.name}: ${money(amt)}${note.trim() ? " · " + note.trim() : ""}`, "payment");
       else void addAppNotification("Payment entry updated", `${active?.name ?? "Party"}: ${money(amt)}`, "payment-updated");
       toast(editingPayment ? "Entry updated" : (isSupplier ? "Payment recorded" : "Receipt recorded"), "success");
-      setActive(null); setEditingPayment(null);
+      setActive(null); setEditingPayment(null); setSelectedBill(null);
     } catch (e: any) {
       toast(e?.message || "Could not record", "error");
     } finally {
@@ -320,6 +331,43 @@ export default function Payments() {
   const supplierPurchases = safePurchases
     .filter((p) => isSupplier && p.supplier_id && visiblePartyIds.has(p.supplier_id))
     .slice(0, 12);
+
+  const refundBySale = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const row of safeSalesReturns) {
+      if (!row.sale_id) continue;
+      totals[row.sale_id] = (totals[row.sale_id] ?? 0) + Number(row.refund_total ?? 0);
+    }
+    return totals;
+  }, [safeSalesReturns]);
+
+  const billOptions = useMemo<BillOption[]>(() => {
+    if (!active || editingPayment || fakeFinanceDisplay) return [];
+    if (isSupplier) {
+      return safePurchases
+        .filter((purchase) => purchase.supplier_id === active.id)
+        .map((purchase) => {
+          const paid = safePayments
+            .filter((payment) => payment.purchase_id === purchase.id && payment.kind === "pay")
+            .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
+          const due = Math.max(0, Number(purchase.total ?? 0) - Number(refundByPurchase[purchase.id] ?? 0) - paid);
+          return { id: purchase.id, ref: purchase.ref_no, due, kind: "purchase" as const };
+        })
+        .filter((bill) => bill.due > 0.004)
+        .sort((a, b) => a.ref.localeCompare(b.ref));
+    }
+    return safeSales
+      .filter((sale) => sale.customer_id === active.id && !!sale.credit)
+      .map((sale) => {
+        const paid = safePayments
+          .filter((payment) => payment.sale_id === sale.id && payment.kind === "receive")
+          .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
+        const due = Math.max(0, Number(sale.amount_due ?? sale.total ?? 0) - Number(refundBySale[sale.id] ?? 0) - paid);
+        return { id: sale.id, ref: sale.invoice_no, due, kind: "sale" as const };
+      })
+      .filter((bill) => bill.due > 0.004)
+      .sort((a, b) => a.ref.localeCompare(b.ref));
+  }, [active, editingPayment, isSupplier, fakeFinanceDisplay, safePurchases, safeSales, safePayments, refundByPurchase, refundBySale]);
 
   const confirmDelete = async () => {
     if (!deleting) return;
@@ -468,6 +516,7 @@ export default function Payments() {
                               </View>
                               <Text style={styles.ledgerMeta}>
                                 {formatDate(p.created_at)}
+                                {p.bill_ref ? " · Bill " + p.bill_ref : ""}
                                 {p.adjustment ? ` · adj ${money(fakeFinanceDisplay ? fakePaymentAmount(p.adjustment, String(p.id) + ":adjustment") : p.adjustment)}` : ""}
                                 {p.note ? ` · ${p.note}` : ""}
                               </Text>
@@ -477,7 +526,7 @@ export default function Payments() {
                             {refund ? "-" : ""}{money(fakeFinanceDisplay ? fakePaymentAmount(p.amount, String(p.id)) : p.amount)}
                           </Text>
                           {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
-                            setEditingPayment(p); setActive(null); setEntryKind(p.kind); setAmount(String(Math.abs(fakeFinanceDisplay ? fakeDisplayAmount(p.amount) : p.amount))); setAdjustment(String(fakeFinanceDisplay ? fakeDisplayAmount(p.adjustment || 0) : (p.adjustment || ""))); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
+                            setEditingPayment(p); setActive(null); setSelectedBill(null); setEntryKind(p.kind); setAmount(String(Math.abs(fakeFinanceDisplay ? fakeDisplayAmount(p.amount) : p.amount))); setAdjustment(String(fakeFinanceDisplay ? fakeDisplayAmount(p.adjustment || 0) : (p.adjustment || ""))); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
                           }}>
                             <MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/>
                           </Pressable>}
@@ -539,12 +588,51 @@ export default function Payments() {
 
             {!editingPayment && (
               <View style={styles.kindRow}>
-                <Pressable testID={`payment-kind-${isSupplier ? "pay" : "receive"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "pay" : "receive") && styles.kindBtnActive]} onPress={() => setEntryKind(isSupplier ? "pay" : "receive")}>
+                <Pressable testID={`payment-kind-${isSupplier ? "pay" : "receive"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "pay" : "receive") && styles.kindBtnActive]} onPress={() => { setEntryKind(isSupplier ? "pay" : "receive"); setSelectedBill(null); }}}>
                   <Text style={[styles.kindText, entryKind === (isSupplier ? "pay" : "receive") && styles.kindTextActive]}>{isSupplier ? "Pay Supplier" : "Receive Customer"}</Text>
                 </Pressable>
-                <Pressable testID={`payment-kind-${isSupplier ? "supplier_refund" : "customer_refund"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "supplier_refund" : "customer_refund") && styles.kindBtnActive]} onPress={() => setEntryKind(isSupplier ? "supplier_refund" : "customer_refund")}>
+                <Pressable testID={`payment-kind-${isSupplier ? "supplier_refund" : "customer_refund"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "supplier_refund" : "customer_refund") && styles.kindBtnActive]} onPress={() => { setEntryKind(isSupplier ? "supplier_refund" : "customer_refund"); setSelectedBill(null); }}}>
                   <Text style={[styles.kindText, entryKind === (isSupplier ? "supplier_refund" : "customer_refund") && styles.kindTextActive]}>{isSupplier ? "Supplier Refund" : "Customer Refund"}</Text>
                 </Pressable>
+              </View>
+            )}
+            {active && !editingPayment && (entryKind === "receive" || entryKind === "pay") && (
+              <View style={{ gap: 6, marginTop: 4 }} testID="partial-bill-allocation">
+                <Text style={styles.fieldLabel}>Apply this installment to a bill — optional</Text>
+                {billOptions.length === 0 ? (
+                  <Text style={styles.hint}>No unpaid bills are available for this account. You can still record an unallocated payment.</Text>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+                    {billOptions.map((bill) => (
+                      <Pressable
+                        key={bill.id}
+                        testID={"select-open-bill-" + bill.id}
+                        style={[styles.billChoice, selectedBill?.id === bill.id && styles.billChoiceActive]}
+                        onPress={() => {
+                          setSelectedBill(bill);
+                          setAmount(String(bill.due));
+                          setAdjustment("");
+                        }}
+                      >
+                        <Text style={[styles.billChoiceTitle, selectedBill?.id === bill.id && styles.billChoiceTextActive]}>{bill.ref}</Text>
+                        <Text style={[styles.billChoiceMeta, selectedBill?.id === bill.id && styles.billChoiceTextActive]}>
+                          Remaining {money(bill.due)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                )}
+                {selectedBill && (
+                  <View style={styles.billSelectedRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.billSelectedText}>Installment linked to {selectedBill.ref}</Text>
+                      <Text style={styles.hint}>Outstanding before payment: {money(selectedBill.due)}</Text>
+                    </View>
+                    <Pressable testID="clear-selected-bill" onPress={() => setSelectedBill(null)} hitSlop={8}>
+                      <MaterialDesignIcons name="close-circle" size={20} color={colors.muted} />
+                    </Pressable>
+                  </View>
+                )}
               </View>
             )}
             <Text style={styles.fieldLabel}>
@@ -857,6 +945,13 @@ const useStyles = makeStyles((colors) => ({
   kindBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   kindText: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary, textAlign: "center" },
   kindTextActive: { color: colors.onBrandPrimary },
+  billChoice: { minWidth: 112, maxWidth: 160, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  billChoiceActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  billChoiceTitle: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  billChoiceMeta: { fontSize: 10, color: colors.muted, marginTop: 3 },
+  billChoiceTextActive: { color: colors.onBrandPrimary },
+  billSelectedRow: { flexDirection: "row", alignItems: "center", gap: 8, padding: 9, borderRadius: 9, backgroundColor: colors.brandTertiary },
+  billSelectedText: { fontSize: 11, fontWeight: "800", color: colors.brandPrimary },
   deleteBtn: { padding: 6, marginLeft: 2 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 24 },
   modalCard: { width: "100%", maxWidth: 400, backgroundColor: colors.surface, borderRadius: 18, padding: 20, gap: 8 },

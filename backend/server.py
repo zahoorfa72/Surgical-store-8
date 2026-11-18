@@ -351,6 +351,7 @@ class SettingsIn(BaseModel):
 class ProductIn(BaseModel):
     name: str
     barcode: str = ""
+    category: str = ""
     purchase_price: float = 0
     sale_price: float = 0
     low_stock_threshold: float = 5
@@ -386,6 +387,8 @@ class PaymentIn(BaseModel):
     amount: float = Field(ge=0)
     adjustment: float = 0.0  # signed non-cash adjustment: positive reduces balance; negative increases it
     note: str = ""
+    sale_id: Optional[str] = None
+    purchase_id: Optional[str] = None
 
 
 class CustomerBalanceTransferIn(BaseModel):
@@ -431,6 +434,8 @@ class PurchaseItemIn(BaseModel):
     product_id: str
     quantity: float
     unit_cost: float  # editable purchase price
+    batch_number: str = ""
+    expiry_date: Optional[str] = None
 
 
 class PurchaseIn(BaseModel):
@@ -476,7 +481,9 @@ async def _ensure_cost_layers(product: dict) -> list:
         layer = {**raw, "quantity": quantity}
         match = next((x for x in layers
                       if str(x.get("purchase_id") or "") == str(layer.get("purchase_id") or "")
-                      and abs(float(x.get("unit_cost", 0) or 0) - float(layer.get("unit_cost", 0) or 0)) <= 1e-8), None)
+                      and abs(float(x.get("unit_cost", 0) or 0) - float(layer.get("unit_cost", 0) or 0)) <= 1e-8
+                      and str(x.get("batch_number") or "") == str(layer.get("batch_number") or "")
+                      and str(x.get("expiry_date") or "") == str(layer.get("expiry_date") or "")), None)
         if match is None:
             layers.append(layer)
         else:
@@ -542,7 +549,7 @@ def _consume_cost_layers_with_breakdown(layers: list, quantity: float, fallback_
         take = min(q, remaining)
         if take > 1e-9:
             unit_cost = max(0.0, float(layer.get("unit_cost", 0) or 0))
-            used_layers.append({"quantity": take, "unit_cost": unit_cost, "purchase_id": layer.get("purchase_id")})
+            used_layers.append({**layer, "quantity": take, "unit_cost": unit_cost, "purchase_id": layer.get("purchase_id")})
             total_cost += take * unit_cost
         left = q - take
         if left > 1e-9:
@@ -570,37 +577,48 @@ def _cost_layer_slice(layers: list, skip_quantity: float, quantity: float) -> li
         available = layer_qty - skipped
         take = min(available, remaining)
         if take > 1e-9:
-            result.append({"quantity": take, "unit_cost": float(layer.get("unit_cost", 0) or 0), "purchase_id": layer.get("purchase_id")})
+            result.append({**layer, "quantity": take, "unit_cost": float(layer.get("unit_cost", 0) or 0), "purchase_id": layer.get("purchase_id")})
             remaining -= take
         if remaining <= 1e-9:
             break
     return result
 
 
-def _append_cost_layer(layers: list, quantity: float, unit_cost: float, purchase_id: Optional[str] = None) -> list:
-    """Add stock to its matching cost lot instead of creating duplicate lots.
-
-    Different purchase IDs remain separate, so genuine separate purchases are
-    still represented as separate lots. Anonymous sale/return reversals at the
-    same unit cost are consolidated to prevent repeated edits multiplying lots.
-    """
+def _append_cost_layer(
+    layers: list,
+    quantity: float,
+    unit_cost: float,
+    purchase_id: Optional[str] = None,
+    batch_number: str = "",
+    expiry_date: Optional[str] = None,
+) -> list:
+    """Add stock to a matching FIFO lot while keeping batch identity intact."""
     quantity = float(quantity)
     unit_cost = float(unit_cost)
+    batch_number = str(batch_number or "").strip()
+    expiry_date = str(expiry_date or "").strip() or None
     if quantity <= 0:
         return layers
     for index, layer in enumerate(layers):
         same_purchase = str(layer.get("purchase_id") or "") == str(purchase_id or "")
         same_cost = abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) <= 1e-8
-        if same_purchase and same_cost:
+        same_batch = str(layer.get("batch_number") or "") == batch_number
+        same_expiry = str(layer.get("expiry_date") or "") == str(expiry_date or "")
+        if same_purchase and same_cost and same_batch and same_expiry:
             updated = list(layers)
             updated[index] = {
                 **layer,
                 "quantity": float(layer.get("quantity", 0) or 0) + quantity,
                 "unit_cost": unit_cost,
                 "purchase_id": purchase_id,
+                "batch_number": batch_number,
+                "expiry_date": expiry_date,
             }
             return updated
-    return [*layers, {"quantity": quantity, "unit_cost": unit_cost, "purchase_id": purchase_id}]
+    return [*layers, {
+        "quantity": quantity, "unit_cost": unit_cost, "purchase_id": purchase_id,
+        "batch_number": batch_number, "expiry_date": expiry_date,
+    }]
 
 
 def _remove_cost_layer_composition(layers: list, used_layers: list) -> list:
@@ -630,7 +648,7 @@ def _remove_cost_layer_composition(layers: list, used_layers: list) -> list:
 
 async def _save_cost_layers(product_id: str, layers: list):
     clean = [
-        {"quantity": round(float(x.get("quantity", 0)), 8), "unit_cost": round(float(x.get("unit_cost", 0)), 8), "purchase_id": x.get("purchase_id")}
+        {"quantity": round(float(x.get("quantity", 0)), 8), "unit_cost": round(float(x.get("unit_cost", 0)), 8), "purchase_id": x.get("purchase_id"), "batch_number": x.get("batch_number", ""), "expiry_date": x.get("expiry_date")}
         for x in layers if float(x.get("quantity", 0) or 0) > 1e-9
     ]
     await db.products.update_one(
@@ -1249,15 +1267,38 @@ async def delete_user(user_id: str, admin: AdminOnly):
 # ---------------------------------------------------------------------------
 # Products
 # ---------------------------------------------------------------------------
+def _suggest_product_category(name: str) -> str:
+    """Conservative name-based first-pass category; staff can always override it."""
+    value = str(name or "").casefold()
+    rules = [
+        ("Gloves & PPE", ("glove", "mask", "gown", "cap", "shoe cover", "apron", "face shield", "ppe")),
+        ("Syringes & Needles", ("syringe", "needle", "insulin")),
+        ("IV & Infusion", ("iv set", "infusion", "drip set", "blood set", "extension line", "three way", "3 way", "iv cannula", "scalp vein", "n/s", "r/l", "normal saline", "ringer lactate", "ringer's lactate", "nss")),
+        ("Catheters & Tubes", ("catheter", "foley", "feeding tube", "ryle", "endotracheal", "suction tube", "nasogastric", "drain tube")),
+        ("Dressings & Wound Care", ("gauze", "dressing", "bandage", "cotton", "abdominal pad", "adhesive tape", "micropore", "plaster", "swab")),
+        ("Sutures & Surgical Consumables", ("suture", "vicryl", "prolene", "silk", "catgut", "monocryl", "staple", "skin stapler")),
+        ("Orthopaedic & Implants", ("bone plate", "locking plate", "recon plate", "dcp", "lcp", "t-plate", "l-plate", "screw", "intramedullary nail", "interlocking nail", "k wire", "k-wire", "external fixator", "prosthesis", "implant", "orthopedic", "orthopaedic", "cast", "crutch", "brace")),
+        ("Surgical Instruments", ("forceps", "scissor", "scissors", "retractor", "clamp", "mosquito", "needle holder", "speculum", "dilator", "probe", "blade", "instrument")),
+        ("Anaesthesia & Respiratory", ("oxygen", "ambu", "nebulizer", "breathing circuit", "laryngoscope", "airway", "anesthesia", "anaesthesia")),
+        ("Laboratory & Diagnostics", ("test kit", "test strip", "reagent", "vacutainer", "blood collection", "urine", "centrifuge", "slide", "lab ", "diagnostic", "glucometer", "thermometer", "bp apparatus", "stethoscope")),
+        ("Disposables & General Supplies", ("disposable", "kidney tray", "urinal", "bed pan", "specimen", "container", "linen", "mattress")),
+    ]
+    for category, keywords in rules:
+        if any(keyword in value for keyword in keywords):
+            return category
+    return "General Surgical Supplies"
+
+
 def product_public(d: dict) -> ProductOut:
     return ProductOut(
         id=oid(d["_id"]), name=d["name"], barcode=d.get("barcode", ""),
+        category=d.get("category", ""),
         purchase_price=max(0.0, float(d.get("purchase_price", 0) or 0)),
         sale_price=max(0.0, float(d.get("sale_price", 0) or 0)),
         low_stock_threshold=max(0.0, float(d.get("low_stock_threshold", 5) or 0)),
         expiry_date=d.get("expiry_date"),
         cost_layers=[
-            {"quantity": round(float(x.get("quantity", 0) or 0), 8), "unit_cost": round(float(x.get("unit_cost", 0) or 0), 8), "purchase_id": x.get("purchase_id")}
+            {"quantity": round(float(x.get("quantity", 0) or 0), 8), "unit_cost": round(float(x.get("unit_cost", 0) or 0), 8), "purchase_id": x.get("purchase_id"), "batch_number": x.get("batch_number", ""), "expiry_date": x.get("expiry_date")}
             for x in (d.get("cost_layers") or []) if float(x.get("quantity", 0) or 0) > 1e-9
         ],
         # Negative quantity is valid only for an explicit forced sale; keep it visible so inventory shows the real deficit.
@@ -1269,6 +1310,12 @@ def product_public(d: dict) -> ProductOut:
 @api.get("/products", response_model=List[ProductOut])
 async def list_products(_: AnyUser):
     docs = await db.products.find({"deleted": {"$ne": True}}).sort("name", 1).to_list(2000)
+    # Lazy one-time migration for legacy products; preserve manually chosen categories.
+    for doc in docs:
+        if not str(doc.get("category") or "").strip():
+            category = _suggest_product_category(doc.get("name", ""))
+            await db.products.update_one({"_id": doc["_id"]}, {"$set": {"category": category}})
+            doc["category"] = category
     return [product_public(d) for d in docs]
 
 
@@ -1300,7 +1347,7 @@ async def create_product(body: ProductIn, _: Staff):
         return product_public(duplicate)
     ts = now_iso()
     doc = body.model_dump()
-    doc.update({"name": name, "barcode": barcode, "quantity": 0.0, "deleted": False, "created_at": ts, "updated_at": ts})
+    doc.update({"name": name, "barcode": barcode, "category": body.category.strip() or _suggest_product_category(name), "quantity": 0.0, "deleted": False, "created_at": ts, "updated_at": ts})
     res = await db.products.insert_one(doc)
     doc["_id"] = res.inserted_id
     return product_public(doc)
@@ -1324,7 +1371,7 @@ async def update_product(product_id: str, body: ProductIn, _: Staff):
         if duplicate and str(duplicate.get("_id")) != product_id:
             raise HTTPException(status_code=409, detail="A product with this barcode already exists")
     update = body.model_dump()
-    update.update({"name": name, "barcode": barcode, "updated_at": now_iso()})
+    update.update({"name": name, "barcode": barcode, "category": body.category.strip() or _suggest_product_category(name), "updated_at": now_iso()})
     # Never overwrite quantity while editing product master data.
     await db.products.update_one({"_id": ObjectId(product_id)}, {"$set": update})
     doc = await db.products.find_one({"_id": ObjectId(product_id), "deleted": {"$ne": True}})
@@ -1361,6 +1408,70 @@ def _normalize_stock_accounting(
     if selected in ("both", "split_50_50", "net_profit_to_remaining_balance"):
         return selected, net_amount, balance_amount
     return selected, 0.0, 0.0
+
+
+@api.get("/stock-movements")
+async def list_stock_movements(_: Staff, product_id: Optional[str] = None, limit: int = Query(500, ge=1, le=5000)):
+    products = await db.products.find({}).to_list(10000)
+    product_names = {str(row["_id"]): str(row.get("name", "")) for row in products}
+    movements = []
+
+    def add(pid, delta, movement_type, reference="", created_at="", user_name="", note="", batch_number="", expiry_date=""):
+        pid = str(pid or "")
+        if not pid or (product_id and pid != product_id) or abs(float(delta or 0)) < 1e-9:
+            return
+        movements.append({
+            "id": f"{movement_type}:{reference}:{pid}:{len(movements)}",
+            "product_id": pid,
+            "product_name": product_names.get(pid, "Item"),
+            "movement_type": movement_type,
+            "quantity_delta": round(float(delta), 4),
+            "reference": str(reference or ""),
+            "created_at": str(created_at or ""),
+            "user_name": str(user_name or ""),
+            "note": str(note or ""),
+            "batch_number": str(batch_number or ""),
+            "expiry_date": str(expiry_date or ""),
+        })
+
+    purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchase_by_id = {str(row.get("_id")): row for row in purchases}
+    for purchase in purchases:
+        for item in purchase.get("items", []):
+            add(item.get("product_id"), item.get("quantity", 0), "purchase", purchase.get("ref_no"), purchase.get("created_at"), purchase.get("user_name"), "Stock received", item.get("batch_number"), item.get("expiry_date"))
+
+    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    for sale in sales:
+        for item in sale.get("items", []):
+            lots = item.get("cost_layers_used") or [{}]
+            first = lots[0] if lots else {}
+            add(item.get("product_id"), -float(item.get("quantity", 0) or 0), "sale", sale.get("invoice_no"), sale.get("created_at"), sale.get("cashier_name"), "Stock sold", first.get("batch_number"), first.get("expiry_date"))
+
+    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    for row in returns:
+        for item in row.get("items", []):
+            lots = item.get("cost_layers_used") or [{}]
+            first = lots[0] if lots else {}
+            add(item.get("product_id"), item.get("quantity", 0), "customer_return", row.get("ref_no") or row.get("sale_id"), row.get("created_at"), row.get("user_name"), row.get("reason", "Customer return"), first.get("batch_number"), first.get("expiry_date"))
+
+    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    for row in purchase_returns:
+        purchase = purchase_by_id.get(str(row.get("purchase_id")), {})
+        for item in row.get("items", []):
+            add(item.get("product_id"), -float(item.get("quantity", 0) or 0), "supplier_return", purchase.get("ref_no"), row.get("created_at"), row.get("user_name"), row.get("reason", "Supplier return"), item.get("batch_number"), item.get("expiry_date"))
+
+    adjustments = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).to_list(20000)
+    for row in adjustments:
+        add(row.get("product_id"), row.get("delta", 0), row.get("adjustment_type", "adjustment"), row.get("id") or str(row.get("_id")), row.get("created_at"), row.get("user_name"), row.get("reason", ""))
+
+    transfers = await db.stock_transfers.find({"deleted": {"$ne": True}}).to_list(20000)
+    for row in transfers:
+        ref = str(row.get("_id") or "")
+        add(row.get("from_product_id"), -float(row.get("quantity", 0) or 0), "stock_transfer_out", ref, row.get("created_at"), row.get("user_name"), row.get("reason", "Product transfer"))
+        add(row.get("to_product_id"), float(row.get("quantity", 0) or 0), "stock_transfer_in", ref, row.get("created_at"), row.get("user_name"), row.get("reason", "Product transfer"))
+
+    movements.sort(key=lambda row: row.get("created_at", ""), reverse=True)
+    return movements[:limit]
 
 
 @api.get("/inventory-adjustments")
@@ -1462,6 +1573,8 @@ async def _reversed_inventory_adjustment_state(row: dict, product: dict) -> tupl
                     float(used.get("quantity", 0) or 0),
                     float(used.get("unit_cost", 0) or 0),
                     used.get("purchase_id"),
+                    used.get("batch_number", ""),
+                    used.get("expiry_date"),
                 )
         else:
             # Older loss records did not retain FIFO composition.
@@ -1617,7 +1730,9 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
     next_layers = [
         {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
          "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
-         "purchase_id": layer.get("purchase_id")}
+         "purchase_id": layer.get("purchase_id"),
+         "batch_number": layer.get("batch_number", ""),
+         "expiry_date": layer.get("expiry_date")}
         for layer in next_layers if float(layer.get("quantity", 0) or 0) > 1e-9
     ]
 
@@ -1927,6 +2042,9 @@ def payment_public(d: dict) -> dict:
         "note": d.get("note", ""),
         "user_name": d.get("user_name", ""),
         "created_at": d.get("created_at"),
+        "sale_id": d.get("sale_id"),
+        "purchase_id": d.get("purchase_id"),
+        "bill_ref": d.get("bill_ref", ""),
     }
 
 
@@ -1937,6 +2055,55 @@ async def list_payments(_: Staff, party_id: Optional[str] = None, limit: int = Q
         q["party_id"] = party_id
     docs = await db.payments.find(q).sort("created_at", -1).to_list(limit)
     return [payment_public(d) for d in docs]
+
+
+async def _validate_bill_payment_link(
+    body: PaymentIn,
+    party: dict,
+    exclude_payment_id: Optional[str] = None,
+) -> str:
+    if body.sale_id and body.purchase_id:
+        raise HTTPException(status_code=400, detail="A payment can be allocated to only one bill")
+    if not body.sale_id and not body.purchase_id:
+        return ""
+    if body.amount <= 0 or body.adjustment != 0:
+        raise HTTPException(status_code=400, detail="Bill installments must be positive cash payments without an adjustment")
+
+    if body.sale_id:
+        if party.get("type") != PartyType.customer.value or body.kind != PaymentKind.receive:
+            raise HTTPException(status_code=400, detail="Only customer receipts can be allocated to a sales bill")
+        if not ObjectId.is_valid(body.sale_id):
+            raise HTTPException(status_code=404, detail="Sales bill not found")
+        bill = await db.sales.find_one({"_id": ObjectId(body.sale_id), "deleted": {"$ne": True}})
+        if not bill or str(bill.get("customer_id") or "") != str(party["_id"]):
+            raise HTTPException(status_code=404, detail="Sales bill does not belong to this customer")
+        if not bill.get("credit"):
+            raise HTTPException(status_code=400, detail="Only credit sales can receive bill-linked customer installments")
+        base_due = max(0.0, float(bill.get("amount_due", bill.get("total", 0)) or 0))
+        ref = str(bill.get("invoice_no") or body.sale_id)
+        linked = await db.payments.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(10000)
+    else:
+        if party.get("type") != PartyType.supplier.value or body.kind != PaymentKind.pay:
+            raise HTTPException(status_code=400, detail="Only supplier payments can be allocated to a purchase bill")
+        if not ObjectId.is_valid(body.purchase_id):
+            raise HTTPException(status_code=404, detail="Purchase bill not found")
+        bill = await db.purchases.find_one({"_id": ObjectId(body.purchase_id), "deleted": {"$ne": True}})
+        if not bill or str(bill.get("supplier_id") or "") != str(party["_id"]):
+            raise HTTPException(status_code=404, detail="Purchase bill does not belong to this supplier")
+        refunds = await db.purchase_returns.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(1000)
+        base_due = max(0.0, float(bill.get("total", 0) or 0) - sum(float(row.get("refund_total", 0) or 0) for row in refunds))
+        ref = str(bill.get("ref_no") or body.purchase_id)
+        linked = await db.payments.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(10000)
+
+    already_paid = sum(
+        float(row.get("amount", 0) or 0)
+        for row in linked
+        if not exclude_payment_id or str(row.get("_id")) != exclude_payment_id
+    )
+    remaining = max(0.0, round(base_due - already_paid, 2))
+    if body.amount > remaining + 0.004:
+        raise HTTPException(status_code=400, detail=f"Only {remaining:.2f} remains on bill {ref}")
+    return ref
 
 
 @api.post("/payments", status_code=201)
@@ -1952,6 +2119,7 @@ async def create_payment(body: PaymentIn, user: Staff):
         raise HTTPException(status_code=400, detail="Cash amount cannot be negative")
     if body.adjustment != 0 and user.get("role") != Role.admin.value:
         raise HTTPException(status_code=403, detail="Only an admin can make non-cash bill adjustments")
+    bill_ref = await _validate_bill_payment_link(body, party)
     # supplier -> pay, customer -> receive
     if party["type"] == "supplier" and body.kind not in (PaymentKind.pay, PaymentKind.supplier_refund):
         raise HTTPException(status_code=400, detail="Use 'pay' or 'supplier_refund' for a supplier")
@@ -1965,6 +2133,9 @@ async def create_payment(body: PaymentIn, user: Staff):
         "amount": round(body.amount, 2),
         "adjustment": round(body.adjustment, 2),
         "note": body.note,
+        "sale_id": body.sale_id,
+        "purchase_id": body.purchase_id,
+        "bill_ref": bill_ref,
         "user_name": user.get("name", user["email"]),
         "deleted": False,
         "created_at": now_iso(),
@@ -1992,7 +2163,8 @@ async def edit_payment(payment_id: str, body: PaymentIn, _: AdminOnly):
     if not party: raise HTTPException(status_code=404, detail="Party not found")
     allowed = ("pay", "supplier_refund") if party["type"] == "supplier" else ("receive", "customer_refund")
     if body.kind.value not in allowed: raise HTTPException(status_code=400, detail=f"Use one of {', '.join(allowed)} for this party")
-    update={"party_id":body.party_id,"party_name":party["name"],"party_type":party["type"],"kind":body.kind.value,"amount":round(body.amount,2),"adjustment":round(body.adjustment,2),"note":body.note,"edited_at":now_iso()}
+    bill_ref = await _validate_bill_payment_link(body, party, exclude_payment_id=payment_id)
+    update={"party_id":body.party_id,"party_name":party["name"],"party_type":party["type"],"kind":body.kind.value,"amount":round(body.amount,2),"adjustment":round(body.adjustment,2),"note":body.note,"sale_id":body.sale_id,"purchase_id":body.purchase_id,"bill_ref":bill_ref,"edited_at":now_iso()}
     await db.payments.update_one({"_id": ObjectId(payment_id)}, {"$set": update})
     return payment_public(await db.payments.find_one({"_id": ObjectId(payment_id)}))
 
@@ -2410,6 +2582,8 @@ async def delete_sale(sale_id: str, _: AdminOnly):
                     float(lot.get("quantity", 0) or 0),
                     float(lot.get("unit_cost", 0) or 0),
                     lot.get("purchase_id"),
+                    lot.get("batch_number", ""),
+                    lot.get("expiry_date"),
                 )
             await db.products.update_one(
                 {"_id": ObjectId(product_id)},
@@ -2597,6 +2771,8 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                     float(lot.get("quantity", 0) or 0),
                     float(lot.get("unit_cost", 0) or 0),
                     lot.get("purchase_id"),
+                    lot.get("batch_number", ""),
+                    lot.get("expiry_date"),
                 )
         product_states[product_id] = {
             "product": product,
@@ -2660,7 +2836,9 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
         clean_layers = [
             {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
-             "purchase_id": layer.get("purchase_id")}
+             "purchase_id": layer.get("purchase_id"),
+             "batch_number": layer.get("batch_number", ""),
+             "expiry_date": layer.get("expiry_date")}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -2763,6 +2941,8 @@ async def create_purchase(body: PurchaseIn, user: Staff):
             "quantity": it.quantity,
             "unit_cost": it.unit_cost,
             "line_total": line_total,
+            "batch_number": str(it.batch_number or "").strip(),
+            "expiry_date": str(it.expiry_date or "").strip() or None,
         })
 
     supplier_name = "—"
@@ -2791,7 +2971,7 @@ async def create_purchase(body: PurchaseIn, user: Staff):
     for it in body.items:
         product = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
         layers = await _ensure_cost_layers(product or {})
-        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, oid(doc["_id"]))
+        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, oid(doc["_id"]), it.batch_number, it.expiry_date)
         await db.products.update_one(
             {"_id": ObjectId(it.product_id)},
             {"$inc": {"quantity": it.quantity},
@@ -2903,6 +3083,8 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             "quantity": it.quantity,
             "unit_cost": it.unit_cost,
             "line_total": line_total,
+            "batch_number": str(it.batch_number or "").strip(),
+            "expiry_date": str(it.expiry_date or "").strip() or None,
         })
 
     # Check the budget before stock layers are touched, so rejection is safe.
@@ -2952,7 +3134,7 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
         if not prod:
             continue
         layers = await _ensure_cost_layers(prod)
-        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, purchase_id)
+        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, purchase_id, it.batch_number, it.expiry_date)
         await db.products.update_one(
             {"_id": ObjectId(product_id)},
             {"$inc": {"quantity": it.quantity},
@@ -3127,7 +3309,7 @@ async def create_return(body: ReturnIn, user: Staff):
         layers = await _ensure_cost_layers(prod or {})
         original_layers = it.get("cost_layers_used") or [{"quantity": it["quantity"], "unit_cost": it.get("purchase_price", 0), "purchase_id": None}]
         for lot in original_layers:
-            layers = _append_cost_layer(layers, float(lot.get("quantity", 0) or 0), float(lot.get("unit_cost", 0) or 0), lot.get("purchase_id"))
+            layers = _append_cost_layer(layers, float(lot.get("quantity", 0) or 0), float(lot.get("unit_cost", 0) or 0), lot.get("purchase_id"), lot.get("batch_number", ""), lot.get("expiry_date"))
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
             {"$inc": {"quantity": it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
@@ -3212,10 +3394,14 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
             "quantity": it.quantity,
             "unit_cost": pi["unit_cost"],
             "purchase_id": body.purchase_id,
+            "batch_number": pi.get("batch_number", ""),
+            "expiry_date": pi.get("expiry_date"),
             "cost_layers_used": [{
                 "quantity": float(it.quantity),
                 "unit_cost": float(pi["unit_cost"]),
                 "purchase_id": body.purchase_id,
+                "batch_number": pi.get("batch_number", ""),
+                "expiry_date": pi.get("expiry_date"),
             }],
             "line_total": line_total,
         })
@@ -3344,6 +3530,8 @@ async def edit_return(return_id: str, body: ReturnIn, _: AdminOnly):
                 float(lot.get("quantity", 0) or 0),
                 float(lot.get("unit_cost", 0) or 0),
                 lot.get("purchase_id"),
+                lot.get("batch_number", ""),
+                lot.get("expiry_date"),
             )
         state["quantity"] += qty
         items.append({
@@ -3374,7 +3562,9 @@ async def edit_return(return_id: str, body: ReturnIn, _: AdminOnly):
         clean_layers = [
             {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
-             "purchase_id": layer.get("purchase_id")}
+             "purchase_id": layer.get("purchase_id"),
+             "batch_number": layer.get("batch_number", ""),
+             "expiry_date": layer.get("expiry_date")}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -3428,7 +3618,9 @@ async def delete_return(return_id: str, _: AdminOnly):
         clean_layers = [
             {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
-             "purchase_id": layer.get("purchase_id")}
+             "purchase_id": layer.get("purchase_id"),
+             "batch_number": layer.get("batch_number", ""),
+             "expiry_date": layer.get("expiry_date")}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -3490,6 +3682,8 @@ async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminO
                     float(lot.get("quantity", 0) or 0),
                     float(lot.get("unit_cost", 0) or 0),
                     lot.get("purchase_id") or body.purchase_id,
+                    lot.get("batch_number", ""),
+                    lot.get("expiry_date"),
                 )
             restored_qty += old_qty
         product_states[product_id] = {
@@ -3555,7 +3749,9 @@ async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminO
         clean_layers = [
             {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
-             "purchase_id": layer.get("purchase_id")}
+             "purchase_id": layer.get("purchase_id"),
+             "batch_number": layer.get("batch_number", ""),
+             "expiry_date": layer.get("expiry_date")}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -3604,6 +3800,8 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
                 float(lot.get("quantity", 0) or 0),
                 float(lot.get("unit_cost", 0) or 0),
                 lot.get("purchase_id") or purchase_id,
+                lot.get("batch_number", ""),
+                lot.get("expiry_date"),
             )
         state["quantity"] += qty
 
@@ -3615,7 +3813,9 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
         clean_layers = [
             {"quantity": round(float(layer.get("quantity", 0) or 0), 8),
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
-             "purchase_id": layer.get("purchase_id")}
+             "purchase_id": layer.get("purchase_id"),
+             "batch_number": layer.get("batch_number", ""),
+             "expiry_date": layer.get("expiry_date")}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(

@@ -9,7 +9,7 @@ import { apiRequest, getConnectionMode, getSettings, StoreSettings } from "@/src
 import { queryClient } from "@/src/query-client";
 import {
   Budget, CustomerBalanceTransfer, CustomerRow, DayClose, Expense, ExpenseBucket, Party, PartyType,
-  Payment, Product, Purchase, ReportSummary, ReturnRecord, Sale, InventoryUsageRow,
+  Payment, Product, Purchase, ReportSummary, ReturnRecord, Sale, StockMovement, InventoryUsageRow,
 } from "@/src/models";
 import { AppUser } from "@/src/api";
 import { notifyLowStock } from "@/src/low-stock-notifications";
@@ -25,6 +25,7 @@ export const qk = {
   purchases: ["purchases"] as const,
   payments: (partyId?: string) => ["payments", partyId ?? "all"] as const,
   customerBalanceTransfers: ["customer-balance-transfers"] as const,
+  stockMovements: (productId?: string) => ["stock-movements", productId ?? "all"] as const,
   budget: ["budget"] as const,
   returns: ["returns"] as const,
   purchaseReturns: ["purchase-returns"] as const,
@@ -324,6 +325,17 @@ export function useCustomerBalanceTransfers() {
     queryFn: () => localOrFetch(
       qk.customerBalanceTransfers,
       () => apiRequest<CustomerBalanceTransfer[]>("/customer-balance-transfers"),
+      [],
+    ),
+  });
+}
+export function useStockMovements(productId?: string) {
+  return useQuery({
+    enabled: !!productId,
+    queryKey: qk.stockMovements(productId),
+    queryFn: () => localOrFetch(
+      qk.stockMovements(productId),
+      () => apiRequest<StockMovement[]>(`/stock-movements?product_id=${encodeURIComponent(productId || "")}`),
       [],
     ),
   });

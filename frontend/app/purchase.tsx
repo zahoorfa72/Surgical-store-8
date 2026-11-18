@@ -15,7 +15,7 @@ import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
-type Line = { id: string; name: string; quantity: number; unit_cost: number };
+type Line = { id: string; name: string; quantity: number; unit_cost: number; batch_number: string; expiry_date: string };
 
 export default function Purchase() {
   const styles = useStyles();
@@ -28,7 +28,7 @@ export default function Purchase() {
   const { user } = useAuth();
   const { createPurchase } = useOffline();
 
-  const { id: editId } = useLocalSearchParams<{ id?: string }>();
+  const { id: editId, product_ids: productIdsParam } = useLocalSearchParams<{ id?: string; product_ids?: string }>();
   const isEdit = !!editId;
   const { data: editing } = usePurchase(editId ?? "");
 
@@ -55,6 +55,7 @@ export default function Purchase() {
   const [transactionDate, setTransactionDate] = useState(todayIsoDate());
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
+  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
 
   // Prefill the form once when editing an existing purchase.
   useEffect(() => {
@@ -65,6 +66,8 @@ export default function Purchase() {
           name: it.name,
           quantity: it.quantity,
           unit_cost: it.unit_cost,
+          batch_number: it.batch_number ?? "",
+          expiry_date: it.expiry_date ?? "",
         })),
       );
       setCostText(Object.fromEntries(editing.items.map((it) => [String(it.product_id), String(it.unit_cost ?? 0)])));
@@ -73,6 +76,33 @@ export default function Purchase() {
       setPrefilled(true);
     }
   }, [isEdit, editing, prefilled]);
+
+  useEffect(() => {
+    if (isEdit || suggestionsLoaded || !productIdsParam || !products?.length) return;
+    const quantities: Record<string, number> = {};
+    const ids = String(productIdsParam).split(",").filter(Boolean).map((entry) => {
+      const [id, quantity] = entry.split(":");
+      const parsed = Number(quantity);
+      quantities[id] = Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed) : 1;
+      return id;
+    });
+    const suggested = products.filter((product) => ids.includes(product.id));
+    if (!suggested.length) {
+      setSuggestionsLoaded(true);
+      return;
+    }
+    setLines(suggested.map((product) => ({
+      id: product.id,
+      name: product.name,
+      quantity: quantities[product.id] ?? Math.max(1, Math.ceil(Number(product.low_stock_threshold ?? 0) * 2 - Number(product.quantity ?? 0))),
+      unit_cost: Number(product.purchase_price ?? 0),
+      batch_number: "",
+      expiry_date: "",
+    })));
+    setCostText(Object.fromEntries(suggested.map((product) => [product.id, String(product.purchase_price ?? 0)])));
+    setSuggestionsLoaded(true);
+    toast(`Added ${suggested.length} replenishment suggestions. Review quantities before saving.`, "info");
+  }, [isEdit, suggestionsLoaded, productIdsParam, products]);
 
   const lineIds = useMemo(() => new Set(lines.map((l) => l.id)), [lines]);
   const total = lines.reduce((s, l, index) => { const cost = fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), `${l.id}:${index}`) : l.unit_cost; return s + l.quantity * cost; }, 0);
@@ -124,7 +154,7 @@ export default function Purchase() {
       (barcode && String(p.barcode ?? "").trim() === barcode) || normalize(p.name) === normalize(name)
     );
     if (existing) {
-      setLines((prev) => prev.some((l) => l.id === existing.id) ? prev : [...prev, { id: existing.id, name: existing.name, quantity: 1, unit_cost: Number(existing.purchase_price ?? 0) }]);
+      setLines((prev) => prev.some((l) => l.id === existing.id) ? prev : [...prev, { id: existing.id, name: existing.name, quantity: 1, unit_cost: Number(existing.purchase_price ?? 0), batch_number: "", expiry_date: "" }]);
       setCostText((prev) => ({ ...prev, [existing.id]: String(existing.purchase_price ?? 0) }));
       setProductCreateOpen(false);
       setNewProductName(""); setNewProductBarcode(""); setNewProductSalePrice("");
@@ -137,7 +167,7 @@ export default function Purchase() {
         body: { name, barcode, purchase_price: 0, sale_price: salePrice, low_stock_threshold: 5, expiry_date: null },
       });
       const id = String(created.id);
-      setLines((prev) => [...prev, { id, name: created.name ?? name, quantity: 1, unit_cost: Number(created.purchase_price ?? 0) }]);
+      setLines((prev) => [...prev, { id, name: created.name ?? name, quantity: 1, unit_cost: Number(created.purchase_price ?? 0), batch_number: "", expiry_date: "" }]);
       setCostText((prev) => ({ ...prev, [id]: String(created.purchase_price ?? 0) }));
       await queryClient.invalidateQueries({ queryKey: qk.products });
       setProductCreateOpen(false);
@@ -155,13 +185,15 @@ export default function Purchase() {
       toast("Select at least one new product", "error");
       return;
     }
-    setLines((prev) => [...prev, ...selected.map((p) => ({ id: p.id, name: p.name, quantity: 1, unit_cost: p.purchase_price }))]);
+    setLines((prev) => [...prev, ...selected.map((p) => ({ id: p.id, name: p.name, quantity: 1, unit_cost: p.purchase_price, batch_number: "", expiry_date: "" }))]);
     setCostText((prev) => ({ ...prev, ...Object.fromEntries(selected.map((p) => [p.id, String(p.purchase_price ?? 0)])) }));
     setSelectedProductIds(new Set());
     setPickerOpen(false);
   };
   const setQty = (id: string, q: number) =>
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(0, q) } : l)));
+  const setLotField = (id: string, field: "batch_number" | "expiry_date", value: string) =>
+    setLines((prev) => prev.map((line) => line.id === id ? { ...line, [field]: value } : line));
   const setCostTextValue = (id: string, text: string) => {
     const normalized = text.replace(/,/g, ".");
     if (!/^\d*(\.\d*)?$/.test(normalized)) return;
@@ -191,6 +223,17 @@ export default function Purchase() {
       return;
     }
     const valid = lines.filter((l) => l.quantity > 0);
+    const invalidExpiry = valid.find((line) => {
+      const expiry = line.expiry_date.trim();
+      if (!expiry) return false;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return true;
+      const parsed = new Date(`${expiry}T00:00:00.000Z`);
+      return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== expiry;
+    });
+    if (invalidExpiry) {
+      toast(`Enter expiry for ${invalidExpiry.name} as YYYY-MM-DD`, "error");
+      return;
+    }
     if (!valid.length) {
       toast("Add at least one product", "error");
       return;
@@ -199,7 +242,10 @@ export default function Purchase() {
     const body = {
       supplier_id: supplierId,
       transaction_date: transactionDate,
-      items: valid.map((l) => ({ product_id: l.id, quantity: l.quantity, unit_cost: l.unit_cost })),
+      items: valid.map((l) => ({
+        product_id: l.id, quantity: l.quantity, unit_cost: l.unit_cost,
+        batch_number: l.batch_number.trim(), expiry_date: l.expiry_date.trim() || null,
+      })),
     };
     try {
       if (isEdit) {
@@ -275,6 +321,31 @@ export default function Purchase() {
                 <View style={styles.miniField}>
                   <Text style={styles.miniLabel}>Total</Text>
                   <Text style={styles.lineTotal}>{money(l.quantity * (fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), String(l.id)) : l.unit_cost))}</Text>
+                </View>
+              </View>
+              <View style={styles.lineInputs}>
+                <View style={[styles.miniField, { flex: 1 }]}>
+                  <Text style={styles.miniLabel}>Batch / lot number</Text>
+                  <TextInput
+                    testID={`purchase-batch-${l.id}`}
+                    style={styles.miniInput}
+                    value={l.batch_number}
+                    onChangeText={(value) => setLotField(l.id, "batch_number", value)}
+                    placeholder="Optional"
+                    placeholderTextColor={colors.muted}
+                  />
+                </View>
+                <View style={[styles.miniField, { flex: 1 }]}>
+                  <Text style={styles.miniLabel}>Expiry date</Text>
+                  <TextInput
+                    testID={`purchase-expiry-${l.id}`}
+                    style={styles.miniInput}
+                    value={l.expiry_date}
+                    onChangeText={(value) => setLotField(l.id, "expiry_date", value)}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.muted}
+                    autoCapitalize="none"
+                  />
                 </View>
               </View>
             </View>

@@ -1,6 +1,12 @@
 // Shared TypeScript types mirroring the backend responses.
 
-export type CostLayer = { quantity: number; unit_cost: number; purchase_id?: string | null };
+export type CostLayer = {
+  quantity: number;
+  unit_cost: number;
+  purchase_id?: string | null;
+  batch_number?: string;
+  expiry_date?: string | null;
+};
 
 export type Product = {
   id: string;
@@ -41,6 +47,9 @@ export type Payment = {
   note: string;
   user_name: string;
   created_at: string;
+  sale_id?: string | null;
+  purchase_id?: string | null;
+  bill_ref?: string;
 };
 
 export type CustomerBalanceTransfer = {
@@ -113,6 +122,22 @@ export type PurchaseItem = {
   quantity: number;
   unit_cost: number;
   line_total: number;
+  batch_number?: string;
+  expiry_date?: string | null;
+};
+
+export type StockMovement = {
+  id: string;
+  product_id: string;
+  product_name: string;
+  movement_type: string;
+  quantity_delta: number;
+  reference: string;
+  created_at: string;
+  user_name: string;
+  note: string;
+  batch_number?: string;
+  expiry_date?: string;
 };
 
 export type Purchase = {

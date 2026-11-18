@@ -27,6 +27,7 @@ export default function ProductForm() {
 
   const [name, setName] = useState("");
   const [barcode, setBarcode] = useState("");
+  const [category, setCategory] = useState("");
   const [purchase, setPurchase] = useState("0");
   const [sale, setSale] = useState("0");
   const [threshold, setThreshold] = useState("5");
@@ -40,6 +41,7 @@ export default function ProductForm() {
       if (p) {
         setName(p.name);
         setBarcode(p.barcode ?? "");
+        setCategory(p.category ?? "");
         setExpiryDate(p.expiry_date ?? "");
         setPurchase(String(p.cost_layers?.length ? p.cost_layers[p.cost_layers.length - 1].unit_cost : p.purchase_price));
         setSale(String(p.sale_price));
@@ -77,6 +79,7 @@ export default function ProductForm() {
     const body = {
       name: name.trim(),
       barcode: barcode.trim(),
+      category: category.trim(),
       purchase_price: parseFloat(purchase) || 0,
       sale_price: parseFloat(sale) || 0,
       low_stock_threshold: parseFloat(threshold) || 0,
@@ -107,6 +110,7 @@ export default function ProductForm() {
         bottomOffset={20}
       >
         <Field label="Product name" testID="product-name-input" value={name} onChangeText={setName} placeholder="e.g. Surgical gloves (box)" />
+        <Field label="Category" testID="product-category-input" value={category} onChangeText={setCategory} placeholder="Auto-suggested from product name" hint="Examples: Gloves & PPE, IV & Infusion, Catheters & Tubes, Orthopaedic & Implants. You can edit this anytime." />
         <View style={styles.barcodeRow}>
           <View style={{ flex: 1 }}>
             <Field label="Barcode" testID="product-barcode-input" value={barcode} onChangeText={setBarcode} placeholder="Scan or type" autoCapitalize="none" />

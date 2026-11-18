@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,7 +8,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { canManageStore, useAuth } from "@/src/auth";
-import { useProducts, useInventoryUsage, usePurchases, useSales, qk } from "@/src/data";
+import { useProducts, useInventoryUsage, usePurchases, useSales, useStockMovements, qk } from "@/src/data";
 import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
@@ -34,11 +34,13 @@ export default function Products() {
   const { data: purchases = [] } = usePurchases();
   const { data: sales = [] } = useSales();
   const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [detailsProduct, setDetailsProduct] = useState<Product | null>(null);
+  const { data: stockMovements = [] } = useStockMovements(detailsProduct?.id);
 
   useFocusEffect(
     useCallback(() => {
@@ -50,11 +52,70 @@ export default function Products() {
     }, []),
   );
 
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const product of products ?? []) {
+      const category = String(product.category || "General Surgical Supplies");
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+    return ["All", ...Array.from(counts.keys()).sort((a, b) => a.localeCompare(b))];
+  }, [products]);
+
   const filtered = useMemo(() => fuzzyFilter(
     products ?? [],
     search,
-    [(p) => p.name, (p) => p.barcode],
-  ), [products, search]);
+    [(p) => p.name, (p) => p.barcode, (p) => p.category],
+  ).filter((product) => selectedCategory === "All" || String(product.category || "General Surgical Supplies") === selectedCategory),
+  [products, search, selectedCategory]);
+
+  const replenishmentSuggestions = useMemo(() => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const soldByProduct: Record<string, number> = {};
+    for (const sale of sales ?? []) {
+      const timestamp = new Date(sale.created_at || sale.transaction_date || 0).getTime();
+      if (!timestamp || timestamp < cutoff) continue;
+      for (const line of sale.items ?? []) {
+        soldByProduct[line.product_id] = (soldByProduct[line.product_id] ?? 0) + Number(line.quantity ?? 0);
+      }
+    }
+    return (products ?? []).map((product) => {
+      const sold30Days = soldByProduct[product.id] ?? 0;
+      const averageDaily = sold30Days / 30;
+      const targetStock = averageDaily > 0
+        ? Math.ceil(averageDaily * 30 + Number(product.low_stock_threshold ?? 0))
+        : Math.ceil(Number(product.low_stock_threshold ?? 0) * 2);
+      const suggestedQuantity = Math.max(0, targetStock - Number(product.quantity ?? 0));
+      return { product, sold30Days, averageDaily, targetStock, suggestedQuantity };
+    }).filter((row) => row.suggestedQuantity > 0)
+      .sort((a, b) => b.suggestedQuantity - a.suggestedQuantity)
+      .slice(0, 12);
+  }, [products, sales]);
+
+  const expiryWatch = useMemo(() => {
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const endKey = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const rows: { product: Product; batch: string; expiry: string; quantity: number; expired: boolean }[] = [];
+    for (const product of products ?? []) {
+      const currentLayers: Array<{ quantity: number; expiry_date?: string | null; batch_number?: string }> =
+        Array.isArray(product.cost_layers) ? product.cost_layers : [];
+      const layers: Array<{ quantity: number; expiry_date?: string | null; batch_number?: string }> =
+        currentLayers.some((layer) => !!layer.expiry_date)
+          ? currentLayers
+          : product.expiry_date ? [{ quantity: product.quantity, expiry_date: product.expiry_date, batch_number: "Product default" }] : currentLayers;
+      for (const layer of layers) {
+        const expiry = String(layer.expiry_date || "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry) || expiry > endKey) continue;
+        rows.push({
+          product,
+          batch: layer.batch_number || "No batch number",
+          expiry,
+          quantity: Number(layer.quantity ?? 0),
+          expired: expiry < todayKey,
+        });
+      }
+    }
+    return rows.sort((a, b) => a.expiry.localeCompare(b.expiry));
+  }, [products]);
 
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
@@ -120,6 +181,84 @@ export default function Products() {
           contentContainerStyle={{ padding: 16, paddingBottom: 120, gap: 10 }}
           ListHeaderComponent={
             <View>
+                    <Card style={styles.usageCard}>
+                      <View style={styles.financeHead}>
+                        <View>
+                          <Text style={styles.financeTitle}>Product categories</Text>
+                          <Text style={styles.financeSub}>Existing items are categorized automatically; edit any category in product details</Text>
+                        </View>
+                        <MaterialDesignIcons name="shape-outline" size={22} color={colors.brandPrimary} />
+                      </View>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+                        {categoryOptions.map((category) => (
+                          <Pressable
+                            key={category}
+                            testID={`stock-category-${category.replace(/[^a-z0-9]+/gi, "-")}`}
+                            onPress={() => setSelectedCategory(category)}
+                            style={[styles.categoryChip, selectedCategory === category && styles.categoryChipActive]}
+                          >
+                            <Text style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]}>{category}</Text>
+                          </Pressable>
+                        ))}
+                      </ScrollView>
+                    </Card>
+
+                    <Card style={styles.usageCard}>
+                      <View style={styles.financeHead}>
+                        <View>
+                          <Text style={styles.financeTitle}>Replenishment suggestions</Text>
+                          <Text style={styles.financeSub}>Last 30 days of sales · target 30 days of cover plus your low-stock buffer</Text>
+                        </View>
+                        <MaterialDesignIcons name="cart-arrow-down" size={22} color={colors.brandPrimary} />
+                      </View>
+                      {replenishmentSuggestions.length === 0 ? (
+                        <Text style={styles.usageEmpty}>No replenishment needed at current sales and stock levels.</Text>
+                      ) : (
+                        <>
+                          {replenishmentSuggestions.slice(0, 7).map((row) => (
+                            <View key={row.product.id} style={styles.usageRow} testID={`replenishment-${row.product.id}`}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.usageName}>{row.product.name}</Text>
+                                <Text style={styles.usageQty}>
+                                  Stock {row.product.quantity} · Sold {row.sold30Days} in 30 days · Suggest {row.suggestedQuantity}
+                                </Text>
+                              </View>
+                              <Badge text={row.averageDaily > 0 ? "Sales based" : "Low stock"} tone={row.averageDaily > 0 ? "success" : "warning"} />
+                            </View>
+                          ))}
+                          <Pressable
+                            testID="create-replenishment-order"
+                            style={styles.replenishmentButton}
+                            onPress={() => router.push("/purchase?product_ids=" + replenishmentSuggestions.map((row) => row.product.id + ":" + row.suggestedQuantity).join(","))}
+                          >
+                            <MaterialDesignIcons name="truck-plus" size={18} color={colors.onBrandPrimary} />
+                            <Text style={styles.replenishmentButtonText}>Create purchase list ({replenishmentSuggestions.length} items)</Text>
+                          </Pressable>
+                        </>
+                      )}
+                    </Card>
+
+                    <Card style={styles.usageCard}>
+                      <View style={styles.financeHead}>
+                        <View>
+                          <Text style={styles.financeTitle}>Expiry watch · next 60 days</Text>
+                          <Text style={styles.financeSub}>Batch-level expiry where batch information is available</Text>
+                        </View>
+                        <MaterialDesignIcons name="calendar-alert" size={22} color={expiryWatch.some((row) => row.expired) ? colors.error : colors.warning} />
+                      </View>
+                      {expiryWatch.length === 0 ? (
+                        <Text style={styles.usageEmpty}>No recorded batches expiring within 60 days.</Text>
+                      ) : expiryWatch.slice(0, 6).map((row, index) => (
+                        <View key={row.product.id + row.batch + row.expiry + index} style={styles.usageRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.usageName}>{row.product.name} · {row.batch}</Text>
+                            <Text style={styles.usageQty}>Qty {row.quantity} · Expiry {row.expiry}</Text>
+                          </View>
+                          <Badge text={row.expired ? "Expired" : "Expiring"} tone="warning" />
+                        </View>
+                      ))}
+                    </Card>
+
                     {!isLoading && (
                       <Card style={styles.usageCard}>
                         <View style={styles.financeHead}>
@@ -218,7 +357,7 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":latest") : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
+                    {item.category || "General Surgical Supplies"} · Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":latest") : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
                   </Text>
                   {!!item.cost_layers?.length && (
                     <View style={{ gap: 2, marginTop: 3 }}>
@@ -288,6 +427,12 @@ export default function Products() {
                         <View style={{ flex: 1 }}>
                           <Text style={styles.detailName}>{purchase.ref_no} · {line.quantity} units</Text>
                           <Text style={styles.meta}>{purchase.supplier_name} · {formatDetailDate(purchase.created_at)}</Text>
+                          {(line.batch_number || line.expiry_date) && (
+                            <Text style={styles.meta}>
+                              {line.batch_number ? `Batch ${line.batch_number}` : "Batch not recorded"}
+                              {line.expiry_date ? ` · Expiry ${line.expiry_date}` : ""}
+                            </Text>
+                          )}
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
                           <Text style={styles.detailValue}>{money(unit)}/unit</Text>
@@ -314,6 +459,31 @@ export default function Products() {
                         </View>
                       </View>;
                     })}
+                  </Card>
+                  <Card>
+                    <Text style={styles.detailTitle}>Stock movement history</Text>
+                    {stockMovements.filter((movement) => movement.product_id === p.id).length === 0 && (
+                      <Text style={styles.meta}>No recorded stock movements found.</Text>
+                    )}
+                    {stockMovements.filter((movement) => movement.product_id === p.id).slice(0, 60).map((movement) => (
+                      <View key={movement.id} style={styles.detailRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.detailName}>
+                            {movement.movement_type.replace(/_/g, " ")} · {movement.reference || "Stock event"}
+                          </Text>
+                          <Text style={styles.meta}>
+                            {formatDetailDate(movement.created_at)}
+                            {movement.batch_number ? ` · Batch ${movement.batch_number}` : ""}
+                            {movement.expiry_date ? ` · Expiry ${movement.expiry_date}` : ""}
+                          </Text>
+                          {!!movement.note && <Text style={styles.meta}>{movement.note}</Text>}
+                          {!!movement.user_name && <Text style={styles.meta}>By {movement.user_name}</Text>}
+                        </View>
+                        <Text style={[styles.detailValue, { color: movement.quantity_delta >= 0 ? colors.success : colors.error }]}>
+                          {movement.quantity_delta > 0 ? "+" : ""}{movement.quantity_delta}
+                        </Text>
+                      </View>
+                    ))}
                   </Card>
                   {staff && <Pressable testID="edit-product-from-details" style={styles.detailEditBtn} onPress={() => { const id = p.id; setDetailsProduct(null); router.push("/product-form?id=" + id); }}>
                     <MaterialDesignIcons name="pencil" size={19} color={colors.onBrandPrimary} />
@@ -368,6 +538,12 @@ const useStyles = makeStyles((colors) => ({
   scanBtn: { width: 34, height: 34, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
 
   usageCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 2 },
+  categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  categoryChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  categoryChipText: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary },
+  categoryChipTextActive: { color: colors.onBrandPrimary },
+  replenishmentButton: { minHeight: 42, borderRadius: 10, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 12, marginTop: 8 },
+  replenishmentButtonText: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "800" },
   usageTabs: { flexDirection: "row", gap: 6, marginBottom: 10 },
   usageTab: { flex: 1, minHeight: 36, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceTertiary },
   usageTabText: { fontSize: 11, fontWeight: "700", color: colors.onSurface },
