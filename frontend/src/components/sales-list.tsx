@@ -181,15 +181,15 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                     {item.items.length} item(s) · by {item.cashier_name}
                   </Text>
                   <Text style={styles.finance}>
-                    Discount {money(item.discount ?? 0)}{!grossHidden ? " · Profit " + money(fakeFinanceDisplay ? fakeDisplayAmount(saleProfit) : saleProfit) : ""}
+                    Discount {money(fakeFinanceDisplay ? fakeDisplayAmount(item.discount ?? 0) : item.discount ?? 0)}{!grossHidden ? " · Profit " + money(fakeFinanceDisplay ? fakeDisplayAmount(saleProfit) : saleProfit) : ""}
                   </Text>
                 </View>
                 <View style={styles.rowRight}>
-                  <Text style={styles.total} testID={`sale-net-${item.id}`}>{money(net)}</Text>
+                  <Text style={styles.total} testID={`sale-net-${item.id}`}>{money(fakeFinanceDisplay ? fakeDisplayAmount(net) : net)}</Text>
                   {refunded > 0 && (
                     <View style={styles.refundLine} testID={`sale-refund-info-${item.id}`}>
-                      <Text style={styles.origStruck}>{money(item.total)}</Text>
-                      <Text style={styles.refundAmt}>-{money(refunded)}</Text>
+                      <Text style={styles.origStruck}>{money(fakeFinanceDisplay ? fakeDisplayAmount(item.total) : item.total)}</Text>
+                      <Text style={styles.refundAmt}>-{money(fakeFinanceDisplay ? fakeDisplayAmount(refunded) : refunded)}</Text>
                     </View>
                   )}
                   {canModify ? (
