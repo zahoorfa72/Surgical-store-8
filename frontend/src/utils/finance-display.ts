@@ -51,7 +51,7 @@ export async function getFakeFinanceDisplay(): Promise<boolean> {
   try {
     return (await AsyncStorage.getItem(FAKE_FINANCE_STORAGE_KEY)) === "1";
   } catch {
-    return false;
+    return true;
   }
 }
 
