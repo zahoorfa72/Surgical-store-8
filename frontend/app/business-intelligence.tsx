@@ -20,7 +20,8 @@ import { apiRequest, getWriteQueueCount } from "@/src/api";
 import { isAdmin, useAuth } from "@/src/auth";
 import { money, ScreenHeader, Card, Badge, useToast, formatDateTime } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeUnitCost, fakeReportProfit } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeUnitCost, fakeReportProfit, fakeDisplayAmount, fakeReportRevenue } from "@/src/utils/finance-display";
+import { useProfitVisibility } from "@/src/security/finance-security";
 import { storage } from "@/src/utils/storage";
 
 type Tab = "overview" | "stock" | "statements" | "audit";
@@ -48,6 +49,7 @@ export default function BusinessIntelligence() {
   const styles = useStyles();
   const { colors } = useTheme();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const { grossHidden } = useProfitVisibility();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -188,10 +190,10 @@ export default function BusinessIntelligence() {
       th:last-child,td:last-child{text-align:right}.neg{color:#b42318}.pos{color:#157347}
     </style></head><body><h1>${selectedParty.name.replace(/[<>&"]/g,"")}</h1>
       <div class="muted">${partyType === "supplier" ? "Supplier statement" : "Customer statement"}</div>
-      <div class="bal">Current balance: ${money(Number(selectedParty.balance ?? 0))}</div>
+      <div class="bal">Current balance: ${money(fakeFinanceDisplay ? fakeDisplayAmount(selectedParty.balance) : Number(selectedParty.balance ?? 0))}</div>
       <div class="muted">Generated ${new Date().toLocaleString()}</div>
       <table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Amount</th></tr></thead><tbody>
-      ${statementRows.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${String(r.detail).replace(/[<>&"]/g,"")}</td><td class="${r.amount < 0 ? "neg" : "pos"}">${r.amount < 0 ? "- " : "+ "}${money(Math.abs(r.amount))}</td></tr>`).join("")}
+      ${statementRows.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${r.type}</td><td>${String(r.detail).replace(/[<>&"]/g,"")}</td><td class="${r.amount < 0 ? "neg" : "pos"}">${r.amount < 0 ? "- " : "+ "}${money(fakeFinanceDisplay ? fakeDisplayAmount(Math.abs(r.amount)) : Math.abs(r.amount))}</td></tr>`).join("")}
       </tbody></table></body></html>`;
     try {
       const { uri } = await Print.printToFileAsync({ html });
@@ -273,8 +275,8 @@ export default function BusinessIntelligence() {
               <Text style={styles.cardTitle}>Smart dashboard</Text>
               <Text style={styles.cardHint}>Operational intelligence only — existing finance calculations are read as-is.</Text>
               <View style={styles.stats}>
-                <Stat label="Sales (selected period)" value={money(Number(report?.revenue ?? 0))} icon="cash" />
-                <Stat label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(report) : Number(report?.gross_profit ?? 0))} icon="chart-line" />
+                <Stat label="Sales (selected period)" value={money(fakeFinanceDisplay ? fakeReportRevenue(report) : Number(report?.revenue ?? 0))} icon="cash" />
+                {!grossHidden && <Stat label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(report) : Number(report?.gross_profit ?? 0))} icon="chart-line" />}
                 <Stat label="Products" value={String(products.length)} icon="package-variant" />
                 <Stat label="Low stock" value={String(reorderRows.length)} icon="alert-circle" />
               </View>
@@ -296,7 +298,7 @@ export default function BusinessIntelligence() {
 
             <Card>
               <Text style={styles.cardTitle}>Best sellers</Text>
-              {topSellers.map((r, i) => <View key={r.name + i} style={styles.listRow}><View style={styles.rank}><Text style={styles.rankText}>{i + 1}</Text></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.name}</Text><Text style={styles.rowSub}>{r.qty} units sold</Text></View><Text style={styles.value}>{money(r.revenue)}</Text></View>)}
+              {topSellers.map((r, i) => <View key={r.name + i} style={styles.listRow}><View style={styles.rank}><Text style={styles.rankText}>{i + 1}</Text></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.name}</Text><Text style={styles.rowSub}>{r.qty} units sold</Text></View><Text style={styles.value}>{money(fakeFinanceDisplay ? fakeDisplayAmount(r.revenue) : r.revenue)}</Text></View>)}
               {!topSellers.length && <Text style={styles.empty}>No sales data yet.</Text>}
             </Card>
 
@@ -358,14 +360,14 @@ export default function BusinessIntelligence() {
             {selectedParty && (
               <Card>
                 <Text style={styles.cardTitle}>{selectedParty.name} statement</Text>
-                <Text style={styles.balance}>{money(Number(selectedParty.balance ?? 0))}</Text>
+                <Text style={styles.balance}>{money(fakeFinanceDisplay ? fakeDisplayAmount(selectedParty.balance) : Number(selectedParty.balance ?? 0))}</Text>
                 <Text style={styles.cardHint}>{partyType === "supplier" ? "Current payable balance from the existing ledger" : "Current receivable balance from the existing ledger"}</Text>
                 <Text style={styles.statementNote}>The balance shown above is not recalculated here; the app's existing finance engine remains the source of truth.</Text>
                 <Pressable testID="export-party-statement-pdf" style={styles.exportBtn} onPress={() => void exportStatementPdf()}>
                   <MaterialDesignIcons name="file-pdf-box" size={18} color={colors.onBrandPrimary} />
                   <Text style={styles.exportText}>Export statement PDF</Text>
                 </Pressable>
-                {statementRows.map((r, i) => <View key={r.type + r.date + i} style={styles.historyRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.type}</Text><Text style={styles.rowSub}>{fmtDate(r.date)} · {r.detail}</Text></View><Text style={[styles.value, { color: r.amount < 0 ? colors.error : colors.onSurface }]}>{r.amount < 0 ? "- " : "+ "}{money(Math.abs(r.amount))}</Text></View>)}
+                {statementRows.map((r, i) => <View key={r.type + r.date + i} style={styles.historyRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.type}</Text><Text style={styles.rowSub}>{fmtDate(r.date)} · {r.detail}</Text></View><Text style={[styles.value, { color: r.amount < 0 ? colors.error : colors.onSurface }]}>{r.amount < 0 ? "- " : "+ "}{money(fakeFinanceDisplay ? fakeDisplayAmount(Math.abs(r.amount)) : Math.abs(r.amount))}</Text></View>)}
                 {!statementRows.length && <Text style={styles.empty}>No transactions for this party.</Text>}
               </Card>
             )}
