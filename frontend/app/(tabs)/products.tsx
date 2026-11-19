@@ -8,7 +8,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { canManageStore, useAuth } from "@/src/auth";
-import { useProducts, useInventoryUsage, usePurchases, useSales, useStockMovements, qk } from "@/src/data";
+import { useProducts, usePurchases, useSales, useStockMovements, qk } from "@/src/data";
 import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
@@ -29,8 +29,6 @@ export default function Products() {
   const staff = canManageStore(user?.role);
 
   const { data: products, isLoading } = useProducts();
-  const [usageRange, setUsageRange] = useState<"month" | "year" | "all">("month");
-  const { data: usageAnalytics = [] } = useInventoryUsage(usageRange);
   const { data: purchases = [] } = usePurchases();
   const { data: sales = [] } = useSales();
   const [search, setSearch] = useState("");
@@ -68,28 +66,45 @@ export default function Products() {
   ).filter((product) => selectedCategory === "All" || String(product.category || "General Surgical Supplies") === selectedCategory),
   [products, search, selectedCategory]);
 
+  const [replenishmentRange, setReplenishmentRange] = useState<"month" | "year" | "all">("month");
+  const [replenishmentDropdownOpen, setReplenishmentDropdownOpen] = useState(false);
+  const replenishmentRangeLabel = replenishmentRange === "month" ? "This month" : replenishmentRange === "year" ? "This year" : "All time";
+
   const replenishmentSuggestions = useMemo(() => {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const now = new Date();
+    const rangeStart = replenishmentRange === "month"
+      ? new Date(now.getFullYear(), now.getMonth(), 1)
+      : replenishmentRange === "year" ? new Date(now.getFullYear(), 0, 1) : null;
+    const relevantSales = (sales ?? []).filter((sale) => {
+      const rawDate = sale.transaction_date || sale.created_at;
+      const timestamp = rawDate ? new Date(rawDate).getTime() : 0;
+      return Number.isFinite(timestamp) && timestamp > 0 && (!rangeStart || timestamp >= rangeStart.getTime());
+    });
+    const firstSaleTime = relevantSales.reduce((earliest, sale) => {
+      const rawDate = sale.transaction_date || sale.created_at;
+      const timestamp = rawDate ? new Date(rawDate).getTime() : 0;
+      return timestamp > 0 ? Math.min(earliest, timestamp) : earliest;
+    }, now.getTime());
+    const periodStart = rangeStart?.getTime() ?? firstSaleTime;
+    const elapsedDays = Math.max(1, Math.ceil((now.getTime() - periodStart) / 86400000) + 1);
     const soldByProduct: Record<string, number> = {};
-    for (const sale of sales ?? []) {
-      const timestamp = new Date(sale.created_at || sale.transaction_date || 0).getTime();
-      if (!timestamp || timestamp < cutoff) continue;
+    for (const sale of relevantSales) {
       for (const line of sale.items ?? []) {
         soldByProduct[line.product_id] = (soldByProduct[line.product_id] ?? 0) + Number(line.quantity ?? 0);
       }
     }
     return (products ?? []).map((product) => {
-      const sold30Days = soldByProduct[product.id] ?? 0;
-      const averageDaily = sold30Days / 30;
+      const soldInRange = soldByProduct[product.id] ?? 0;
+      const averageDaily = soldInRange / elapsedDays;
       const targetStock = averageDaily > 0
         ? Math.ceil(averageDaily * 30 + Number(product.low_stock_threshold ?? 0))
         : Math.ceil(Number(product.low_stock_threshold ?? 0) * 2);
       const suggestedQuantity = Math.max(0, targetStock - Number(product.quantity ?? 0));
-      return { product, sold30Days, averageDaily, targetStock, suggestedQuantity };
+      return { product, soldInRange, averageDaily, targetStock, suggestedQuantity };
     }).filter((row) => row.suggestedQuantity > 0)
       .sort((a, b) => b.suggestedQuantity - a.suggestedQuantity)
       .slice(0, 12);
-  }, [products, sales]);
+  }, [products, sales, replenishmentRange]);
 
   const expiryWatch = useMemo(() => {
     const todayKey = new Date().toISOString().slice(0, 10);
@@ -208,9 +223,9 @@ export default function Products() {
                       <View style={styles.financeHead}>
                         <View>
                           <Text style={styles.financeTitle}>Replenishment suggestions</Text>
-                          <Text style={styles.financeSub}>Last 30 days of sales · target 30 days of cover plus your low-stock buffer</Text>
+                          <Text style={styles.financeSub}>Sales pace for the selected period · suggested stock covers the next 30 days plus your low-stock buffer</Text>
                         </View>
-                        <MaterialDesignIcons name="cart-arrow-down" size={22} color={colors.brandPrimary} />
+                        <Pressable testID="replenishment-period-dropdown" onPress={() => setReplenishmentDropdownOpen(true)} style={styles.periodDropdown}><Text style={styles.periodDropdownText}>{replenishmentRangeLabel}</Text><MaterialDesignIcons name="chevron-down" size={18} color={colors.brandPrimary} /></Pressable>
                       </View>
                       {replenishmentSuggestions.length === 0 ? (
                         <Text style={styles.usageEmpty}>No replenishment needed at current sales and stock levels.</Text>
@@ -221,7 +236,7 @@ export default function Products() {
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.usageName}>{row.product.name}</Text>
                                 <Text style={styles.usageQty}>
-                                  Stock {row.product.quantity} · Sold {row.sold30Days} in 30 days · Suggest {row.suggestedQuantity}
+                                  Stock {row.product.quantity} · Sold {row.soldInRange} · Suggest {row.suggestedQuantity}
                                 </Text>
                               </View>
                               <Badge text={row.averageDaily > 0 ? "Sales based" : "Low stock"} tone={row.averageDaily > 0 ? "success" : "warning"} />
@@ -260,39 +275,6 @@ export default function Products() {
                       ))}
                     </Card>
 
-                    {!isLoading && (
-                      <Card style={styles.usageCard}>
-                        <View style={styles.financeHead}>
-                          <View>
-                            <Text style={styles.financeTitle}>Inventory usage</Text>
-                            <Text style={styles.financeSub}>See which products are used most, medium, or least</Text>
-                          </View>
-                          <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
-                        </View>
-                        <View style={styles.usageTabs}>
-                          {([["month", "This month"], ["year", "This year"], ["all", "All time"]] as const).map(([key, label]) => (
-                            <Pressable key={key} onPress={() => setUsageRange(key)} style={[styles.usageTab, usageRange === key && { backgroundColor: colors.brandPrimary }]}>
-                              <Text style={[styles.usageTabText, usageRange === key && { color: colors.onBrandPrimary }]}>{label}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                        {usageAnalytics.length === 0 ? (
-                          <Text style={styles.usageEmpty}>No inventory items available.</Text>
-                        ) : (
-                          <View style={{ gap: 7 }}>
-                            {usageAnalytics.slice(0, 10).map((row) => (
-                              <View key={row.product_id} style={styles.usageRow}>
-                                <View style={styles.usageRank}><Text style={styles.usageRankText}>{row.rank}</Text></View>
-                                <View style={{ flex: 1 }}><Text style={styles.usageName} numberOfLines={1}>{row.name}</Text><Text style={styles.usageQty}>{row.quantity} units used</Text></View>
-                                <Badge text={row.level} tone={row.level === "High" ? "success" : row.level === "Low" ? "warning" : "muted"} />
-                              </View>
-                            ))}
-                            {usageAnalytics.length > 10 && <Text style={styles.usageMore}>Showing top 10. Lower-use products remain included in the calculations.</Text>}
-                          </View>
-                        )}
-                      </Card>
-                    )}
-              
                     {!isLoading && showInventoryProfitMargin && (
                       <Card style={styles.financeCard}>
                         <View style={styles.financeHead}>
@@ -497,6 +479,28 @@ export default function Products() {
         </View>
       </Modal>
 
+      <Modal visible={replenishmentDropdownOpen} transparent animationType="fade" onRequestClose={() => setReplenishmentDropdownOpen(false)}>
+        <Pressable style={styles.dropdownBackdrop} onPress={() => setReplenishmentDropdownOpen(false)}>
+          <View style={styles.dropdownMenu}>
+            {([
+              ["month", "This month"],
+              ["year", "This year"],
+              ["all", "All time"],
+            ] as const).map(([key, label]) => (
+              <Pressable
+                key={key}
+                testID={`replenishment-period-${key}`}
+                style={styles.dropdownOption}
+                onPress={() => { setReplenishmentRange(key); setReplenishmentDropdownOpen(false); }}
+              >
+                <Text style={[styles.dropdownOptionText, replenishmentRange === key && { color: colors.brandPrimary, fontWeight: "900" }]}>{label}</Text>
+                {replenishmentRange === key && <MaterialDesignIcons name="check" size={18} color={colors.brandPrimary} />}
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
       <BarcodeScannerModal
         visible={scannerOpen}
         onClose={() => setScannerOpen(false)}
@@ -543,6 +547,12 @@ const useStyles = makeStyles((colors) => ({
   categoryChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   categoryChipText: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary },
   categoryChipTextActive: { color: colors.onBrandPrimary },
+  periodDropdown: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.surfaceTertiary },
+  periodDropdownText: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
+  dropdownBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.28)", justifyContent: "center", padding: 28 },
+  dropdownMenu: { alignSelf: "flex-end", minWidth: 180, borderRadius: 14, paddingVertical: 6, backgroundColor: colors.surface, elevation: 8, borderWidth: 1, borderColor: colors.border },
+  dropdownOption: { minHeight: 46, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  dropdownOptionText: { fontSize: 14, color: colors.onSurface, fontWeight: "700" },
   replenishmentButton: { minHeight: 42, borderRadius: 10, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 12, marginTop: 8 },
   replenishmentButtonText: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "800" },
   usageTabs: { flexDirection: "row", gap: 6, marginBottom: 10 },
