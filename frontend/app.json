@@ -55,7 +55,10 @@
           ]
         }
       ],
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        { "faceIDPermission": "Use Face ID to unlock Surgical Store" }
+      ],
       "expo-web-browser",
       "expo-status-bar",
       "@react-native-vector-icons/material-design-icons",
