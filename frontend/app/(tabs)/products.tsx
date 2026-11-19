@@ -8,7 +8,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { canManageStore, useAuth } from "@/src/auth";
-import { useProducts, usePurchases, useSales, useStockMovements, qk } from "@/src/data";
+import { useProducts, usePurchases, useSales, useStockMovements, useSettings, qk } from "@/src/data";
 import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
@@ -29,10 +29,15 @@ export default function Products() {
   const staff = canManageStore(user?.role);
 
   const { data: products, isLoading } = useProducts();
+  const { data: settings } = useSettings();
   const { data: purchases = [] } = usePurchases();
   const { data: sales = [] } = useSales();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const isAdmin = String(user?.role ?? "").toLowerCase() === "admin";
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
@@ -56,8 +61,10 @@ export default function Products() {
       const category = String(product.category || "General Surgical Supplies");
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
-    return ["All", ...Array.from(counts.keys()).sort((a, b) => a.localeCompare(b))];
-  }, [products]);
+    const saved = Array.isArray(settings?.product_categories) ? settings.product_categories : [];
+    const all = new Set([...saved, ...counts.keys()].filter(Boolean));
+    return ["All", ...Array.from(all).sort((a, b) => a.localeCompare(b))];
+  }, [products, settings?.product_categories]);
 
   const filtered = useMemo(() => fuzzyFilter(
     products ?? [],
@@ -199,33 +206,45 @@ export default function Products() {
             <View>
                     <Card style={styles.usageCard}>
                       <View style={styles.financeHead}>
-                        <View>
+                        <View style={{ flex: 1 }}>
                           <Text style={styles.financeTitle}>Product categories</Text>
-                          <Text style={styles.financeSub}>Existing items are categorized automatically; edit any category in product details</Text>
+                          <Text style={styles.financeSub}>Create your own groups and filter stock by category</Text>
                         </View>
-                        <MaterialDesignIcons name="shape-outline" size={22} color={colors.brandPrimary} />
-                      </View>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
-                        {categoryOptions.map((category) => (
-                          <Pressable
-                            key={category}
-                            testID={`stock-category-${category.replace(/[^a-z0-9]+/gi, "-")}`}
-                            onPress={() => setSelectedCategory(category)}
-                            style={[styles.categoryChip, selectedCategory === category && styles.categoryChipActive]}
-                          >
-                            <Text style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]}>{category}</Text>
+                        {isAdmin ? (
+                          <Pressable testID="manage-product-categories" style={styles.manageCategoriesButton} onPress={() => setCategoryManagerOpen(true)}>
+                            <MaterialDesignIcons name="cog-outline" size={17} color={colors.brandPrimary} />
+                            <Text style={styles.manageCategoriesText}>Manage</Text>
                           </Pressable>
-                        ))}
-                      </ScrollView>
+                        ) : <MaterialDesignIcons name="shape-outline" size={22} color={colors.brandPrimary} />}
+                      </View>
+                      <View style={styles.categoryChips}>
+                        {categoryOptions.map((category) => {
+                          const count = category === "All" ? (products ?? []).length : (products ?? []).filter((p) => String(p.category || "General Surgical Supplies") === category).length;
+                          return (
+                            <Pressable key={category} testID={`stock-category-${category.replace(/[^a-z0-9]+/gi, "-")}`} onPress={() => setSelectedCategory(category)} style={[styles.categoryChip, selectedCategory === category && styles.categoryChipActive]}>
+                              <Text style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]}>{category}</Text>
+                              <Text style={[styles.categoryCount, selectedCategory === category && styles.categoryCountActive]}>{count}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
                     </Card>
-
                     <Card style={styles.usageCard}>
-                      <View style={styles.financeHead}>
+                      <View style={{ gap: 10, marginBottom: 10 }}>
                         <View>
                           <Text style={styles.financeTitle}>Replenishment suggestions</Text>
-                          <Text style={styles.financeSub}>Sales pace for the selected period · suggested stock covers the next 30 days plus your low-stock buffer</Text>
+                          <Text style={styles.financeSub}>Based on the selected sales period · target is 30 days of stock plus your low-stock buffer</Text>
                         </View>
-                        <Pressable testID="replenishment-period-dropdown" onPress={() => setReplenishmentDropdownOpen(true)} style={styles.periodDropdown}><Text style={styles.periodDropdownText}>{replenishmentRangeLabel}</Text><MaterialDesignIcons name="chevron-down" size={18} color={colors.brandPrimary} /></Pressable>
+                        <Pressable testID="replenishment-period-dropdown" onPress={() => setReplenishmentDropdownOpen(true)} style={styles.periodDropdownWide}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                            <MaterialDesignIcons name="calendar-range" size={18} color={colors.brandPrimary} />
+                            <Text style={styles.periodDropdownLabel}>Sales period</Text>
+                          </View>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <Text style={styles.periodDropdownText}>{replenishmentRangeLabel}</Text>
+                            <MaterialDesignIcons name="chevron-down" size={20} color={colors.brandPrimary} />
+                          </View>
+                        </Pressable>
                       </View>
                       {replenishmentSuggestions.length === 0 ? (
                         <Text style={styles.usageEmpty}>No replenishment needed at current sales and stock levels.</Text>
@@ -381,6 +400,66 @@ export default function Products() {
           <MaterialDesignIcons name="plus" size={22} color={colors.onBrandPrimary} /><Text style={styles.fabText}>Add product</Text>
         </Pressable>
       )}
+
+      <Modal visible={categoryManagerOpen} animationType="slide" onRequestClose={() => setCategoryManagerOpen(false)}>
+        <View style={styles.root}>
+          <ScreenHeader title="Manage categories" subtitle="Create and organize your stock groups" topInset={insets.top} onBack={() => setCategoryManagerOpen(false)} />
+          <View style={{ padding: 16, gap: 14, flex: 1 }}>
+            <Card>
+              <Text style={styles.financeTitle}>Create a category</Text>
+              <Text style={styles.financeSub}>Examples: Gloves & PPE, IV & Infusion, Syringes & Needles</Text>
+              <TextInput testID="new-product-category-input" value={newCategoryName} onChangeText={setNewCategoryName} placeholder="Enter category name" placeholderTextColor={colors.muted} maxLength={60} style={styles.newCategoryInput} />
+              <Pressable testID="add-product-category" disabled={categoryBusy || !newCategoryName.trim()} style={[styles.addCategoryButton, (categoryBusy || !newCategoryName.trim()) && { opacity: 0.5 }]} onPress={async () => {
+                const name = newCategoryName.trim();
+                if (!name) return;
+                const current = Array.isArray(settings?.product_categories) ? settings.product_categories : [];
+                const existing = new Set([...current, ...categoryOptions.slice(1)].map((v) => v.toLowerCase()));
+                if (existing.has(name.toLowerCase())) { toast("This category already exists", "error"); return; }
+                const next = [...current, name];
+                setCategoryBusy(true);
+                try {
+                  await apiRequest("/settings", { method: "PUT", body: { product_categories: next } });
+                  queryClient.setQueryData(qk.settings, { ...(settings ?? {}), product_categories: next });
+                  setNewCategoryName("");
+                  toast("Category created", "success");
+                } catch (error: any) { toast(error?.message || "Could not create category", "error"); }
+                finally { setCategoryBusy(false); }
+              }}>
+                <MaterialDesignIcons name="plus" size={18} color={colors.onBrandPrimary} />
+                <Text style={styles.addCategoryButtonText}>Create category</Text>
+              </Pressable>
+            </Card>
+            <Text style={styles.categoryListHeading}>Available categories</Text>
+            <FlatList data={categoryOptions.slice(1)} keyExtractor={(item) => item} contentContainerStyle={{ gap: 8, paddingBottom: insets.bottom + 24 }} renderItem={({ item }) => {
+              const count = (products ?? []).filter((p) => String(p.category || "General Surgical Supplies") === item).length;
+              return (
+                <View style={styles.categoryManageRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.categoryManageName}>{item}</Text>
+                    <Text style={styles.categoryManageMeta}>{count} products assigned</Text>
+                  </View>
+                  {count > 0 ? <Badge text="In use" tone="success" /> : (
+                    <Pressable testID={`delete-category-${item.replace(/[^a-z0-9]+/gi, "-")}`} hitSlop={8} onPress={async () => {
+                      const current = Array.isArray(settings?.product_categories) ? settings.product_categories : [];
+                      const next = current.filter((v) => v !== item);
+                      setCategoryBusy(true);
+                      try {
+                        await apiRequest("/settings", { method: "PUT", body: { product_categories: next } });
+                        queryClient.setQueryData(qk.settings, { ...(settings ?? {}), product_categories: next });
+                        if (selectedCategory === item) setSelectedCategory("All");
+                        toast("Category removed", "success");
+                      } catch (error: any) { toast(error?.message || "Could not remove category", "error"); }
+                      finally { setCategoryBusy(false); }
+                    }}>
+                      <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
+                    </Pressable>
+                  )}
+                </View>
+              );
+            }} />
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={!!detailsProduct} animationType="slide" onRequestClose={() => setDetailsProduct(null)}>
         <View style={styles.root}>
@@ -543,11 +622,24 @@ const useStyles = makeStyles((colors) => ({
   scanBtn: { width: 34, height: 34, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
 
   usageCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 2 },
-  categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  categoryChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  categoryChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  categoryCount: { minWidth: 19, textAlign: "center", fontSize: 10, fontWeight: "800", color: colors.muted, backgroundColor: colors.surface, borderRadius: 10, overflow: "hidden", paddingHorizontal: 5, paddingVertical: 2 },
+  categoryCountActive: { color: colors.brandPrimary, backgroundColor: colors.onBrandPrimary },
+  manageCategoriesButton: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 9, backgroundColor: colors.surfaceTertiary },
+  manageCategoriesText: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
+  newCategoryInput: { minHeight: 46, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, color: colors.onSurface, marginTop: 12 },
+  addCategoryButton: { minHeight: 44, marginTop: 10, borderRadius: 10, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  addCategoryButtonText: { color: colors.onBrandPrimary, fontWeight: "800" },
+  categoryListHeading: { fontSize: 14, fontWeight: "900", color: colors.onSurface },
+  categoryManageRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }, 
+  categoryManageName: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  categoryManageMeta: { fontSize: 11, color: colors.muted, marginTop: 3 },
   categoryChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   categoryChipText: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary },
   categoryChipTextActive: { color: colors.onBrandPrimary },
-  periodDropdown: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.surfaceTertiary },
+  periodDropdownWide: { width: "100%", minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  periodDropdownLabel: { fontSize: 12, color: colors.muted, fontWeight: "700" },
   periodDropdownText: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
   dropdownBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.28)", justifyContent: "center", padding: 28 },
   dropdownMenu: { alignSelf: "flex-end", minWidth: 180, borderRadius: 14, paddingVertical: 6, backgroundColor: colors.surface, elevation: 8, borderWidth: 1, borderColor: colors.border },
