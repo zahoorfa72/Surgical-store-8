@@ -7,6 +7,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { useCustomers } from "@/src/data";
 import { ChipRow, EmptyState, Loader, ScreenHeader, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 
 const RANGES = [
   { key: "all", label: "All Time" },
@@ -18,6 +19,7 @@ const RANGES = [
 export default function CustomersReport() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [range, setRange] = useState<string>("all");
@@ -47,7 +49,7 @@ export default function CustomersReport() {
                 </Text>
               </View>
               <View style={styles.right}>
-                <Text style={styles.total}>{money(item.total)}</Text>
+                <Text style={styles.total}>{money(fakeFinanceDisplay ? fakeDisplayAmount(item.total) : item.total)}</Text>
                 {index === 0 && (
                   <View style={styles.topBadge}>
                     <MaterialDesignIcons name="crown" size={12} color={colors.onWarning} />
