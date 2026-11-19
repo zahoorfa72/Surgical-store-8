@@ -6,39 +6,27 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 export const FAKE_FINANCE_KEY = ["fake-finance-display"] as const;
 export const FAKE_FINANCE_STORAGE_KEY = "ssm.fakeFinanceDisplay.v1";
 const FAKE_MASK_FACTOR_KEY = "ssm.fakeFinanceMaskFactor.v1";
-const FAKE_MASK_SEED_KEY = "ssm.fakeFinanceMaskSeed.v1";
 let privateMaskFactor = 0.825;
-let privateMaskSeed = "private-finance";
 let privateMaskProfilePromise: Promise<void> | null = null;
 
 async function ensurePrivateMaskProfile(): Promise<void> {
   if (!privateMaskProfilePromise) {
     privateMaskProfilePromise = (async () => {
       try {
-        const [factorRaw, seedRaw] = await Promise.all([
-          SecureStore.getItemAsync(FAKE_MASK_FACTOR_KEY),
-          SecureStore.getItemAsync(FAKE_MASK_SEED_KEY),
-        ]);
+        const factorRaw = await SecureStore.getItemAsync(FAKE_MASK_FACTOR_KEY);
         const parsedFactor = Number(factorRaw);
-        if (Number.isFinite(parsedFactor) && parsedFactor >= 0.65 && parsedFactor <= 0.95 && seedRaw) {
+        if (Number.isFinite(parsedFactor) && parsedFactor >= 0.65 && parsedFactor <= 0.95) {
           privateMaskFactor = parsedFactor;
-          privateMaskSeed = seedRaw;
           return;
         }
         const bytes = await Crypto.getRandomBytesAsync(18);
-        const seed = Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
         const random = ((bytes[0] << 8) | bytes[1]) / 65535;
         const factor = 0.68 + random * 0.25;
-        await Promise.all([
-          SecureStore.setItemAsync(FAKE_MASK_FACTOR_KEY, factor.toFixed(6)),
-          SecureStore.setItemAsync(FAKE_MASK_SEED_KEY, seed),
-        ]);
+        await SecureStore.setItemAsync(FAKE_MASK_FACTOR_KEY, factor.toFixed(6));
         privateMaskFactor = factor;
-        privateMaskSeed = seed;
       } catch {
         // A privacy mask must never block the POS if secure storage is unavailable.
         privateMaskFactor = 0.825;
-        privateMaskSeed = "private-finance-fallback";
       }
     })();
   }
@@ -74,29 +62,6 @@ export function notifyFakeFinanceDisplay(queryClient: ReturnType<typeof useQuery
   queryClient.setQueryData(FAKE_FINANCE_KEY, enabled);
 }
 
-function stableHash(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return Math.abs(hash >>> 0);
-}
-
-export function fakeMarginPercent(key: string): number {
-  return 11 + (stableHash(privateMaskSeed + ":" + key) % 20);
-}
-
-export function fakeUnitCost(salePrice: number, key: string): number {
-  const sale = Math.max(0, Number(salePrice) || 0);
-  return sale * (1 - fakeMarginPercent(key) / 100);
-}
-
-export function fakeProfit(salePrice: number, key: string): number {
-  const sale = Math.max(0, Number(salePrice) || 0);
-  return sale - fakeUnitCost(sale, key);
-}
-
 export function fakePurchaseTotal(
   items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
   _productsById: Record<string, { sale_price?: number }>,
@@ -125,17 +90,6 @@ export function fakePaymentAmount(amount: unknown, _key?: string): number {
   return fakeDisplayAmount(amount);
 }
 
-export function fakeSaleProfit(sale: {
-  id?: string;
-  items?: Array<{ product_id?: string; quantity?: number; unit_price?: number; sale_price?: number }>;
-}): number {
-  return (sale.items ?? []).reduce((total, item, index) => {
-    const price = Number(item.unit_price ?? item.sale_price ?? 0);
-    const quantity = Math.max(0, Number(item.quantity) || 0);
-    return total + quantity * fakeProfit(price, String(sale.id ?? "sale") + ":" + index);
-  }, 0);
-}
-
 export function fakeDisplayAmount(value: unknown): number {
   const amount = Number(value ?? 0);
   return Number.isFinite(amount) ? amount * privateMaskFactor : 0;
@@ -145,10 +99,11 @@ export function fakeReportRevenue(report: { revenue?: number }): number {
   return fakeDisplayAmount(report.revenue);
 }
 
-export function fakeReportProfit(report: { revenue?: number; gross_profit?: number; lost_stock_gross_profit_transfer?: number }): number {
+export function fakeReportProfit(report: { gross_profit?: number }): number {
+  // Never estimate profit from revenue or a percentage. If the recorded figure
+  // is unavailable, show no synthetic profit value.
   const recordedProfit = Number(report.gross_profit);
-  if (Number.isFinite(recordedProfit)) return fakeDisplayAmount(recordedProfit);
-  return fakeReportRevenue(report) * 0.175 - fakeDisplayAmount(report.lost_stock_gross_profit_transfer);
+  return Number.isFinite(recordedProfit) ? fakeDisplayAmount(recordedProfit) : 0;
 }
 
 
@@ -162,16 +117,10 @@ export function fakeReportNetProfit(report: {
   net_profit_adjustment?: number;
   net_profit?: number;
 }): number {
+  // Use the backend/offline-engine result only. Missing recorded net profit
+  // must never be filled with a made-up percentage or reconstructed estimate.
   const recordedNetProfit = Number(report.net_profit);
-  if (Number.isFinite(recordedNetProfit)) return fakeDisplayAmount(recordedNetProfit);
-  const gross = fakeReportProfit(report);
-  const expenses = fakeDisplayAmount(report.operating_expenses)
-    + fakeDisplayAmount(report.personal_expenses)
-    + fakeDisplayAmount(report.lost_products_net_profit_deduction);
-  const adminAdjustment = Number(report.net_profit_adjustment ?? 0);
-  return gross - expenses
-    + fakeDisplayAmount(report.profit_products_net_profit_addition)
-    + (adminAdjustment >= 0 ? fakeDisplayAmount(adminAdjustment) : -fakeDisplayAmount(-adminAdjustment));
+  return Number.isFinite(recordedNetProfit) ? fakeDisplayAmount(recordedNetProfit) : 0;
 }
 
 
