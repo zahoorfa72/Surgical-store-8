@@ -1687,7 +1687,7 @@ export function resetPasswordRequest(email: string, code: string, new_password: 
   return rawRequest("/auth/reset-password", { method: "POST", body: { email, code, new_password } });
 }
 
-export type StoreSettings = { store_name: string; has_logo: boolean; logo_version: number; search_to_add_enabled: boolean; pending_logo_uri?: string | null };
+export type StoreSettings = { store_name: string; has_logo: boolean; logo_version: number; search_to_add_enabled: boolean; product_categories?: string[]; pending_logo_uri?: string | null };
 
 export function getSettings() {
   return apiRequest<StoreSettings>("/settings");
