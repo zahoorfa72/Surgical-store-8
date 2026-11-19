@@ -108,7 +108,7 @@ export function useProfitVisibility(): ProfitVisibility {
     staleTime: Infinity,
     gcTime: Infinity,
   });
-  return data ?? { grossHidden: false, netHidden: false };
+  // Fail closed while SecureStore reads; never briefly render protected profit values.\n  return data ?? { grossHidden: true, netHidden: true };
 }
 
 export async function updateProfitVisibilityCache(
