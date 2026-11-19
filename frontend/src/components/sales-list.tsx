@@ -11,7 +11,8 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { Sale } from "@/src/models";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatTransactionDateTime, money, transactionDateIso, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeSaleProfit } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
+import { useProfitVisibility } from "@/src/security/finance-security";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 // Shared sales/receipt list used by the Receipts tab (cashier) and the
@@ -20,6 +21,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
   const styles = useStyles();
   const { colors } = useTheme();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const { grossHidden } = useProfitVisibility();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -146,7 +148,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
             const refunded = refundBySale[item.id] ?? 0;
             const refundedProfit = refundProfitBySale[item.id] ?? 0;
             const net = Math.max(0, Number(item.total ?? 0) - refunded);
-            const saleProfit = fakeFinanceDisplay ? fakeSaleProfit(item) : Number(item.profit ?? 0) - refundedProfit;
+            const saleProfit = Number(item.profit ?? 0) - refundedProfit;
             return (
               <Pressable
                 testID={`receipt-row-${item.id}`}
