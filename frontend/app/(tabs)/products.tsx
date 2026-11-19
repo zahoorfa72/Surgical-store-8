@@ -332,21 +332,12 @@ export default function Products() {
           }
           renderItem={({ item }) => {
             const low = item.quantity <= item.low_stock_threshold;
-            const displayStockCost = item.cost_layers?.length
-              ? item.cost_layers.reduce(
-                  (sum, layer, index) =>
-                    sum +
-                    Number(layer.quantity ?? 0) *
-                      (fakeFinanceDisplay
-                        ? fakeDisplayAmount(Number(layer.unit_cost ?? 0))
-                        : Number(layer.unit_cost ?? 0)),
-                  0,
-                )
-              : Number(item.quantity ?? 0) *
-                (fakeFinanceDisplay
-                  ? fakeDisplayAmount(Number(item.purchase_price ?? 0))
-                  : Number(item.purchase_price ?? 0));
-            const displayMargin = Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - displayStockCost;
+            const realStockCost = item.cost_layers?.length
+              ? item.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
+              : Number(item.quantity ?? 0) * Number(item.purchase_price ?? 0);
+            const displayStockCost = fakeFinanceDisplay ? fakeDisplayAmount(realStockCost) : realStockCost;
+            const realMargin = Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - realStockCost;
+            const displayMargin = fakeFinanceDisplay ? fakeDisplayAmount(realMargin) : realMargin;
             return (
               <Pressable
                 testID={`product-row-${item.id}`}
