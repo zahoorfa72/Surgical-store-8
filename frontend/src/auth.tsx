@@ -95,6 +95,27 @@ export async function signupOffline(email: string, name: string, password: strin
   await saveOfflineCredentials(em, password, user, OFFLINE_TOKEN);
 }
 
+// Verify a PIN recovery request without changing the currently signed-in account.
+export async function verifyAdminCredentials(email: string, password: string): Promise<boolean> {
+  const em = email.trim().toLowerCase();
+  if (!em || !password) return false;
+  const verifyLocal = async () => {
+    const vault = await getVault();
+    const record = vault[em];
+    if (record) return record.user.role === "admin" && record.hash === hashPassword(password);
+    const demo = DEMO_ACCOUNTS[em];
+    return !!demo && demo.user.role === "admin" && demo.password === password;
+  };
+  if ((await getConnectionMode()) === "offline") return verifyLocal();
+  try {
+    const response = await loginRequest(em, password);
+    return response.user.role === "admin";
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return false;
+    return verifyLocal();
+  }
+}
+
 type AuthState = {
   user: AppUser | null;
   loading: boolean;
