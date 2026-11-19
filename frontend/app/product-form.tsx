@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { apiRequest } from "@/src/api";
-import { useProducts, qk } from "@/src/data";
+import { useProducts, useSettings, qk } from "@/src/data";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -23,6 +23,8 @@ export default function ProductForm() {
   const toast = useToast();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { data: products } = useProducts();
+  const { data: settings } = useSettings();
+  const categoryOptions = Array.from(new Set([...(settings?.product_categories ?? []), ...(products ?? []).map((p) => String(p.category || "")).filter(Boolean)])).sort((a, b) => a.localeCompare(b));
   const editing = !!id;
 
   const [name, setName] = useState("");
@@ -110,7 +112,18 @@ export default function ProductForm() {
         bottomOffset={20}
       >
         <Field label="Product name" testID="product-name-input" value={name} onChangeText={setName} placeholder="e.g. Surgical gloves (box)" />
-        <Field label="Category" testID="product-category-input" value={category} onChangeText={setCategory} placeholder="Auto-suggested from product name" hint="Examples: Gloves & PPE, IV & Infusion, Catheters & Tubes, Orthopaedic & Implants. You can edit this anytime." />
+        <View style={{ gap: 8 }}>
+          <Field label="Category" testID="product-category-input" value={category} onChangeText={setCategory} placeholder="Choose below or type a new category" hint="Select a saved category or enter a new one." />
+          {categoryOptions.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+              {categoryOptions.map((item) => (
+                <Pressable key={item} testID={`product-category-option-${item.replace(/[^a-z0-9]+/gi, "-")}`} onPress={() => setCategory(item)} style={{ paddingHorizontal: 11, paddingVertical: 8, borderRadius: 18, borderWidth: 1, borderColor: category === item ? colors.brandPrimary : colors.border, backgroundColor: category === item ? colors.brandTertiary : colors.surfaceTertiary }}>
+                  <Text style={{ fontSize: 11, fontWeight: "700", color: category === item ? colors.brandPrimary : colors.onSurfaceSecondary }}>{item}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
+        </View>
         <View style={styles.barcodeRow}>
           <View style={{ flex: 1 }}>
             <Field label="Barcode" testID="product-barcode-input" value={barcode} onChangeText={setBarcode} placeholder="Scan or type" autoCapitalize="none" />
