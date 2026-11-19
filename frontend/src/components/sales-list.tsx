@@ -181,7 +181,7 @@ export function SalesListView({ onBack }: { onBack?: () => void }) {
                     {item.items.length} item(s) · by {item.cashier_name}
                   </Text>
                   <Text style={styles.finance}>
-                    Discount {money(item.discount ?? 0)} · Profit {money(saleProfit)}
+                    Discount {money(item.discount ?? 0)}{!grossHidden ? " · Profit " + money(fakeFinanceDisplay ? fakeDisplayAmount(saleProfit) : saleProfit) : ""}
                   </Text>
                 </View>
                 <View style={styles.rowRight}>
