@@ -411,11 +411,11 @@ export default function Payments() {
                 {isSupplier ? "Total payable (you owe)" : "Total receivable (owed to you)"}
               </Text>
               <Text style={[styles.summaryValue, { color: isSupplier ? colors.error : colors.success }]}>
-                {money(totalOutstanding)}
+                {money(fakeFinanceDisplay ? fakeDisplayAmount(totalOutstanding) : totalOutstanding)}
               </Text>
               {!isSupplier && totalCustomerCredit > 0 && (
                 <Text style={{ color: colors.error, fontSize: 13, fontWeight: "700", marginTop: 6 }}>
-                  Customer credit (store owes): {money(totalCustomerCredit)}
+                  Customer credit (store owes): {money(fakeFinanceDisplay ? fakeDisplayAmount(totalCustomerCredit) : totalCustomerCredit)}
                 </Text>
               )}
               {!isSupplier && admin && (
@@ -456,7 +456,7 @@ export default function Payments() {
                   </Text>
                 </View>
                 <Text style={[styles.balance, { color: owes ? (isSupplier ? colors.error : colors.success) : colors.muted }]}>
-                  {money(Math.abs(displayBalance))}
+                  {money(fakeFinanceDisplay ? fakeDisplayAmount(Math.abs(displayBalance)) : Math.abs(displayBalance))}
                 </Text>
                 <Pressable
                   testID={`record-payment-${item.id}`}
@@ -485,13 +485,13 @@ export default function Payments() {
                           <Text style={styles.ledgerName}>{p.supplier_name}</Text>
                           <Text style={styles.ledgerMeta}>
                             {p.ref_no} · {formatDate(p.created_at)}
-                            {refunded > 0 ? ` · returned ${money(refunded)}` : " · Purchase added to supplier balance"}
+                            {refunded > 0 ? ` · returned ${money(fakeFinanceDisplay ? fakeDisplayAmount(refunded) : refunded)}` : " · Purchase added to supplier balance"}
                           </Text>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
                           <Text style={styles.ledgerAmt}>{money(net)}</Text>
                           {refunded > 0 && (
-                            <Text style={styles.ledgerStruck}>{money(p.total)}</Text>
+                            <Text style={styles.ledgerStruck}>{money(fakeFinanceDisplay ? fakeDisplayAmount(p.total) : p.total)}</Text>
                           )}
                         </View>
                       </View>
@@ -565,12 +565,12 @@ export default function Payments() {
                         {typeof transfer.source_balance_before === "number" && typeof transfer.source_balance_after === "number" &&
                           typeof transfer.destination_balance_before === "number" && typeof transfer.destination_balance_after === "number" && (
                           <Text style={styles.ledgerMeta}>
-                            Source {money(transfer.source_balance_before)} → {money(transfer.source_balance_after)}
-                            {" · "}Destination {money(transfer.destination_balance_before)} → {money(transfer.destination_balance_after)}
+                            Source {money(fakeFinanceDisplay ? fakeDisplayAmount(transfer.source_balance_before) : transfer.source_balance_before)} → {money(fakeFinanceDisplay ? fakeDisplayAmount(transfer.source_balance_after) : transfer.source_balance_after)}
+                            {" · "}Destination {money(fakeFinanceDisplay ? fakeDisplayAmount(transfer.destination_balance_before) : transfer.destination_balance_before)} → {money(fakeFinanceDisplay ? fakeDisplayAmount(transfer.destination_balance_after) : transfer.destination_balance_after)}
                           </Text>
                         )}
                       </View>
-                      <Text style={styles.ledgerAmt}>{money(transfer.amount)}</Text>
+                      <Text style={styles.ledgerAmt}>{money(fakeFinanceDisplay ? fakeDisplayAmount(transfer.amount) : transfer.amount)}</Text>
                     </View>
                   ))}
                 </>
@@ -729,7 +729,7 @@ export default function Payments() {
                   <Text style={styles.transferPartyName}>{selectedTransferFrom?.name ?? "Choose source customer"}</Text>
                   {!!selectedTransferFrom && (
                     <Text style={styles.transferPartyBalance}>
-                      {Number(selectedTransferFrom.balance ?? 0) < 0 ? "Customer credit" : "Owes you"} · {money(transferAvailable)}
+                      {Number(selectedTransferFrom.balance ?? 0) < 0 ? "Customer credit" : "Owes you"} · {money(fakeFinanceDisplay ? fakeDisplayAmount(transferAvailable) : transferAvailable)}
                     </Text>
                   )}
                 </View>
@@ -746,7 +746,7 @@ export default function Payments() {
                   <Text style={styles.transferPartyName}>{selectedTransferTo?.name ?? "Choose destination customer"}</Text>
                   {!!selectedTransferTo && (
                     <Text style={styles.transferPartyBalance}>
-                      Current balance: {money(Number(selectedTransferTo.balance ?? 0))}
+                      Current balance: {money(fakeFinanceDisplay ? fakeDisplayAmount(Number(selectedTransferTo.balance ?? 0)) : Number(selectedTransferTo.balance ?? 0))}
                     </Text>
                   )}
                 </View>
@@ -792,7 +792,7 @@ export default function Payments() {
                           <Text style={styles.transferPartyName}>{party.name}</Text>
                           <Text style={styles.transferPartyBalance}>
                             {Number(party.balance ?? 0) < 0 ? "Customer credit" : Number(party.balance ?? 0) > 0 ? "Owes you" : "Settled"}
-                            {" · "}{money(Math.abs(Number(party.balance ?? 0)))}
+                            {" · "}{money(fakeFinanceDisplay ? fakeDisplayAmount(Math.abs(Number(party.balance ?? 0))) : Math.abs(Number(party.balance ?? 0)))}
                           </Text>
                         </Pressable>
                       ))}
@@ -817,7 +817,7 @@ export default function Payments() {
               {!!selectedTransferFrom && (
                 <>
                   <Text style={styles.hint}>
-                    Available: {money(transferAvailable)} · {Number(selectedTransferFrom.balance ?? 0) < 0 ? "customer credit" : "outstanding balance"}
+                    Available: {money(fakeFinanceDisplay ? fakeDisplayAmount(transferAvailable) : transferAvailable)} · {Number(selectedTransferFrom.balance ?? 0) < 0 ? "customer credit" : "outstanding balance"}
                   </Text>
                   <Pressable
                     testID="transfer-full-balance"
@@ -830,8 +830,8 @@ export default function Payments() {
               )}
               {!!selectedTransferFrom && !!selectedTransferTo && transferValue > 0 && (
                 <Text style={styles.hint}>
-                  Preview · Source: {money(Number(selectedTransferFrom.balance ?? 0) - transferSignedValue)}
-                  {" · "}Destination: {money(Number(selectedTransferTo.balance ?? 0) + transferSignedValue)}
+                  Preview · Source: {money(fakeFinanceDisplay ? fakeDisplayAmount(Number(selectedTransferFrom.balance ?? 0) - transferSignedValue) : Number(selectedTransferFrom.balance ?? 0) - transferSignedValue)}
+                  {" · "}Destination: {money(fakeFinanceDisplay ? fakeDisplayAmount(Number(selectedTransferTo.balance ?? 0) + transferSignedValue) : Number(selectedTransferTo.balance ?? 0) + transferSignedValue)}
                 </Text>
               )}
               <Text style={styles.fieldLabel}>Note — optional</Text>
