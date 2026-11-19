@@ -122,16 +122,25 @@ async function buildLocalSale(body: any, cashierName: string): Promise<Sale> {
     const p = prods.find((x) => x.id === it.product_id);
     const layers = workingLayers.get(it.product_id) ?? (Array.isArray(p?.cost_layers) ? p!.cost_layers.map((l: any) => ({ ...l, quantity: Number(l.quantity ?? 0) })) : []);
     let left = Math.max(0, Number(it.quantity) || 0), cogs = 0;
+    const costLayersUsed: any[] = [];
     for (const layer of layers) {
       if (left <= 1e-9) break;
       const take = Math.min(left, Math.max(0, Number(layer.quantity) || 0));
-      cogs += take * Math.max(0, Number(layer.unit_cost) || 0);
+      if (take > 1e-9) {
+        const unitCost = Math.max(0, Number(layer.unit_cost) || 0);
+        costLayersUsed.push({ ...layer, quantity: take, unit_cost: unitCost });
+        cogs += take * unitCost;
+      }
       layer.quantity = Math.max(0, Number(layer.quantity) - take);
       left -= take;
     }
-    if (left > 1e-9) cogs += left * Math.max(0, Number(p?.purchase_price) || 0);
+    if (left > 1e-9) {
+      const fallbackCost = Math.max(0, Number(p?.purchase_price) || 0);
+      costLayersUsed.push({ quantity: left, unit_cost: fallbackCost, purchase_id: null, batch_number: "", expiry_date: null, non_expiring: false });
+      cogs += left * fallbackCost;
+    }
     workingLayers.set(it.product_id, layers);
-    return { product_id: it.product_id, name: p?.name ?? "Item", quantity: it.quantity, unit_price: it.unit_price, purchase_price: Number(it.quantity) > 0 ? cogs / Number(it.quantity) : 0, line_cogs: Math.round(cogs * 100) / 100, line_total: Math.round(it.quantity * it.unit_price * 100) / 100 };
+    return { product_id: it.product_id, name: p?.name ?? "Item", quantity: it.quantity, unit_price: it.unit_price, purchase_price: Number(it.quantity) > 0 ? cogs / Number(it.quantity) : 0, line_cogs: Math.round(cogs * 100) / 100, line_total: Math.round(it.quantity * it.unit_price * 100) / 100, cost_layers_used: costLayersUsed };
   });
   const subtotal = items.reduce((s: number, i: any) => s + i.line_total, 0);
   const discount = Math.max(0, body.discount ?? 0);
