@@ -111,7 +111,7 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       setError("Only the administrator can set the first app PIN.");
       return;
     }
-    if (!/^\\d{6}$/.test(firstPin) || firstPin !== firstPinConfirm) {
+    if (!/^\d{6}$/.test(firstPin) || firstPin !== firstPinConfirm) {
       setError("Enter matching 6-digit PINs.");
       return;
     }
@@ -218,8 +218,8 @@ export function AppLockGate({ children }: { children: ReactNode }) {
           {user.role === "admin" ? (
             <View style={styles.form}>
               <Text style={styles.subtitle}>Create the administrator's 6-digit PIN before using the store. You will need this PIN when the app starts or returns after 30 seconds in the background.</Text>
-              <TextInput testID="first-app-pin" style={[styles.input, styles.pinInput]} value={firstPin} onChangeText={(v) => setFirstPin(v.replace(/\\D/g, "").slice(0, 6))} placeholder="Create 6-digit PIN" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry maxLength={6} />
-              <TextInput testID="first-app-pin-confirm" style={[styles.input, styles.pinInput]} value={firstPinConfirm} onChangeText={(v) => setFirstPinConfirm(v.replace(/\\D/g, "").slice(0, 6))} placeholder="Confirm 6-digit PIN" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry maxLength={6} />
+              <TextInput testID="first-app-pin" style={[styles.input, styles.pinInput]} value={firstPin} onChangeText={(v) => setFirstPin(v.replace(/\D/g, "").slice(0, 6))} placeholder="Create 6-digit PIN" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry maxLength={6} />
+              <TextInput testID="first-app-pin-confirm" style={[styles.input, styles.pinInput]} value={firstPinConfirm} onChangeText={(v) => setFirstPinConfirm(v.replace(/\D/g, "").slice(0, 6))} placeholder="Confirm 6-digit PIN" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry maxLength={6} />
               <Pressable disabled={busy || firstPin.length !== 6 || firstPinConfirm.length !== 6} style={[styles.primaryButton, (busy || firstPin.length !== 6 || firstPinConfirm.length !== 6) && { opacity: 0.55 }]} onPress={() => void createFirstPin()}>
                 {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Create PIN and enter store</Text>}
               </Pressable>
