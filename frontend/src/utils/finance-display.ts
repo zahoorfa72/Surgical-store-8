@@ -95,19 +95,19 @@ export function fakeDisplayAmount(value: unknown): number {
   return Number.isFinite(amount) ? amount * privateMaskFactor : 0;
 }
 
-export function fakeReportRevenue(report: { revenue?: number }): number {
-  return fakeDisplayAmount(report.revenue);
+export function fakeReportRevenue(report?: { revenue?: number } | null): number {
+  return fakeDisplayAmount(report?.revenue);
 }
 
-export function fakeReportProfit(report: { gross_profit?: number }): number {
+export function fakeReportProfit(report?: { gross_profit?: number } | null): number {
   // Never estimate profit from revenue or a percentage. If the recorded figure
   // is unavailable, show no synthetic profit value.
-  const recordedProfit = Number(report.gross_profit);
+  const recordedProfit = Number(report?.gross_profit);
   return Number.isFinite(recordedProfit) ? fakeDisplayAmount(recordedProfit) : 0;
 }
 
 
-export function fakeReportNetProfit(report: {
+export function fakeReportNetProfit(report?: {
   revenue?: number;
   operating_expenses?: number;
   personal_expenses?: number;
@@ -116,10 +116,10 @@ export function fakeReportNetProfit(report: {
   profit_products_net_profit_addition?: number;
   net_profit_adjustment?: number;
   net_profit?: number;
-}): number {
+} | null): number {
   // Use the backend/offline-engine result only. Missing recorded net profit
   // must never be filled with a made-up percentage or reconstructed estimate.
-  const recordedNetProfit = Number(report.net_profit);
+  const recordedNetProfit = Number(report?.net_profit);
   return Number.isFinite(recordedNetProfit) ? fakeDisplayAmount(recordedNetProfit) : 0;
 }
 
