@@ -164,8 +164,8 @@ export default function Payments() {
 
   const openFor = (p: Party) => {
     setActive(p);
-    const displayedBalance = balanceForParty(p);
-    setAmount(displayedBalance > 0 ? String(Math.abs(displayedBalance)) : "");
+    // Cash entry is always the real amount physically paid/received; never prefill a masked balance.
+    setAmount("");
     setSelectedBill(null);
     setAdjustment("");
     setNote("");
@@ -179,8 +179,9 @@ export default function Payments() {
     // separate admin-only bill-adjustment field.
     const enteredAmount = Math.abs(Number.parseFloat(amount) || 0);
     const enteredAdjustment = Number.parseFloat(adjustment) || 0;
-    const amt = fakeFinanceDisplay ? enteredAmount / 0.825 : enteredAmount;
-    const adj = fakeFinanceDisplay ? enteredAdjustment / 0.825 : enteredAdjustment;
+    // Persist exactly the real cash amount and adjustment entered by the operator.
+    const amt = enteredAmount;
+    const adj = enteredAdjustment;
     if (amt < 0) {
       toast("Cash amount cannot be negative", "error");
       return;
@@ -527,7 +528,7 @@ export default function Payments() {
                             {refund ? "-" : ""}{money(fakeFinanceDisplay ? fakePaymentAmount(p.amount, String(p.id)) : p.amount)}
                           </Text>
                           {admin && <Pressable testID={`edit-payment-${p.id}`} hitSlop={8} style={styles.deleteBtn} onPress={()=>{
-                            setEditingPayment(p); setActive(null); setSelectedBill(null); setEntryKind(p.kind); setAmount(String(Math.abs(fakeFinanceDisplay ? fakeDisplayAmount(p.amount) : p.amount))); setAdjustment(String(fakeFinanceDisplay ? fakeDisplayAmount(p.adjustment || 0) : (p.adjustment || ""))); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
+                            setEditingPayment(p); setActive(null); setSelectedBill(null); setEntryKind(p.kind); setAmount(String(Math.abs(p.amount))); setAdjustment(String(p.adjustment || "")); setNote(p.note||""); setReceiptPhoto(receiptPhotos[p.id] ?? null);
                           }}>
                             <MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/>
                           </Pressable>}
@@ -585,7 +586,7 @@ export default function Payments() {
             <Text style={styles.modalTitle}>
               {editingPayment ? "Edit payment / receipt" : (isSupplier ? "Pay supplier" : "Receive from customer")}
             </Text>
-            <Text style={styles.modalSub}>{editingPayment ? editingPayment.party_name : active?.name} · {editingPayment ? "Edit existing entry" : `balance ${money(active?.balance ?? 0)}`}</Text>
+            <Text style={styles.modalSub}>{editingPayment ? editingPayment.party_name : active?.name} · {editingPayment ? "Edit existing entry" : fakeFinanceDisplay ? "Enter the actual cash paid or received" : `balance ${money(active?.balance ?? 0)}`}</Text>
 
             {!editingPayment && (
               <View style={styles.kindRow}>
@@ -663,7 +664,7 @@ export default function Payments() {
             />
             <Text style={styles.hint}>{isSupplier ? "Positive adjustment reduces what you owe the supplier. Negative adjustments (admin only) increase the balance without cash." : "Receipts are not capped at the bill amount. Overpayment becomes customer credit. Positive adjustment reduces the customer balance; negative adjustment (admin only) increases it without recording cash."}</Text>
             {active && <Text style={styles.hint}>
-              Balance preview: {money(balanceForParty(active))} {Number(balanceForParty(active)) >= 0 ? "outstanding" : "customer credit"} → {money(balanceForParty(active) + ((entryKind === "receive" || entryKind === "pay") ? -Math.abs(Number.parseFloat(amount) || 0) - (Number.parseFloat(adjustment) || 0) : Math.abs(Number.parseFloat(amount) || 0) - (Number.parseFloat(adjustment) || 0)))} after this entry. Cash received/paid and non-cash adjustment are calculated separately.
+              {fakeFinanceDisplay ? "This entry saves the exact real cash amount and adjustment. Private balance figures remain masked." : `Balance preview: ${money(balanceForParty(active))} ${Number(balanceForParty(active)) >= 0 ? "outstanding" : "customer credit"} → ${money(balanceForParty(active) + ((entryKind === "receive" || entryKind === "pay") ? -Math.abs(Number.parseFloat(amount) || 0) - (Number.parseFloat(adjustment) || 0) : Math.abs(Number.parseFloat(amount) || 0) - (Number.parseFloat(adjustment) || 0)))} after this entry. Cash received/paid and non-cash adjustment are calculated separately.`}
             </Text>}
 
             <View style={styles.photoSection}>
