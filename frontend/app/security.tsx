@@ -7,7 +7,6 @@ import { useRouter } from "expo-router";
 import { useAuth, isAdmin, verifyAdminCredentials } from "@/src/auth";
 import { ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { ProfitVisibilityToggle } from "@/src/components/profit-visibility-toggle";
 import {
   disableBiometricUnlock,
   enableBiometricUnlock,
@@ -191,21 +190,6 @@ export default function SecuritySettings() {
             {!pinConfigured && <Text style={styles.cardHint}>Set the administrator PIN first.</Text>}
           </View>
 
-          <View style={styles.card}>
-            <View style={styles.cardHead}>
-              <MaterialDesignIcons name="eye-off-outline" size={22} color={colors.brandPrimary} />
-              <Text style={styles.cardTitle}>Profit visibility</Text>
-            </View>
-            <Text style={styles.cardHint}>Hide either figure from dashboard, reports, charts and product profitability screens. Hiding is immediate. Showing it again always requires the administrator PIN.</Text>
-            <View style={styles.visibilityRow}>
-              <Text style={styles.visibilityLabel}>Gross profit</Text>
-              <ProfitVisibilityToggle kind="gross" />
-            </View>
-            <View style={styles.visibilityRow}>
-              <Text style={styles.visibilityLabel}>Net profit</Text>
-              <ProfitVisibilityToggle kind="net" />
-            </View>
-          </View>
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Lock behaviour</Text>

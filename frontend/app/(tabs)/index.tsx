@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { AppState } from "react-native";
+import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -11,7 +13,7 @@ import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpense
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
-import { useProfitVisibility } from "@/src/security/finance-security";
+import { useProfitVisibility, updateProfitVisibilityCache } from "@/src/security/finance-security";
 import { ProfitVisibilityToggle } from "@/src/components/profit-visibility-toggle";
 
 const displayFinanceAmount = (value: unknown, fake: boolean) => fake ? fakeDisplayAmount(value) : Number(value ?? 0) || 0;
@@ -139,9 +141,17 @@ export default function Dashboard() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
   const { grossHidden, netHidden } = useProfitVisibility();
   const { user } = useAuth();
+  const hideDashboardProfits = useCallback(() => {
+    void Promise.all([updateProfitVisibilityCache(queryClient, "gross", true), updateProfitVisibilityCache(queryClient, "net", true)]);
+  }, [queryClient]);
+  useFocusEffect(useCallback(() => {
+    const sub = AppState.addEventListener("change", (state) => { if (state !== "active") hideDashboardProfits(); });
+    return () => { sub.remove(); hideDashboardProfits(); };
+  }, [hideDashboardProfits]));
   const cashier = user?.role === "cashier";
 
   const now = new Date();
@@ -444,8 +454,16 @@ export default function Dashboard() {
         >
           <View style={styles.financeGrid}>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
-            {!netHidden && <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")} style={styles.statPressable}><StatTile label="Net Profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0)))))} icon="trending-up" tone="success" testID="stat-net-profit" /></Pressable> }
-            {!grossHidden && <StatTile label="Gross Profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" /> }
+            <View style={styles.statPressable}>
+              <Pressable disabled={netHidden || !financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")}>
+                <StatTile label="Net Profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0)))))} icon="trending-up" tone="success" testID="stat-net-profit" />
+              </Pressable>
+              <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="net" /></View>
+            </View>
+            <View style={styles.statPressable}>
+              <StatTile label="Gross Profit" value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
+              <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="gross" /></View>
+            </View>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(localDay); setBalanceFromDate(""); setBalanceToDate(""); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel={periodBalanceLabel} secondaryValue={money(displayFinanceAmount(selectedPeriodRemaining, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
             <StatTile label="Transactions" value={String(data.transactions)} icon="receipt" tone="muted" />
           </View>
@@ -720,8 +738,8 @@ export default function Dashboard() {
             </View>
             {[
               { label: "Revenue", value: Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0), tone: colors.brandPrimary },
-              ...(!grossHidden ? [{ label: "Gross Profit", value: Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), tone: colors.info }] : []),
-              ...(!netHidden ? [{ label: "Net Profit", value: Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), tone: colors.success }] : []),
+              { label: "Gross Profit", value: grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), display: grossHidden ? "Rs ****" : null, tone: colors.info },
+              { label: "Net Profit", value: netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), display: netHidden ? "Rs ****" : null, tone: colors.success },
               { label: "Remaining Balance", value: Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
             ].map((item) => {
               const max = Math.max(1, ...[Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0), !grossHidden ? Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0) : 0, !netHidden ? Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0) : 0, Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0)].map((value) => Math.abs(value)));
@@ -730,7 +748,7 @@ export default function Dashboard() {
                 <View key={item.label} style={styles.chartRow}>
                   <View style={styles.chartLabelRow}>
                     <Text style={styles.chartLabel}>{item.label}</Text>
-                    <Text style={[styles.chartValue, item.value < 0 && { color: colors.error }]}>{money(item.value)}</Text>
+                    <Text style={[styles.chartValue, item.value < 0 && { color: colors.error }]}>{item.display || money(item.value)}</Text>
                   </View>
                   <View style={styles.chartTrack}>
                     <View style={[styles.chartBar, { width: `${width}%`, backgroundColor: item.tone }]} />
@@ -740,20 +758,17 @@ export default function Dashboard() {
             })}
           </Card>
           {/* Profit & loss breakdown */}
-          {(!grossHidden || !netHidden) && <Card>
+          {<Card>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <Text style={styles.cardTitle}>Profit breakdown</Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Text style={{ color: colors.muted, fontSize: 10 }}>Gross</Text><ProfitVisibilityToggle kind="gross" /></View>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Text style={{ color: colors.muted, fontSize: 10 }}>Net</Text><ProfitVisibilityToggle kind="net" /></View>
-              </View>
+              <View />
             </View>
             <PLRow label="Gross sales" value={money(displayFinanceAmount(data.gross_revenue, fakeFinanceDisplay))} />
             <PLRow label="Returns / refunds" value={"- " + money(displayFinanceAmount(data.returns_total, fakeFinanceDisplay))} muted />
             <PLRow label="Net sales" value={money(displayFinanceAmount(data.revenue, fakeFinanceDisplay))} />
             <PLRow label="Inventory purchase (goods sold)" value={"- " + money(displayFinanceAmount(data.cogs_goods, fakeFinanceDisplay))} muted />
             <View style={styles.plDivider} />
-            {!grossHidden && <PLRow label="Gross profit" value={money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />}
+            <PLRow label="Gross profit" value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
             <PLRow label="Personal expenses" value={"- " + money(displayFinanceAmount(data.personal_expenses, fakeFinanceDisplay))} muted />
             <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
             {!netHidden && <>
@@ -761,8 +776,8 @@ export default function Dashboard() {
               <PLRow label="Profit product addition to Net Profit" value={"+ " + money(displayFinanceAmount(data.profit_products_net_profit_addition ?? 0, fakeFinanceDisplay))} muted />
               {Number(data.net_profit_adjustment ?? 0) !== 0 && <PLRow label="Other admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(displayFinanceAmount(Math.abs(Number(data.net_profit_adjustment)), fakeFinanceDisplay))} muted />}
               <View style={styles.plDivider} />
-              <PLRow label="Net profit" value={money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
             </>}
+            <PLRow label="Net profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>}
 
           {/* Remaining balance (cash) */}
