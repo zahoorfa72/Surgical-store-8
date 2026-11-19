@@ -345,6 +345,7 @@ class ResetIn(BaseModel):
 class SettingsIn(BaseModel):
     store_name: Optional[str] = Field(default=None, min_length=1, max_length=60)
     search_to_add_enabled: Optional[bool] = None
+    product_categories: Optional[List[str]] = None
 
 
 # ----- Product models -----
@@ -4403,6 +4404,7 @@ async def get_settings():
         "has_logo": bool(doc.get("logo_data") or doc.get("logo_path")),
         "logo_version": doc.get("logo_version", 0),
         "search_to_add_enabled": doc.get("search_to_add_enabled", True),
+        "product_categories": doc.get("product_categories", []),
     }
 
 
@@ -4413,6 +4415,18 @@ async def update_settings(body: SettingsIn, _: AdminOnly):
         updates["store_name"] = body.store_name.strip()
     if body.search_to_add_enabled is not None:
         updates["search_to_add_enabled"] = body.search_to_add_enabled
+    if body.product_categories is not None:
+        categories = []
+        seen = set()
+        for value in body.product_categories:
+            name = str(value or "").strip()
+            key = name.casefold()
+            if name and key not in seen:
+                if len(name) > 60:
+                    raise HTTPException(status_code=400, detail="Category names must be 60 characters or fewer")
+                seen.add(key)
+                categories.append(name)
+        updates["product_categories"] = categories
     if not updates:
         raise HTTPException(status_code=400, detail="No settings were provided")
     await db.settings.update_one(
