@@ -332,7 +332,7 @@ export default function BusinessIntelligence() {
                 </Card>
                 <Card>
                   <Text style={styles.cardTitle}>Purchase cost history</Text>
-                  {costHistory.map((r, i) => <View key={r.ref + i} style={styles.historyRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{fmtDate(r.date)} · {r.ref}</Text><Text style={styles.rowSub}>{r.supplier} · {r.qty} units</Text></View><Text style={styles.value}>{money(r.cost)}/unit</Text></View>)}
+                  {costHistory.map((r, i) => <View key={r.ref + i} style={styles.historyRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{fmtDate(r.date)} · {r.ref}</Text><Text style={styles.rowSub}>{r.supplier} · {r.qty} units</Text></View><Text style={styles.value}>{money(fakeFinanceDisplay ? fakeDisplayAmount(r.cost) : r.cost)}/unit</Text></View>)}
                   {!costHistory.length && <Text style={styles.empty}>No purchase history.</Text>}
                 </Card>
                 <Card>
