@@ -11,7 +11,7 @@ import { useProducts, useSettings, qk } from "@/src/data";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 
 export default function ProductForm() {
   const styles = useStyles();
@@ -143,7 +143,7 @@ export default function ProductForm() {
         />
         {fakeFinanceDisplay && (
           <Text style={styles.privateHint}>
-            Display purchase: {money(fakeUnitCost(Number(sale), id || name || "new-product"))} · 15–20% display margin. Real cost is hidden and unchanged.
+            Display purchase: {money(fakeDisplayAmount(Number(purchase) || 0))} · Masked display only. The entered real purchase cost is saved unchanged.
           </Text>
         )}
         <Field label="Sale price (per unit)" testID="product-sale-input" value={sale} onChangeText={setSale} keyboardType="numeric" />
