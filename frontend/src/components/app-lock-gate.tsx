@@ -14,7 +14,7 @@ import {
 } from "@/src/security/finance-security";
 
 export function AppLockGate({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const styles = useStyles();
   const { colors } = useTheme();
   const [ready, setReady] = useState(false);
@@ -55,7 +55,7 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       if (!active) return;
       setPinConfigured(hasPin);
       setBiometricEnabled(hasBiometric);
-      setUnlocked(!hasPin);
+      setUnlocked(false);
       setReady(true);
     })().catch(() => {
       if (active) {
