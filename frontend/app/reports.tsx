@@ -103,8 +103,8 @@ export default function Reports() {
           <View style={styles.grid}>
             <StatTile label="Sales (net)" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cart" tone="brand" testID="report-sales" />
             <StatTile label="Purchases" value={money(netPurchases)} icon="truck" tone="warning" testID="report-purchases" />
-            <StatTile label="Returns / refunds" value={money(data.returns_total)} icon="cash-refund" tone="error" testID="report-returns" />
-            <StatTile label="Expenses" value={money(data.total_expenses)} icon="cash-multiple" tone="info" testID="report-expenses" />
+            <StatTile label="Returns / refunds" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.returns_total) : data.returns_total)} icon="cash-refund" tone="error" testID="report-returns" />
+            <StatTile label="Expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.total_expenses) : data.total_expenses)} icon="cash-multiple" tone="info" testID="report-expenses" />
           </View>
 
           {!netHidden && <StatTile
@@ -116,7 +116,7 @@ export default function Reports() {
           />}
           <StatTile
             label="Remaining Balance"
-            value={money(data.remaining_balance)}
+            value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance)}
             icon="wallet"
             tone={Number(data.remaining_balance ?? 0) >= 0 ? "success" : "error"}
             testID="report-remaining-balance"
