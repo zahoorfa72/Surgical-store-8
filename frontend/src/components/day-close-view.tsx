@@ -45,7 +45,7 @@ export function DayCloseView({ onBack }: { onBack?: () => void }) {
             <StatTile label="Transactions" value={String(data.me.transactions)} icon="receipt" tone="brand" testID="dayclose-transactions" />
             <StatTile label="Units sold" value={String(data.me.units)} icon="cube-outline" tone="info" />
             <StatTile label="Discounts given" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.me.discount) : data.me.discount)} icon="tag" tone="warning" />
-            <StatTile label="Net collected" value={money(data.me.gross_sales)} icon="cash" tone="success" />
+            <StatTile label="Net collected" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.me.gross_sales) : data.me.gross_sales)} icon="cash" tone="success" />
           </View>
 
           {data.by_user && (
