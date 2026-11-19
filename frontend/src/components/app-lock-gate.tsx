@@ -89,12 +89,14 @@ export function AppLockGate({ children }: { children: ReactNode }) {
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(() => {
           setUnlocked(false);
+          fingerprintPromptStarted.current = false;
           setPin("");
           setError("");
         }, 30000);
       } else {
         if (backgroundAt.current !== null && Date.now() - backgroundAt.current >= 30000) {
           setUnlocked(false);
+          fingerprintPromptStarted.current = false;
           setPin("");
           setError("");
         }
@@ -218,6 +220,12 @@ export function AppLockGate({ children }: { children: ReactNode }) {
     }
   };
 
+  useEffect(() => {
+    if (!pinConfigured || !biometricEnabled || unlocked || showPinFallback || fingerprintPromptStarted.current) return;
+    fingerprintPromptStarted.current = true;
+    void unlockWithFingerprint();
+  }, [pinConfigured, biometricEnabled, unlocked, showPinFallback]);
+
   if (user && !ready) return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
   if (!user) return <>{children}</>;
   if (!pinConfigured) {
@@ -248,12 +256,6 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       </SafeAreaView>
     );
   }
-  useEffect(() => {
-    if (!pinConfigured || !biometricEnabled || unlocked || showPinFallback || fingerprintPromptStarted.current) return;
-    fingerprintPromptStarted.current = true;
-    void unlockWithFingerprint();
-  }, [pinConfigured, biometricEnabled, unlocked, showPinFallback]);
-
   if (unlocked) return <>{children}</>;
 
   return (
