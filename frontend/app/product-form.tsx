@@ -9,7 +9,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { apiRequest } from "@/src/api";
 import { useProducts, useSettings, qk } from "@/src/data";
 import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
-import { Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
+import { Field, PrimaryButton, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 
