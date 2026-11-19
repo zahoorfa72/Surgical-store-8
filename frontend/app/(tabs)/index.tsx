@@ -776,8 +776,8 @@ export default function Dashboard() {
               <PLRow label="Profit product addition to Net Profit" value={"+ " + money(displayFinanceAmount(data.profit_products_net_profit_addition ?? 0, fakeFinanceDisplay))} muted />
               {Number(data.net_profit_adjustment ?? 0) !== 0 && <PLRow label="Other admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(displayFinanceAmount(Math.abs(Number(data.net_profit_adjustment)), fakeFinanceDisplay))} muted />}
               <View style={styles.plDivider} />
-              <PLRow label="Net profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
             </>}
+            <PLRow label="Net profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>}
 
           {/* Remaining balance (cash) */}
