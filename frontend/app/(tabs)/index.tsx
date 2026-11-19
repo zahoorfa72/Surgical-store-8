@@ -512,7 +512,7 @@ export default function Dashboard() {
                     ))}
                     {(data.lost_stock_transfers ?? []).map((item, index) => (
                       <View key={"lost-stock-transfer-" + item.product_id + "-" + index} style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>{item.product_name} · {item.quantity} lost · {item.date} · Gross Profit → Remaining Balance</Text>
+                        <Text style={styles.detailLabel}>{item.product_name} · {item.quantity} lost · {item.date} · Stock value moved to Remaining Balance</Text>
                         <Text style={styles.detailValue}>{money(displayFinanceAmount(item.purchase_cost, fakeFinanceDisplay))}</Text>
                       </View>
                     ))}
