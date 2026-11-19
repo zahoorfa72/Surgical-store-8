@@ -738,8 +738,8 @@ export default function Dashboard() {
             </View>
             {[
               { label: "Revenue", value: Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0), tone: colors.brandPrimary },
-              ...(!grossHidden ? [{ label: "Gross Profit", value: Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), tone: colors.info }] : []),
-              ...(!netHidden ? [{ label: "Net Profit", value: Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), tone: colors.success }] : []),
+              { label: "Gross Profit", value: grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), display: grossHidden ? "Rs ****" : null, tone: colors.info },
+              { label: "Net Profit", value: netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), display: netHidden ? "Rs ****" : null, tone: colors.success },
               { label: "Remaining Balance", value: Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
             ].map((item) => {
               const max = Math.max(1, ...[Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0), !grossHidden ? Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0) : 0, !netHidden ? Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0) : 0, Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0)].map((value) => Math.abs(value)));
@@ -748,7 +748,7 @@ export default function Dashboard() {
                 <View key={item.label} style={styles.chartRow}>
                   <View style={styles.chartLabelRow}>
                     <Text style={styles.chartLabel}>{item.label}</Text>
-                    <Text style={[styles.chartValue, item.value < 0 && { color: colors.error }]}>{money(item.value)}</Text>
+                    <Text style={[styles.chartValue, item.value < 0 && { color: colors.error }]}>{item.display || money(item.value)}</Text>
                   </View>
                   <View style={styles.chartTrack}>
                     <View style={[styles.chartBar, { width: `${width}%`, backgroundColor: item.tone }]} />
@@ -758,7 +758,7 @@ export default function Dashboard() {
             })}
           </Card>
           {/* Profit & loss breakdown */}
-          {(!grossHidden || !netHidden) && <Card>
+          {<Card>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <Text style={styles.cardTitle}>Profit breakdown</Text>
               <View />
