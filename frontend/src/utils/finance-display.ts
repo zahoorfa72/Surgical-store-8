@@ -66,7 +66,7 @@ export function useFakeFinanceDisplay(): boolean {
     staleTime: Infinity,
     gcTime: Infinity,
   });
-  return data === true;
+  // Fail closed while SecureStore and the display preference are loading; do not flash real figures.\n  return data !== false;
 }
 
 export function notifyFakeFinanceDisplay(queryClient: ReturnType<typeof useQueryClient>, enabled: boolean) {
