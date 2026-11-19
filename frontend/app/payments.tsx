@@ -220,8 +220,8 @@ export default function Payments() {
       }
       await queryClient.invalidateQueries({ queryKey: qk.parties(isSupplier ? "supplier" : "customer") });
       await queryClient.invalidateQueries({ queryKey: qk.payments() });
-      if (!editingPayment) void addAppNotification(isSupplier ? "Supplier payment made" : "Customer payment received", `${active!.name}: ${money(amt)}${note.trim() ? " · " + note.trim() : ""}`, "payment");
-      else void addAppNotification("Payment entry updated", `${active?.name ?? "Party"}: ${money(amt)}`, "payment-updated");
+      if (!editingPayment) void addAppNotification(isSupplier ? "Supplier payment made" : "Customer payment received", `${active!.name}: ${money(fakeFinanceDisplay ? fakeDisplayAmount(amt) : amt)}${note.trim() ? " · " + note.trim() : ""}`, "payment");
+      else void addAppNotification("Payment entry updated", `${active?.name ?? "Party"}: ${money(fakeFinanceDisplay ? fakeDisplayAmount(amt) : amt)}`, "payment-updated");
       toast(editingPayment ? "Entry updated" : (isSupplier ? "Payment recorded" : "Receipt recorded"), "success");
       setActive(null); setEditingPayment(null); setSelectedBill(null);
     } catch (e: any) {
@@ -299,7 +299,7 @@ export default function Payments() {
       ]);
       void addAppNotification(
         "Customer balance transferred",
-        `${selectedTransferFrom.name} → ${selectedTransferTo.name}: ${money(saved.amount)}`,
+        `${selectedTransferFrom.name} → ${selectedTransferTo.name}: ${money(fakeFinanceDisplay ? fakeDisplayAmount(saved.amount) : saved.amount)}`,
         "customer-balance-transfer",
       );
       toast("Customer balance transferred and recorded in history", "success");
@@ -489,7 +489,7 @@ export default function Payments() {
                           </Text>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
-                          <Text style={styles.ledgerAmt}>{money(net)}</Text>
+                          <Text style={styles.ledgerAmt}>{money(fakeFinanceDisplay ? fakeDisplayAmount(net) : net)}</Text>
                           {refunded > 0 && (
                             <Text style={styles.ledgerStruck}>{money(fakeFinanceDisplay ? fakeDisplayAmount(p.total) : p.total)}</Text>
                           )}
