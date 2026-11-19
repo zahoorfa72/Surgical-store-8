@@ -475,7 +475,7 @@ export default function Products() {
                           <Text style={styles.meta}>
                             {formatDetailDate(movement.created_at)}
                             {movement.batch_number ? ` · Batch ${movement.batch_number}` : ""}
-                            {movement.expiry_date ? ` · Expiry ${movement.expiry_date}` : ""}
+                            {movement.non_expiring ? " · Non-expiring" : movement.expiry_date ? ` · Expiry ${movement.expiry_date}` : ""}
                           </Text>
                           {!!movement.note && <Text style={styles.meta}>{movement.note}</Text>}
                           {!!movement.user_name && <Text style={styles.meta}>By {movement.user_name}</Text>}

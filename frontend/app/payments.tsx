@@ -210,6 +210,7 @@ export default function Payments() {
           party_id: active!.id, kind: entryKind, amount: amt, adjustment: adj, note: note.trim(),
           sale_id: selectedBill?.kind === "sale" ? selectedBill.id : null,
           purchase_id: selectedBill?.kind === "purchase" ? selectedBill.id : null,
+          bill_ref: selectedBill?.ref ?? null,
         }});
       }
       if (saved?.id) {

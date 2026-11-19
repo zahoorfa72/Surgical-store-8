@@ -149,7 +149,10 @@ function ensureCostLayers(product: any): any[] {
   for (const layer of rawLayers) {
     const match = layers.find((x: any) =>
       String(x?.purchase_id ?? "") === String(layer?.purchase_id ?? "") &&
-      Math.abs(Number(x?.unit_cost ?? 0) - Number(layer?.unit_cost ?? 0)) <= 1e-8
+      Math.abs(Number(x?.unit_cost ?? 0) - Number(layer?.unit_cost ?? 0)) <= 1e-8 &&
+      String(x?.batch_number ?? "") === String(layer?.batch_number ?? "") &&
+      String(x?.expiry_date ?? "") === String(layer?.expiry_date ?? "") &&
+      !!x?.non_expiring === !!layer?.non_expiring
     );
     if (match) match.quantity = Number(match.quantity ?? 0) + Number(layer.quantity ?? 0);
     else layers.push({ ...layer });
@@ -171,20 +174,23 @@ function ensureCostLayers(product: any): any[] {
   return result;
 }
 
-function appendCostLayer(layers: any[], quantity: number, unitCost: number, purchaseId: string | null = null): any[] {
+function appendCostLayer(layers: any[], quantity: number, unitCost: number, purchaseId: string | null = null, batchNumber = "", expiryDate: string | null = null, nonExpiring = false): any[] {
   const qty = Number(quantity), cost = Number(unitCost);
   if (!Number.isFinite(qty) || qty <= 0) return layers;
   const wantedId = String(purchaseId ?? "");
   const index = layers.findIndex((layer: any) =>
     String(layer?.purchase_id ?? "") === wantedId &&
-    Math.abs(Number(layer?.unit_cost ?? 0) - cost) <= 1e-8
+    Math.abs(Number(layer?.unit_cost ?? 0) - cost) <= 1e-8 &&
+    String(layer?.batch_number ?? "") === String(batchNumber ?? "") &&
+    String(layer?.expiry_date ?? "") === String(expiryDate ?? "") &&
+    !!layer?.non_expiring === !!nonExpiring
   );
   if (index >= 0) {
     return layers.map((layer: any, i: number) => i === index
-      ? { ...layer, quantity: Number(layer.quantity ?? 0) + qty, unit_cost: cost, purchase_id: purchaseId }
+      ? { ...layer, quantity: Number(layer.quantity ?? 0) + qty, unit_cost: cost, purchase_id: purchaseId, batch_number: batchNumber, expiry_date: expiryDate, non_expiring: nonExpiring }
       : layer);
   }
-  return [...layers, { quantity: qty, unit_cost: cost, purchase_id: purchaseId }];
+  return [...layers, { quantity: qty, unit_cost: cost, purchase_id: purchaseId, batch_number: batchNumber, expiry_date: expiryDate, non_expiring: nonExpiring }];
 }
 
 function consumeCostLayersMatching(layers: any[], quantity: number, unitCost: number): { layers: any[]; totalCost: number } {
@@ -225,7 +231,7 @@ function consumeCostLayers(
     const take = Math.min(q, remaining);
     const unitCost = Math.max(0, Number(layer?.unit_cost ?? 0));
     if (take > 1e-9) {
-      usedLayers.push({ quantity: take, unit_cost: unitCost, purchase_id: layer?.purchase_id ?? null });
+      usedLayers.push({ ...layer, quantity: take, unit_cost: unitCost, purchase_id: layer?.purchase_id ?? null });
       totalCost += take * unitCost;
     }
     const left = q - take;
@@ -240,7 +246,7 @@ function consumeCostLayers(
   // beyond available FIFO lots at the product's current purchase-price fallback.
   if (remaining > 1e-9) {
     const unitCost = Math.max(0, Number(fallbackUnitCost) || 0);
-    usedLayers.push({ quantity: remaining, unit_cost: unitCost, purchase_id: null });
+    usedLayers.push({ quantity: remaining, unit_cost: unitCost, purchase_id: null, batch_number: "", expiry_date: null, non_expiring: false });
     totalCost += remaining * unitCost;
   }
   return { layers: next, totalCost, usedLayers };
@@ -261,6 +267,9 @@ function sliceCostLayers(layers: any[], skipQuantity: number, quantity: number):
         quantity: take,
         unit_cost: Math.max(0, Number(layer?.unit_cost ?? 0)),
         purchase_id: layer?.purchase_id ?? null,
+        batch_number: layer?.batch_number ?? "",
+        expiry_date: layer?.expiry_date ?? null,
+        non_expiring: !!layer?.non_expiring,
       });
       remaining -= take;
     }
@@ -293,6 +302,9 @@ function removeCostLayerComposition(layers: any[], usedLayers: any[]): any[] {
       if (remaining <= 1e-9) break;
       if (String(layer.purchase_id ?? "") !== purchaseId) continue;
       if (Math.abs(Number(layer.unit_cost ?? 0) - cost) > 1e-6) continue;
+      if (used?.batch_number != null && String(layer.batch_number ?? "") !== String(used.batch_number)) continue;
+      if (used?.expiry_date != null && String(layer.expiry_date ?? "") !== String(used.expiry_date)) continue;
+      if (used?.non_expiring != null && !!layer.non_expiring !== !!used.non_expiring) continue;
       const take = Math.min(Number(layer.quantity ?? 0), remaining);
       layer.quantity = Number(layer.quantity ?? 0) - take;
       remaining -= take;
@@ -449,7 +461,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
             ? newItem.cost_layers_used
             : [{ quantity: Number(newItem.quantity ?? 0), unit_cost: Number(newItem.purchase_price ?? 0), purchase_id: null }];
           for (const lot of newLayers) {
-            layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null);
+            layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null, lot.batch_number ?? "", lot.expiry_date ?? null, !!lot.non_expiring);
           }
         }
         return {
@@ -505,7 +517,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         for (const it of matching) {
           qty += Number(it.quantity ?? 0);
           for (const lot of it.cost_layers_used ?? []) {
-            layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null);
+            layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null, lot.batch_number ?? "", lot.expiry_date ?? null, !!lot.non_expiring);
           }
         }
         return { ...product, quantity: Number(product.quantity ?? 0) + qty, cost_layers: layers, updated_at: now(), pending: true };
@@ -653,6 +665,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
               Number(lot.quantity ?? 0),
               Number(lot.unit_cost ?? 0),
               lot.purchase_id ?? purchaseId,
+              lot.batch_number ?? "", lot.expiry_date ?? null, !!lot.non_expiring,
             );
           }
         }
@@ -766,6 +779,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
                 Number(lot.quantity ?? 0),
                 Number(lot.unit_cost ?? 0),
                 lot.purchase_id ?? row.purchase_id ?? null,
+                lot.batch_number ?? "", lot.expiry_date ?? null, !!lot.non_expiring,
               );
             }
           }
@@ -916,7 +930,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
                 ? oldItem.cost_layers_used
                 : [{ quantity: Number(oldItem.quantity ?? 0), unit_cost: Number(oldItem.purchase_price ?? 0), purchase_id: null }];
               for (const lot of restored) {
-                layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null);
+                layers = appendCostLayer(layers, Number(lot.quantity ?? 0), Number(lot.unit_cost ?? 0), lot.purchase_id ?? null, lot.batch_number ?? "", lot.expiry_date ?? null, !!lot.non_expiring);
               }
               oldQty += Number(oldItem.quantity ?? 0);
             }
@@ -1029,6 +1043,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
               Number(lot.quantity ?? 0),
               Number(lot.unit_cost ?? 0),
               lot.purchase_id ?? null,
+              lot.batch_number ?? "", lot.expiry_date ?? null, !!lot.non_expiring,
             );
           }
           const nextQty = Number(product.quantity ?? 0) + restoreQty;
@@ -1074,7 +1089,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
         let addedQty = 0;
         for (const it of matching) {
           const qty = Number(it.quantity ?? 0);
-          layers = appendCostLayer(layers, qty, Number(it.unit_cost ?? 0), tempId);
+          layers = appendCostLayer(layers, qty, Number(it.unit_cost ?? 0), tempId, it.batch_number ?? "", it.expiry_date ?? null, !!it.non_expiring);
           addedQty += qty;
         }
         return { ...p, quantity: Number(p.quantity ?? 0) + addedQty,
@@ -1099,7 +1114,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
           const oldQty=oldForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           const newQty=newForProduct.reduce((a:number,x:any)=>a+Number(x.quantity||0),0);
           layers = removePurchaseLot(layers, oldQty, id);
-          for(const ni of newForProduct) layers = appendCostLayer(layers, Number(ni.quantity || 0), Number(ni.unit_cost || 0), id);
+          for(const ni of newForProduct) layers = appendCostLayer(layers, Number(ni.quantity || 0), Number(ni.unit_cost || 0), id, ni.batch_number ?? "", ni.expiry_date ?? null, !!ni.non_expiring);
           const nextQty = Math.max(0, Number(p.quantity ?? 0) + newQty - oldQty);
           layers = ensureCostLayers({ ...p, quantity: nextQty, cost_layers: layers });
           return {...p,quantity:nextQty,cost_layers:layers,purchase_price:newForProduct.length?Number(newForProduct[newForProduct.length-1].unit_cost):p.purchase_price};
@@ -1192,7 +1207,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       const type = (body.kind === "pay" || body.kind === "supplier_refund") ? "supplier" : "customer";
       const list = (queryClient.getQueryData<any[]>(["parties", type]) ?? []) as any[];
       const party = list.find((p) => p.id === body.party_id);
-      const rec = { id: tempId, party_id: body.party_id, party_name: party?.name ?? "", party_type: type, kind: body.kind, amount: body.amount ?? 0, adjustment: body.adjustment ?? 0, note: body.note ?? "", user_name: "", created_at: now(), pending: true };
+      const rec = { id: tempId, party_id: body.party_id, party_name: party?.name ?? "", party_type: type, kind: body.kind, amount: body.amount ?? 0, adjustment: body.adjustment ?? 0, note: body.note ?? "", sale_id: body.sale_id ?? null, purchase_id: body.purchase_id ?? null, bill_ref: body.bill_ref ?? null, user_name: "", created_at: now(), pending: true };
       queryClient.setQueryData<any[]>(["payments", "all"], (old) => [rec, ...(old ?? [])]);
       queryClient.setQueryData<any[]>(["payments", body.party_id], (old) => [rec, ...(old ?? [])]);
       applyBalance(type, body.party_id, balanceEffect(body.kind, body.amount, body.adjustment));
@@ -1257,6 +1272,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
                 Number(used.quantity ?? 0),
                 Math.max(0, Number(used.unit_cost ?? 0)),
                 used.purchase_id ?? null,
+                used.batch_number ?? "", used.expiry_date ?? null, !!used.non_expiring,
               );
             }
           } else {

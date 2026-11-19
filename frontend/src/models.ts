@@ -6,6 +6,7 @@ export type CostLayer = {
   purchase_id?: string | null;
   batch_number?: string;
   expiry_date?: string | null;
+  non_expiring?: boolean;
 };
 
 export type Product = {
@@ -124,6 +125,7 @@ export type PurchaseItem = {
   line_total: number;
   batch_number?: string;
   expiry_date?: string | null;
+  non_expiring?: boolean;
 };
 
 export type StockMovement = {
@@ -138,6 +140,7 @@ export type StockMovement = {
   note: string;
   batch_number?: string;
   expiry_date?: string;
+  non_expiring?: boolean;
 };
 
 export type Purchase = {

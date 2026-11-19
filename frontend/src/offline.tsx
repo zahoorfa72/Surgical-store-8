@@ -25,7 +25,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { ApiError, apiRequest, rawRequest, flushWriteQueue, flushOfflineLogo, getConnectionMode, getWriteQueueCount } from "@/src/api";
 import { queryClient } from "@/src/query-client";
 import { qk } from "@/src/data";
-import { Product, Purchase, Sale } from "@/src/models";
+import { Product, Purchase, Sale, StockMovement } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { useToast } from "@/src/ui";
 import { money, todayIsoDate } from "@/src/format";
@@ -181,6 +181,7 @@ async function buildLocalPurchase(body: any, userName: string): Promise<Purchase
       line_total: Math.round(it.quantity * it.unit_cost * 100) / 100,
       batch_number: it.batch_number ?? "",
       expiry_date: it.expiry_date ?? null,
+      non_expiring: !!it.non_expiring,
     };
   });
   const total = items.reduce((s: number, i: any) => s + i.line_total, 0);
@@ -211,7 +212,7 @@ function applyStockDelta(items: any[], sign: 1 | -1) {
         .filter((x: any) => Number(x?.quantity ?? 0) > 1e-9)
         .map((x: any) => ({ ...x, quantity: Number(x.quantity ?? 0) }));
       if (sign > 0) {
-        layers.push({ quantity: qty, unit_cost: Number(line.unit_cost ?? p.purchase_price ?? 0), purchase_id: null, batch_number: line.batch_number ?? "", expiry_date: line.expiry_date ?? null });
+        layers.push({ quantity: qty, unit_cost: Number(line.unit_cost ?? p.purchase_price ?? 0), purchase_id: null, batch_number: line.batch_number ?? "", expiry_date: line.expiry_date ?? null, non_expiring: !!line.non_expiring });
       } else {
         let remaining = Math.min(qty, Math.max(0, currentQty));
         for (let i = 0; i < layers.length && remaining > 1e-9; i += 1) {
@@ -224,6 +225,47 @@ function applyStockDelta(items: any[], sign: 1 | -1) {
       return { ...p, quantity: nextQty, purchase_price: sign > 0 ? Number(line.unit_cost ?? p.purchase_price ?? 0) : p.purchase_price, cost_layers: nextQty > 0 ? layers.filter((x: any) => Number(x.quantity ?? 0) > 1e-9) : [] };
     }),
   );
+}
+
+function recordLocalStockMovements(
+  items: any[],
+  movementType: "purchase" | "sale",
+  reference: string,
+  userName: string,
+) {
+  const productRows = products();
+  for (const item of items ?? []) {
+    const product = productRows.find((row) => row.id === item.product_id);
+    const lots = movementType === "purchase"
+      ? [{
+          quantity: Number(item.quantity ?? 0),
+          batch_number: item.batch_number ?? "",
+          expiry_date: item.expiry_date ?? null,
+          non_expiring: !!item.non_expiring,
+        }]
+      : (Array.isArray(item.cost_layers_used) && item.cost_layers_used.length
+          ? item.cost_layers_used
+          : [{ quantity: Number(item.quantity ?? 0), batch_number: "", expiry_date: null, non_expiring: false }]);
+    for (const [index, lot] of lots.entries()) {
+      const quantity = Math.max(0, Number(lot.quantity ?? 0));
+      if (quantity <= 0) continue;
+      const movement: StockMovement = {
+        id: `offline-${movementType}-${reference}-${item.product_id}-${index}`,
+        product_id: item.product_id,
+        product_name: item.name ?? product?.name ?? "Item",
+        movement_type: movementType,
+        quantity_delta: movementType === "purchase" ? quantity : -quantity,
+        reference,
+        created_at: new Date().toISOString(),
+        user_name: userName || "Staff",
+        note: "Saved offline; synced when connection returns",
+        batch_number: lot.batch_number ?? "",
+        expiry_date: lot.expiry_date ?? undefined,
+        non_expiring: !!lot.non_expiring,
+      };
+      queryClient.setQueryData<StockMovement[]>(qk.stockMovements(item.product_id), (old) => [movement, ...(old ?? [])]);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +431,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     }
     const local = await buildLocalSale(body, cashierName);
     applyStockDelta(local.items, -1);
+    recordLocalStockMovements(local.items, "sale", local.invoice_no, cashierName);
     queryClient.setQueryData<Sale[]>(qk.sales, (old) => [local, ...(old ?? [])]);
     queryClient.setQueryData(qk.sale(local.id), local);
     if (local.customer_id && local.credit) {
@@ -419,6 +462,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     }
     const local = await buildLocalPurchase(body, userName);
     applyStockDelta(local.items, 1);
+    recordLocalStockMovements(local.items, "purchase", local.ref_no, userName);
     queryClient.setQueryData<Purchase[]>(qk.purchases, (old) => [local, ...(old ?? [])]);
     queryClient.setQueryData(qk.purchase(local.id), local);
     if (local.supplier_id) {

@@ -436,6 +436,7 @@ class PurchaseItemIn(BaseModel):
     unit_cost: float  # editable purchase price
     batch_number: str = ""
     expiry_date: Optional[str] = None
+    non_expiring: bool = False
 
 
 class PurchaseIn(BaseModel):
@@ -483,7 +484,8 @@ async def _ensure_cost_layers(product: dict) -> list:
                       if str(x.get("purchase_id") or "") == str(layer.get("purchase_id") or "")
                       and abs(float(x.get("unit_cost", 0) or 0) - float(layer.get("unit_cost", 0) or 0)) <= 1e-8
                       and str(x.get("batch_number") or "") == str(layer.get("batch_number") or "")
-                      and str(x.get("expiry_date") or "") == str(layer.get("expiry_date") or "")), None)
+                      and str(x.get("expiry_date") or "") == str(layer.get("expiry_date") or "")
+                      and bool(x.get("non_expiring", False)) == bool(layer.get("non_expiring", False))), None)
         if match is None:
             layers.append(layer)
         else:
@@ -591,12 +593,14 @@ def _append_cost_layer(
     purchase_id: Optional[str] = None,
     batch_number: str = "",
     expiry_date: Optional[str] = None,
+    non_expiring: bool = False,
 ) -> list:
     """Add stock to a matching FIFO lot while keeping batch identity intact."""
     quantity = float(quantity)
     unit_cost = float(unit_cost)
     batch_number = str(batch_number or "").strip()
     expiry_date = str(expiry_date or "").strip() or None
+    non_expiring = bool(non_expiring)
     if quantity <= 0:
         return layers
     for index, layer in enumerate(layers):
@@ -604,7 +608,8 @@ def _append_cost_layer(
         same_cost = abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) <= 1e-8
         same_batch = str(layer.get("batch_number") or "") == batch_number
         same_expiry = str(layer.get("expiry_date") or "") == str(expiry_date or "")
-        if same_purchase and same_cost and same_batch and same_expiry:
+        same_expiry_type = bool(layer.get("non_expiring", False)) == non_expiring
+        if same_purchase and same_cost and same_batch and same_expiry and same_expiry_type:
             updated = list(layers)
             updated[index] = {
                 **layer,
@@ -613,11 +618,12 @@ def _append_cost_layer(
                 "purchase_id": purchase_id,
                 "batch_number": batch_number,
                 "expiry_date": expiry_date,
+                "non_expiring": non_expiring,
             }
             return updated
     return [*layers, {
         "quantity": quantity, "unit_cost": unit_cost, "purchase_id": purchase_id,
-        "batch_number": batch_number, "expiry_date": expiry_date,
+        "batch_number": batch_number, "expiry_date": expiry_date, "non_expiring": non_expiring,
     }]
 
 
@@ -635,6 +641,12 @@ def _remove_cost_layer_composition(layers: list, used_layers: list) -> list:
                 continue
             if abs(float(layer.get("unit_cost", 0) or 0) - unit_cost) > 1e-6:
                 continue
+            if str(layer.get("batch_number") or "") != str(used.get("batch_number") or ""):
+                continue
+            if str(layer.get("expiry_date") or "") != str(used.get("expiry_date") or ""):
+                continue
+            if bool(layer.get("non_expiring", False)) != bool(used.get("non_expiring", False)):
+                continue
             available = max(0.0, float(layer.get("quantity", 0) or 0))
             take = min(available, remaining)
             layer["quantity"] = available - take
@@ -648,7 +660,7 @@ def _remove_cost_layer_composition(layers: list, used_layers: list) -> list:
 
 async def _save_cost_layers(product_id: str, layers: list):
     clean = [
-        {"quantity": round(float(x.get("quantity", 0)), 8), "unit_cost": round(float(x.get("unit_cost", 0)), 8), "purchase_id": x.get("purchase_id"), "batch_number": x.get("batch_number", ""), "expiry_date": x.get("expiry_date")}
+        {"quantity": round(float(x.get("quantity", 0)), 8), "unit_cost": round(float(x.get("unit_cost", 0)), 8), "purchase_id": x.get("purchase_id"), "batch_number": x.get("batch_number", ""), "expiry_date": x.get("expiry_date"), "non_expiring": bool(x.get("non_expiring", False)), "non_expiring": bool(x.get("non_expiring", False))}
         for x in layers if float(x.get("quantity", 0) or 0) > 1e-9
     ]
     await db.products.update_one(
@@ -1298,7 +1310,7 @@ def product_public(d: dict) -> ProductOut:
         low_stock_threshold=max(0.0, float(d.get("low_stock_threshold", 5) or 0)),
         expiry_date=d.get("expiry_date"),
         cost_layers=[
-            {"quantity": round(float(x.get("quantity", 0) or 0), 8), "unit_cost": round(float(x.get("unit_cost", 0) or 0), 8), "purchase_id": x.get("purchase_id"), "batch_number": x.get("batch_number", ""), "expiry_date": x.get("expiry_date")}
+            {"quantity": round(float(x.get("quantity", 0) or 0), 8), "unit_cost": round(float(x.get("unit_cost", 0) or 0), 8), "purchase_id": x.get("purchase_id"), "batch_number": x.get("batch_number", ""), "expiry_date": x.get("expiry_date"), "non_expiring": bool(x.get("non_expiring", False))}
             for x in (d.get("cost_layers") or []) if float(x.get("quantity", 0) or 0) > 1e-9
         ],
         # Negative quantity is valid only for an explicit forced sale; keep it visible so inventory shows the real deficit.
@@ -1416,7 +1428,7 @@ async def list_stock_movements(_: Staff, product_id: Optional[str] = None, limit
     product_names = {str(row["_id"]): str(row.get("name", "")) for row in products}
     movements = []
 
-    def add(pid, delta, movement_type, reference="", created_at="", user_name="", note="", batch_number="", expiry_date=""):
+    def add(pid, delta, movement_type, reference="", created_at="", user_name="", note="", batch_number="", expiry_date="", non_expiring=False):
         pid = str(pid or "")
         if not pid or (product_id and pid != product_id) or abs(float(delta or 0)) < 1e-9:
             return
@@ -1432,33 +1444,34 @@ async def list_stock_movements(_: Staff, product_id: Optional[str] = None, limit
             "note": str(note or ""),
             "batch_number": str(batch_number or ""),
             "expiry_date": str(expiry_date or ""),
+            "non_expiring": bool(non_expiring),
         })
 
     purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
     purchase_by_id = {str(row.get("_id")): row for row in purchases}
     for purchase in purchases:
         for item in purchase.get("items", []):
-            add(item.get("product_id"), item.get("quantity", 0), "purchase", purchase.get("ref_no"), purchase.get("created_at"), purchase.get("user_name"), "Stock received", item.get("batch_number"), item.get("expiry_date"))
+            add(item.get("product_id"), item.get("quantity", 0), "purchase", purchase.get("ref_no"), purchase.get("created_at"), purchase.get("user_name"), "Stock received", item.get("batch_number"), item.get("expiry_date"), item.get("non_expiring", False))
 
     sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
     for sale in sales:
         for item in sale.get("items", []):
-            lots = item.get("cost_layers_used") or [{}]
-            first = lots[0] if lots else {}
-            add(item.get("product_id"), -float(item.get("quantity", 0) or 0), "sale", sale.get("invoice_no"), sale.get("created_at"), sale.get("cashier_name"), "Stock sold", first.get("batch_number"), first.get("expiry_date"))
+            lots = item.get("cost_layers_used") or [{"quantity": item.get("quantity", 0)}]
+            for lot in lots:
+                add(item.get("product_id"), -float(lot.get("quantity", 0) or 0), "sale", sale.get("invoice_no"), sale.get("created_at"), sale.get("cashier_name"), "Stock sold", lot.get("batch_number"), lot.get("expiry_date"), lot.get("non_expiring", False))
 
     returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
     for row in returns:
         for item in row.get("items", []):
-            lots = item.get("cost_layers_used") or [{}]
-            first = lots[0] if lots else {}
-            add(item.get("product_id"), item.get("quantity", 0), "customer_return", row.get("ref_no") or row.get("sale_id"), row.get("created_at"), row.get("user_name"), row.get("reason", "Customer return"), first.get("batch_number"), first.get("expiry_date"))
+            lots = item.get("cost_layers_used") or [{"quantity": item.get("quantity", 0)}]
+            for lot in lots:
+                add(item.get("product_id"), lot.get("quantity", 0), "customer_return", row.get("ref_no") or row.get("sale_id"), row.get("created_at"), row.get("user_name"), row.get("reason", "Customer return"), lot.get("batch_number"), lot.get("expiry_date"), lot.get("non_expiring", False))
 
     purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(20000)
     for row in purchase_returns:
         purchase = purchase_by_id.get(str(row.get("purchase_id")), {})
         for item in row.get("items", []):
-            add(item.get("product_id"), -float(item.get("quantity", 0) or 0), "supplier_return", purchase.get("ref_no"), row.get("created_at"), row.get("user_name"), row.get("reason", "Supplier return"), item.get("batch_number"), item.get("expiry_date"))
+            add(item.get("product_id"), -float(item.get("quantity", 0) or 0), "supplier_return", purchase.get("ref_no"), row.get("created_at"), row.get("user_name"), row.get("reason", "Supplier return"), item.get("batch_number"), item.get("expiry_date"), item.get("non_expiring", False))
 
     adjustments = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).to_list(20000)
     for row in adjustments:
@@ -1732,7 +1745,7 @@ async def edit_inventory_adjustment(adjustment_id: str, body: InventoryAdjustmen
          "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
          "purchase_id": layer.get("purchase_id"),
          "batch_number": layer.get("batch_number", ""),
-         "expiry_date": layer.get("expiry_date")}
+         "expiry_date": layer.get("expiry_date"), "non_expiring": bool(layer.get("non_expiring", False)), "non_expiring": bool(layer.get("non_expiring", False))}
         for layer in next_layers if float(layer.get("quantity", 0) or 0) > 1e-9
     ]
 
@@ -2586,6 +2599,7 @@ async def delete_sale(sale_id: str, _: AdminOnly):
                     lot.get("purchase_id"),
                     lot.get("batch_number", ""),
                     lot.get("expiry_date"),
+                    lot.get("non_expiring", False),
                 )
             await db.products.update_one(
                 {"_id": ObjectId(product_id)},
@@ -2775,6 +2789,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
                     lot.get("purchase_id"),
                     lot.get("batch_number", ""),
                     lot.get("expiry_date"),
+                    lot.get("non_expiring", False),
                 )
         product_states[product_id] = {
             "product": product,
@@ -2840,7 +2855,7 @@ async def edit_sale(sale_id: str, body: SaleIn, user: AnyUser):
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
              "purchase_id": layer.get("purchase_id"),
              "batch_number": layer.get("batch_number", ""),
-             "expiry_date": layer.get("expiry_date")}
+             "expiry_date": layer.get("expiry_date"), "non_expiring": bool(layer.get("non_expiring", False))}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -2935,6 +2950,16 @@ async def create_purchase(body: PurchaseIn, user: Staff):
             raise HTTPException(status_code=400, detail="Product not found")
         if it.quantity <= 0:
             raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
+        expiry = str(it.expiry_date or "").strip()
+        if not it.non_expiring:
+            try:
+                parsed_expiry = datetime.strptime(expiry, "%Y-%m-%d").date()
+                if parsed_expiry.isoformat() != expiry:
+                    raise ValueError("invalid date")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Expiry date is required for {p['name']} (YYYY-MM-DD), or mark it as non-expiring")
+        elif expiry:
+            raise HTTPException(status_code=400, detail=f"Non-expiring item {p['name']} must not have an expiry date")
         line_total = round(it.quantity * it.unit_cost, 2)
         total += line_total
         items.append({
@@ -2944,7 +2969,8 @@ async def create_purchase(body: PurchaseIn, user: Staff):
             "unit_cost": it.unit_cost,
             "line_total": line_total,
             "batch_number": str(it.batch_number or "").strip(),
-            "expiry_date": str(it.expiry_date or "").strip() or None,
+            "expiry_date": expiry or None,
+            "non_expiring": bool(it.non_expiring),
         })
 
     supplier_name = "—"
@@ -2973,7 +2999,7 @@ async def create_purchase(body: PurchaseIn, user: Staff):
     for it in body.items:
         product = await db.products.find_one({"_id": ObjectId(it.product_id), "deleted": {"$ne": True}})
         layers = await _ensure_cost_layers(product or {})
-        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, oid(doc["_id"]), it.batch_number, it.expiry_date)
+        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, oid(doc["_id"]), it.batch_number, it.expiry_date, it.non_expiring)
         await db.products.update_one(
             {"_id": ObjectId(it.product_id)},
             {"$inc": {"quantity": it.quantity},
@@ -3077,6 +3103,16 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             raise HTTPException(status_code=400, detail="Product not found")
         if it.quantity <= 0:
             raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
+        expiry = str(it.expiry_date or "").strip()
+        if not it.non_expiring:
+            try:
+                parsed_expiry = datetime.strptime(expiry, "%Y-%m-%d").date()
+                if parsed_expiry.isoformat() != expiry:
+                    raise ValueError("invalid date")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Expiry date is required for {p['name']} (YYYY-MM-DD), or mark it as non-expiring")
+        elif expiry:
+            raise HTTPException(status_code=400, detail=f"Non-expiring item {p['name']} must not have an expiry date")
         line_total = round(it.quantity * it.unit_cost, 2)
         total += line_total
         items.append({
@@ -3086,7 +3122,8 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
             "unit_cost": it.unit_cost,
             "line_total": line_total,
             "batch_number": str(it.batch_number or "").strip(),
-            "expiry_date": str(it.expiry_date or "").strip() or None,
+            "expiry_date": expiry or None,
+            "non_expiring": bool(it.non_expiring),
         })
 
     # Check the budget before stock layers are touched, so rejection is safe.
@@ -3136,7 +3173,7 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
         if not prod:
             continue
         layers = await _ensure_cost_layers(prod)
-        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, purchase_id, it.batch_number, it.expiry_date)
+        layers = _append_cost_layer(layers, it.quantity, it.unit_cost, purchase_id, it.batch_number, it.expiry_date, it.non_expiring)
         await db.products.update_one(
             {"_id": ObjectId(product_id)},
             {"$inc": {"quantity": it.quantity},
@@ -3311,7 +3348,7 @@ async def create_return(body: ReturnIn, user: Staff):
         layers = await _ensure_cost_layers(prod or {})
         original_layers = it.get("cost_layers_used") or [{"quantity": it["quantity"], "unit_cost": it.get("purchase_price", 0), "purchase_id": None}]
         for lot in original_layers:
-            layers = _append_cost_layer(layers, float(lot.get("quantity", 0) or 0), float(lot.get("unit_cost", 0) or 0), lot.get("purchase_id"), lot.get("batch_number", ""), lot.get("expiry_date"))
+            layers = _append_cost_layer(layers, float(lot.get("quantity", 0) or 0), float(lot.get("unit_cost", 0) or 0), lot.get("purchase_id"), lot.get("batch_number", ""), lot.get("expiry_date"), lot.get("non_expiring", False))
         await db.products.update_one(
             {"_id": ObjectId(it["product_id"])},
             {"$inc": {"quantity": it["quantity"]}, "$set": {"cost_layers": layers, "updated_at": now_iso()}},
@@ -3398,12 +3435,14 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
             "purchase_id": body.purchase_id,
             "batch_number": pi.get("batch_number", ""),
             "expiry_date": pi.get("expiry_date"),
+            "non_expiring": bool(pi.get("non_expiring", False)),
             "cost_layers_used": [{
                 "quantity": float(it.quantity),
                 "unit_cost": float(pi["unit_cost"]),
                 "purchase_id": body.purchase_id,
                 "batch_number": pi.get("batch_number", ""),
                 "expiry_date": pi.get("expiry_date"),
+                "non_expiring": bool(pi.get("non_expiring", False)),
             }],
             "line_total": line_total,
         })
@@ -3534,6 +3573,7 @@ async def edit_return(return_id: str, body: ReturnIn, _: AdminOnly):
                 lot.get("purchase_id"),
                 lot.get("batch_number", ""),
                 lot.get("expiry_date"),
+                lot.get("non_expiring", False),
             )
         state["quantity"] += qty
         items.append({
@@ -3566,7 +3606,7 @@ async def edit_return(return_id: str, body: ReturnIn, _: AdminOnly):
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
              "purchase_id": layer.get("purchase_id"),
              "batch_number": layer.get("batch_number", ""),
-             "expiry_date": layer.get("expiry_date")}
+             "expiry_date": layer.get("expiry_date"), "non_expiring": bool(layer.get("non_expiring", False))}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -3622,7 +3662,7 @@ async def delete_return(return_id: str, _: AdminOnly):
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
              "purchase_id": layer.get("purchase_id"),
              "batch_number": layer.get("batch_number", ""),
-             "expiry_date": layer.get("expiry_date")}
+             "expiry_date": layer.get("expiry_date"), "non_expiring": bool(layer.get("non_expiring", False))}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -3686,6 +3726,7 @@ async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminO
                     lot.get("purchase_id") or body.purchase_id,
                     lot.get("batch_number", ""),
                     lot.get("expiry_date"),
+                    lot.get("non_expiring", False),
                 )
             restored_qty += old_qty
         product_states[product_id] = {
@@ -3753,7 +3794,7 @@ async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminO
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
              "purchase_id": layer.get("purchase_id"),
              "batch_number": layer.get("batch_number", ""),
-             "expiry_date": layer.get("expiry_date")}
+             "expiry_date": layer.get("expiry_date"), "non_expiring": bool(layer.get("non_expiring", False))}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
@@ -3804,6 +3845,7 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
                 lot.get("purchase_id") or purchase_id,
                 lot.get("batch_number", ""),
                 lot.get("expiry_date"),
+                lot.get("non_expiring", False),
             )
         state["quantity"] += qty
 
@@ -3817,7 +3859,7 @@ async def delete_purchase_return(return_id: str, _: AdminOnly):
              "unit_cost": round(float(layer.get("unit_cost", 0) or 0), 8),
              "purchase_id": layer.get("purchase_id"),
              "batch_number": layer.get("batch_number", ""),
-             "expiry_date": layer.get("expiry_date")}
+             "expiry_date": layer.get("expiry_date"), "non_expiring": bool(layer.get("non_expiring", False))}
             for layer in state["layers"] if float(layer.get("quantity", 0) or 0) > 1e-9
         ]
         await db.products.update_one(
