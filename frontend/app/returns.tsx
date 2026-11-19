@@ -10,10 +10,12 @@ import { isAdmin, useAuth } from "@/src/auth";
 import { apiRequest } from "@/src/api";
 import { ConfirmModal, EmptyState, Loader, ScreenHeader, formatDateTime, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 
 export default function Returns() {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { data: returns, isLoading } = useReturns();
@@ -43,7 +45,7 @@ export default function Returns() {
                   {item.items.reduce((s, i) => s + i.quantity, 0)} item(s){item.reason ? ` · ${item.reason}` : ""}
                 </Text>
               </View>
-              <Text style={styles.amount}>-{money(item.refund_total)}</Text>{admin && <View style={{flexDirection:"row",gap:8}}><Pressable onPress={()=>router.push(`/return-form?return_id=${item.id}&sale_id=${item.sale_id}`)} hitSlop={8}><MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/></Pressable><Pressable onPress={()=>setToDelete(item)} hitSlop={8}><MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error}/></Pressable></View>}
+              <Text style={styles.amount}>-{money(fakeFinanceDisplay ? fakeDisplayAmount(item.refund_total) : item.refund_total)}</Text>{admin && <View style={{flexDirection:"row",gap:8}}><Pressable onPress={()=>router.push(`/return-form?return_id=${item.id}&sale_id=${item.sale_id}`)} hitSlop={8}><MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary}/></Pressable><Pressable onPress={()=>setToDelete(item)} hitSlop={8}><MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error}/></Pressable></View>}
             </View>
           )}
         />
