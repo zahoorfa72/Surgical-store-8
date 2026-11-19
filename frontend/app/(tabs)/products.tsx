@@ -338,10 +338,7 @@ export default function Products() {
                     sum +
                     Number(layer.quantity ?? 0) *
                       (fakeFinanceDisplay
-                        ? fakeUnitCost(
-                            Number(item.sale_price ?? 0),
-                            String(item.id) + ":lot:" + index,
-                          )
+                        ? fakeDisplayAmount(Number(layer.unit_cost ?? 0))
                         : Number(layer.unit_cost ?? 0)),
                   0,
                 )
@@ -362,7 +359,7 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    {item.category || "General Surgical Supplies"} · Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeDisplayAmount(Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
+                    {item.category || "General Surgical Supplies"} · Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeDisplayAmount(Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeDisplayAmount(Number(item.purchase_price ?? 0)) : Number(item.purchase_price ?? 0))}
                   </Text>
                   {!!item.cost_layers?.length && (
                     <View style={{ gap: 2, marginTop: 3 }}>
