@@ -9,6 +9,8 @@ import { Card, ChipRow, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { DateCalendar } from "@/src/components/date-calendar";
 import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit } from "@/src/utils/finance-display";
+import { useProfitVisibility } from "@/src/security/finance-security";
+import { ProfitVisibilityToggle } from "@/src/components/profit-visibility-toggle";
 
 // Daily / Weekly / Monthly / Yearly. The keys map to the ranges the offline
 // report engine (src/data.ts -> localReport) already understands.
@@ -48,6 +50,7 @@ export default function Reports() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const { grossHidden, netHidden } = useProfitVisibility();
 
   const [range, setRange] = useState<string>("today");
   const [date, setDate] = useState("");
@@ -98,19 +101,19 @@ export default function Reports() {
 
           {/* Headline tiles */}
           <View style={styles.grid}>
-            <StatTile label="Sales (net)" value={money(data.revenue)} icon="cart" tone="brand" testID="report-sales" />
+            <StatTile label="Sales (net)" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cart" tone="brand" testID="report-sales" />
             <StatTile label="Purchases" value={money(netPurchases)} icon="truck" tone="warning" testID="report-purchases" />
             <StatTile label="Returns / refunds" value={money(data.returns_total)} icon="cash-refund" tone="error" testID="report-returns" />
             <StatTile label="Expenses" value={money(data.total_expenses)} icon="cash-multiple" tone="info" testID="report-expenses" />
           </View>
 
-          <StatTile
+          {!netHidden && <StatTile
             label="Net profit"
             value={money(displayNetProfit)}
             icon="trending-up"
             tone={displayNetProfit >= 0 ? "success" : "error"}
             testID="report-net-profit"
-          />
+          />}
           <StatTile
             label="Remaining Balance"
             value={money(data.remaining_balance)}
@@ -122,8 +125,8 @@ export default function Reports() {
           {/* Sales */}
           <Card>
             <SectionHead icon="cart" title="Sales" tone={colors.brandPrimary} />
-            <Row label="Gross sales" value={money(data.gross_revenue)} />
-            <Row label="Less: returns / refunds" value={"- " + money(data.returns_total)} muted />
+            <Row label="Gross sales" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.gross_revenue) : data.gross_revenue)} />
+            <Row label="Less: returns / refunds" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.returns_total) : data.returns_total)} muted />
             <Divider />
             <Row label="Net sales" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} bold tone="brand" />
             <Row label="Transactions" value={String(data.transactions)} muted />
@@ -134,7 +137,7 @@ export default function Reports() {
           <Card>
             <SectionHead icon="truck" title="Purchases" tone={colors.warning} />
             <Row label="Gross purchases" value={money(fakeFinanceDisplay ? netPurchases : Number(data.purchase_gross ?? data.purchase_total))} />
-            <Row label="Less: purchase returns" value={"- " + money(data.purchase_returns_total ?? 0)} muted />
+            <Row label="Less: purchase returns" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.purchase_returns_total ?? 0) : data.purchase_returns_total ?? 0)} muted />
             <Divider />
             <Row label="Net purchases" value={money(netPurchases)} bold tone="warning" />
           </Card>
@@ -155,43 +158,46 @@ export default function Reports() {
             <Row label="Personal expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.personal_expenses) : data.personal_expenses)} />
             <Row label="Lost product loss" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.lost_products_net_profit_deduction ?? 0) : data.lost_products_net_profit_deduction ?? 0)} />
             <Divider />
-            <Row label="Total expenses" value={money(data.total_expenses)} bold tone="info" />
+            <Row label="Total expenses" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.total_expenses) : data.total_expenses)} bold tone="info" />
           </Card>
 
           {/* Profit */}
-          <Card>
-            <SectionHead icon="chart-line" title="Profit" tone={colors.success} />
-            {lostStockTransfer > 0 && <>
-              <Row label="Gross profit before stock transfer" value={money(grossProfitBeforeLostStock)} />
-              <Row label="Less: lost stock moved to Remaining Balance" value={"- " + money(lostStockTransfer)} muted />
+          {(!grossHidden || !netHidden) && <Card>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <SectionHead icon="chart-line" title="Profit" tone={colors.success} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Text style={{ color: colors.muted, fontSize: 10 }}>Gross</Text><ProfitVisibilityToggle kind="gross" /></View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Text style={{ color: colors.muted, fontSize: 10 }}>Net</Text><ProfitVisibilityToggle kind="net" /></View>
+              </View>
+            </View>
+            {!grossHidden && lostStockTransfer > 0 && <>
+              <Row label="Gross profit before stock transfer" value={money(fakeFinanceDisplay ? fakeDisplayAmount(grossProfitBeforeLostStock) : grossProfitBeforeLostStock)} />
+              <Row label="Less: lost stock moved to Remaining Balance" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(lostStockTransfer) : lostStockTransfer)} muted />
             </>}
-            <Row label="Gross profit" value={money(displayGrossProfit)} />
-            <Row label="Less: personal expenses" value={"- " + money(data.personal_expenses)} muted />
-            <Row label="Less: operating expenses" value={"- " + money(data.operating_expenses)} muted />
-            <Row label="Less: lost product deduction" value={"- " + money(data.lost_products_net_profit_deduction ?? 0)} muted />
-            <Row label="Add: profit product value" value={"+ " + money(data.profit_products_net_profit_addition ?? 0)} muted />
-            {Number(data.net_profit_adjustment ?? 0) !== 0 && <Row label="Admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(Math.abs(Number(data.net_profit_adjustment)))} muted />}
-            <Divider />
-            <Row
-              label="Net profit"
-              value={money(displayNetProfit)}
-              bold
-              tone={data.net_profit >= 0 ? "success" : "error"}
-            />
-          </Card>
+            {!grossHidden && <Row label="Gross profit" value={money(displayGrossProfit)} />}
+            <Row label="Less: personal expenses" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.personal_expenses) : data.personal_expenses)} muted />
+            <Row label="Less: operating expenses" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.operating_expenses) : data.operating_expenses)} muted />
+            {!netHidden && <>
+              <Row label="Less: lost product deduction" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.lost_products_net_profit_deduction ?? 0) : data.lost_products_net_profit_deduction ?? 0)} muted />
+              <Row label="Add: profit product value" value={"+ " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.profit_products_net_profit_addition ?? 0) : data.profit_products_net_profit_addition ?? 0)} muted />
+              {Number(data.net_profit_adjustment ?? 0) !== 0 && <Row label="Admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(fakeFinanceDisplay ? fakeDisplayAmount(Math.abs(Number(data.net_profit_adjustment))) : Math.abs(Number(data.net_profit_adjustment)))} muted />}
+              <Divider />
+              <Row label="Net profit" value={money(displayNetProfit)} bold tone={data.net_profit >= 0 ? "success" : "error"} />
+            </>}
+          </Card>}
 
           {lostStockRows.length > 0 && <Card>
             <SectionHead icon="package-variant-closed" title="Lost stock accounting transfer" tone={colors.warning} />
             <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
               Purchase cost reduces Gross Profit (and therefore Net Profit) and increases Remaining Balance by the same amount, once.
             </Text>
-            <Row label="Total moved to Remaining Balance" value={"+ " + money(data.lost_stock_remaining_balance_addition ?? lostStockTransfer)} bold tone="success" />
+            <Row label="Total moved to Remaining Balance" value={"+ " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.lost_stock_remaining_balance_addition ?? lostStockTransfer) : data.lost_stock_remaining_balance_addition ?? lostStockTransfer)} bold tone="success" />
             {lostStockRows.map((item, index) => <View key={item.product_id + "-" + item.date + "-" + index} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 8 }}>
               <Text style={{ color: colors.onSurface, fontWeight: "700" }}>{item.product_name} · {item.quantity} lost</Text>
               <Text style={{ color: colors.muted, fontSize: 12, marginTop: 3 }}>{item.date}{item.reason ? " · " + item.reason : ""}</Text>
-              <Row label="Purchase cost" value={money(item.purchase_cost)} />
-              <Row label="Gross Profit deduction" value={"- " + money(item.gross_profit_deduction)} tone="error" />
-              <Row label="Remaining Balance addition" value={"+ " + money(item.remaining_balance_addition)} tone="success" />
+              <Row label="Purchase cost" value={money(fakeFinanceDisplay ? fakeDisplayAmount(item.purchase_cost) : item.purchase_cost)} />
+              {!grossHidden && <Row label="Gross Profit deduction" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(item.gross_profit_deduction) : item.gross_profit_deduction)} tone="error" />}
+              <Row label="Remaining Balance addition" value={"+ " + money(fakeFinanceDisplay ? fakeDisplayAmount(item.remaining_balance_addition) : item.remaining_balance_addition)} tone="success" />
             </View>)}
           </Card>}
         </ScrollView>
