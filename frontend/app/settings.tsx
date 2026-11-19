@@ -349,8 +349,8 @@ export default function Settings() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Private financial display</Text>
             <Text style={styles.cardHint}>
-              When enabled, screens show display-only purchase costs and profit. Real purchase prices, profit, stock costs and finance calculations are never changed.
-              Fake margin is deterministic between 15% and 20% and works offline and online.
+              This is a display-only privacy mask for summary screens. Purchase entry, sale checkout, supplier returns, payments, invoices and stored accounting always use the actual rates and amounts. It never changes your real records.
+              This is not an accounting mode or a replacement for role-based access controls.
             </Text>
             <View style={styles.visibilityRow}>
               <View style={styles.visibilityText}>
