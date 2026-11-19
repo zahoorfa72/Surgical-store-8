@@ -29,6 +29,8 @@ export function AppLockGate({ children }: { children: ReactNode }) {
   const [adminPassword, setAdminPassword] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
+  const [firstPin, setFirstPin] = useState("");
+  const [firstPinConfirm, setFirstPinConfirm] = useState("");
   const [attempts, setAttempts] = useState(0);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const backgroundAt = useRef<number | null>(null);
@@ -69,10 +71,7 @@ export function AppLockGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener("ssm.admin-pin-configured", (enabled: boolean) => {
       setPinConfigured(enabled);
-      if (enabled) {
-        setUnlocked(false);
-        setPin("");
-      }
+      if (enabled) setPin("");
     });
     return () => subscription.remove();
   }, []);
@@ -105,6 +104,32 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       timer.current = null;
     };
   }, [user?.id, pinConfigured]);
+
+  const createFirstPin = async () => {
+    if (busy) return;
+    if (user?.role !== "admin") {
+      setError("Only the administrator can set the first app PIN.");
+      return;
+    }
+    if (!/^\\d{6}$/.test(firstPin) || firstPin !== firstPinConfirm) {
+      setError("Enter matching 6-digit PINs.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await setAdminPin(firstPin);
+      setPinConfigured(true);
+      setUnlocked(true);
+      setFirstPin("");
+      setFirstPinConfirm("");
+      setError("");
+    } catch (e: any) {
+      setError(e?.message || "Could not create administrator PIN.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const unlockWithPin = async () => {
     if (busy) return;
@@ -183,7 +208,36 @@ export function AppLockGate({ children }: { children: ReactNode }) {
   };
 
   if (user && !ready) return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
-  if (!user || !pinConfigured || unlocked) return <>{children}</>;
+  if (!user) return <>{children}</>;
+  if (!pinConfigured) {
+    return (
+      <SafeAreaView style={styles.overlay}>
+        <KeyboardAvoidingView style={styles.content} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <View style={styles.brandIcon}><MaterialDesignIcons name="shield-lock" size={34} color={colors.onBrandPrimary} /></View>
+          <Text style={styles.title}>Secure this device</Text>
+          {user.role === "admin" ? (
+            <View style={styles.form}>
+              <Text style={styles.subtitle}>Create the administrator's 6-digit PIN before using the store. You will need this PIN when the app starts or returns after 30 seconds in the background.</Text>
+              <TextInput testID="first-app-pin" style={[styles.input, styles.pinInput]} value={firstPin} onChangeText={(v) => setFirstPin(v.replace(/\\D/g, "").slice(0, 6))} placeholder="Create 6-digit PIN" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry maxLength={6} />
+              <TextInput testID="first-app-pin-confirm" style={[styles.input, styles.pinInput]} value={firstPinConfirm} onChangeText={(v) => setFirstPinConfirm(v.replace(/\\D/g, "").slice(0, 6))} placeholder="Confirm 6-digit PIN" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry maxLength={6} />
+              <Pressable disabled={busy || firstPin.length !== 6 || firstPinConfirm.length !== 6} style={[styles.primaryButton, (busy || firstPin.length !== 6 || firstPinConfirm.length !== 6) && { opacity: 0.55 }]} onPress={() => void createFirstPin()}>
+                {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Create PIN and enter store</Text>}
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.form}>
+              <Text style={styles.subtitle}>The administrator must sign in once and create the app PIN before this device can be used.</Text>
+              <Pressable style={styles.primaryButton} onPress={() => void logout()}>
+                <Text style={styles.primaryText}>Sign out for administrator setup</Text>
+              </Pressable>
+            </View>
+          )}
+          {!!error && <Text style={styles.error}>{error}</Text>}
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+  if (unlocked) return <>{children}</>;
 
   return (
     <View style={{ flex: 1 }}>
