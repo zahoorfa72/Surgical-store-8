@@ -589,10 +589,10 @@ export default function Payments() {
 
             {!editingPayment && (
               <View style={styles.kindRow}>
-                <Pressable testID={`payment-kind-${isSupplier ? "pay" : "receive"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "pay" : "receive") && styles.kindBtnActive]} onPress={() => { setEntryKind(isSupplier ? "pay" : "receive"); setSelectedBill(null); }}}>
+                <Pressable testID={`payment-kind-${isSupplier ? "pay" : "receive"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "pay" : "receive") && styles.kindBtnActive]} onPress={() => { setEntryKind(isSupplier ? "pay" : "receive"); setSelectedBill(null); }}>
                   <Text style={[styles.kindText, entryKind === (isSupplier ? "pay" : "receive") && styles.kindTextActive]}>{isSupplier ? "Pay Supplier" : "Receive Customer"}</Text>
                 </Pressable>
-                <Pressable testID={`payment-kind-${isSupplier ? "supplier_refund" : "customer_refund"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "supplier_refund" : "customer_refund") && styles.kindBtnActive]} onPress={() => { setEntryKind(isSupplier ? "supplier_refund" : "customer_refund"); setSelectedBill(null); }}}>
+                <Pressable testID={`payment-kind-${isSupplier ? "supplier_refund" : "customer_refund"}`} style={[styles.kindBtn, entryKind === (isSupplier ? "supplier_refund" : "customer_refund") && styles.kindBtnActive]} onPress={() => { setEntryKind(isSupplier ? "supplier_refund" : "customer_refund"); setSelectedBill(null); }}>
                   <Text style={[styles.kindText, entryKind === (isSupplier ? "supplier_refund" : "customer_refund") && styles.kindTextActive]}>{isSupplier ? "Supplier Refund" : "Customer Refund"}</Text>
                 </Pressable>
               </View>
