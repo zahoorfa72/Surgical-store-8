@@ -6,6 +6,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import { useDayClose } from "@/src/data";
 import { ChipRow, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 
 const RANGES = [
   { key: "today", label: "Today" },
@@ -18,6 +19,7 @@ const RANGES = [
 export function DayCloseView({ onBack }: { onBack?: () => void }) {
   const styles = useStyles();
   const { colors } = useTheme();
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<string>("today");
   const { data, isLoading } = useDayClose(range);
@@ -35,14 +37,14 @@ export function DayCloseView({ onBack }: { onBack?: () => void }) {
               <MaterialDesignIcons name="account-clock" size={22} color={colors.onBrandPrimary} />
               <Text style={styles.heroName}>{data.me.user_name}</Text>
             </View>
-            <Text style={styles.heroTotal}>{money(data.me.gross_sales)}</Text>
+            <Text style={styles.heroTotal}>{money(fakeFinanceDisplay ? fakeDisplayAmount(data.me.gross_sales) : data.me.gross_sales)}</Text>
             <Text style={styles.heroLabel}>Your sales this {range === "today" ? "shift" : range}</Text>
           </View>
 
           <View style={styles.grid}>
             <StatTile label="Transactions" value={String(data.me.transactions)} icon="receipt" tone="brand" testID="dayclose-transactions" />
             <StatTile label="Units sold" value={String(data.me.units)} icon="cube-outline" tone="info" />
-            <StatTile label="Discounts given" value={money(data.me.discount)} icon="tag" tone="warning" />
+            <StatTile label="Discounts given" value={money(fakeFinanceDisplay ? fakeDisplayAmount(data.me.discount) : data.me.discount)} icon="tag" tone="warning" />
             <StatTile label="Net collected" value={money(data.me.gross_sales)} icon="cash" tone="success" />
           </View>
 
@@ -59,7 +61,7 @@ export function DayCloseView({ onBack }: { onBack?: () => void }) {
                       <Text style={styles.staffName}>{u.user_name}</Text>
                       <Text style={styles.staffMeta}>{u.transactions} sale(s) · {u.units} unit(s)</Text>
                     </View>
-                    <Text style={styles.staffTotal}>{money(u.gross_sales)}</Text>
+                    <Text style={styles.staffTotal}>{money(fakeFinanceDisplay ? fakeDisplayAmount(u.gross_sales) : u.gross_sales)}</Text>
                   </View>
                 ))}
               </View>
