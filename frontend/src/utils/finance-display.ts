@@ -122,7 +122,7 @@ export function fakeDisplayAmount(value: unknown): number {
   const hash = stableMaskHash(privateMaskSeed + ":" + cents);
   const unit = hash / 0xffffffff;
   const adjustment = 0.78 + unit * 0.42;
-  const factor = Math.max(0.58, Math.min(1.02, privateMaskFactor * adjustment));
+  const factor = Math.max(0.58, Math.min(0.96, privateMaskFactor * adjustment));
   return amount * factor;
 }
 
