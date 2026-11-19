@@ -92,7 +92,7 @@ export async function getProfitVisibility(): Promise<ProfitVisibility> {
     ]);
     return { grossHidden: gross === "1", netHidden: net === "1" };
   } catch {
-    return { grossHidden: false, netHidden: false };
+    return { grossHidden: true, netHidden: true };
   }
 }
 
