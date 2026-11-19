@@ -6,27 +6,39 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 export const FAKE_FINANCE_KEY = ["fake-finance-display"] as const;
 export const FAKE_FINANCE_STORAGE_KEY = "ssm.fakeFinanceDisplay.v1";
 const FAKE_MASK_FACTOR_KEY = "ssm.fakeFinanceMaskFactor.v1";
+const FAKE_MASK_SEED_KEY = "ssm.fakeFinanceMaskSeed.v1";
 let privateMaskFactor = 0.825;
+let privateMaskSeed = "private-finance-fallback";
 let privateMaskProfilePromise: Promise<void> | null = null;
 
 async function ensurePrivateMaskProfile(): Promise<void> {
   if (!privateMaskProfilePromise) {
     privateMaskProfilePromise = (async () => {
       try {
-        const factorRaw = await SecureStore.getItemAsync(FAKE_MASK_FACTOR_KEY);
+        const [factorRaw, seedRaw] = await Promise.all([
+          SecureStore.getItemAsync(FAKE_MASK_FACTOR_KEY),
+          SecureStore.getItemAsync(FAKE_MASK_SEED_KEY),
+        ]);
         const parsedFactor = Number(factorRaw);
-        if (Number.isFinite(parsedFactor) && parsedFactor >= 0.65 && parsedFactor <= 0.95) {
+        if (Number.isFinite(parsedFactor) && parsedFactor >= 0.65 && parsedFactor <= 0.95 && seedRaw) {
           privateMaskFactor = parsedFactor;
+          privateMaskSeed = seedRaw;
           return;
         }
-        const bytes = await Crypto.getRandomBytesAsync(18);
+        const bytes = await Crypto.getRandomBytesAsync(32);
         const random = ((bytes[0] << 8) | bytes[1]) / 65535;
         const factor = 0.68 + random * 0.25;
-        await SecureStore.setItemAsync(FAKE_MASK_FACTOR_KEY, factor.toFixed(6));
+        const seed = Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
+        await Promise.all([
+          SecureStore.setItemAsync(FAKE_MASK_FACTOR_KEY, factor.toFixed(6)),
+          SecureStore.setItemAsync(FAKE_MASK_SEED_KEY, seed),
+        ]);
         privateMaskFactor = factor;
+        privateMaskSeed = seed;
       } catch {
         // A privacy mask must never block the POS if secure storage is unavailable.
         privateMaskFactor = 0.825;
+        privateMaskSeed = "private-finance-fallback";
       }
     })();
   }
@@ -62,27 +74,28 @@ export function notifyFakeFinanceDisplay(queryClient: ReturnType<typeof useQuery
   queryClient.setQueryData(FAKE_FINANCE_KEY, enabled);
 }
 
-export function fakePurchaseTotal(
-  items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
-  _productsById: Record<string, { sale_price?: number }>,
-  recordKey: string,
-): number {
-  // Supplier finance must use one identical display factor everywhere.
-  // The real purchase lot costs remain untouched; only the displayed total is masked.
-  const realTotal = items.reduce((total, item) => {
+function realPurchaseTotal(items: Array<{ quantity?: number; unit_cost?: number }>): number {
+  return items.reduce((total, item) => {
     const unitCost = Math.max(0, Number(item.unit_cost ?? 0) || 0);
     const quantity = Math.max(0, Number(item.quantity) || 0);
     return total + quantity * unitCost;
   }, 0);
-  return fakeDisplayAmount(realTotal);
+}
+
+export function fakePurchaseTotal(
+  items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
+  _productsById: Record<string, { sale_price?: number }>,
+  _recordKey: string,
+): number {
+  return fakeDisplayAmount(realPurchaseTotal(items));
 }
 export function fakePurchaseNetTotal(
   items: Array<{ product_id?: string; quantity?: number; unit_cost?: number }>,
-  productsById: Record<string, { sale_price?: number }>,
-  recordKey: string,
+  _productsById: Record<string, { sale_price?: number }>,
+  _recordKey: string,
   refundTotal = 0,
 ): number {
-  return Math.max(0, fakePurchaseTotal(items, productsById, recordKey) - fakeDisplayAmount(refundTotal));
+  return fakeDisplayAmount(Math.max(0, realPurchaseTotal(items) - Math.max(0, Number(refundTotal) || 0)));
 }
 
 export function fakePaymentAmount(amount: unknown, _key?: string): number {
@@ -90,9 +103,27 @@ export function fakePaymentAmount(amount: unknown, _key?: string): number {
   return fakeDisplayAmount(amount);
 }
 
+function stableMaskHash(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 export function fakeDisplayAmount(value: unknown): number {
   const amount = Number(value ?? 0);
-  return Number.isFinite(amount) ? amount * privateMaskFactor : 0;
+  if (!Number.isFinite(amount)) return 0;
+  if (Math.abs(amount) < 0.005) return 0;
+  // The same real amount always displays consistently across screens, but different
+  // amounts get independent factors. This avoids one obvious global percentage.
+  const cents = Math.round(Math.abs(amount) * 100);
+  const hash = stableMaskHash(privateMaskSeed + ":" + cents);
+  const unit = hash / 0xffffffff;
+  const adjustment = 0.78 + unit * 0.42;
+  const factor = Math.max(0.58, Math.min(1.02, privateMaskFactor * adjustment));
+  return amount * factor;
 }
 
 export function fakeReportRevenue(report?: { revenue?: number } | null): number {
