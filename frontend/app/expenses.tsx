@@ -11,6 +11,7 @@ import { useBudget, useExpenses, qk } from "@/src/data";
 import { Expense, ExpenseBucket } from "@/src/models";
 import { Badge, ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatTransactionDate, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -33,6 +34,7 @@ export default function Expenses() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { user } = useAuth(); const admin = isAdmin(user?.role);
+  const fakeFinanceDisplay = useFakeFinanceDisplay();
 
   const [filter, setFilter] = useState<string>("all");
   const bucket = filter === "all" ? undefined : (filter as ExpenseBucket);
@@ -53,10 +55,10 @@ export default function Expenses() {
   };
   const filterOptions = FILTERS.map((option) => ({
     ...option,
-    label: option.key === "all" ? `All · ${money((allExpenses ?? []).reduce((sum, e) => sum + e.amount, 0))}`
-      : option.key === "operating" ? `Operating · ${money(branchTotals.operating)}`
-      : option.key === "cogs" ? `Direct · ${money(branchTotals.cogs)}`
-      : `Personal · ${money(branchTotals.personal)}`,
+    label: option.key === "all" ? `All · ${money(fakeFinanceDisplay ? fakeDisplayAmount((allExpenses ?? []).reduce((sum, e) => sum + e.amount, 0)) : (allExpenses ?? []).reduce((sum, e) => sum + e.amount, 0))}`
+      : option.key === "operating" ? `Operating · ${money(fakeFinanceDisplay ? fakeDisplayAmount(branchTotals.operating) : branchTotals.operating)}`
+      : option.key === "cogs" ? `Direct · ${money(fakeFinanceDisplay ? fakeDisplayAmount(branchTotals.cogs) : branchTotals.cogs)}`
+      : `Personal · ${money(fakeFinanceDisplay ? fakeDisplayAmount(branchTotals.personal) : branchTotals.personal)}`,
   }));
 
   const saveBudget = async () => {
@@ -89,7 +91,7 @@ export default function Expenses() {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title="Expenses" subtitle={`Total ${money(total)}`} topInset={insets.top} onBack={() => router.back()} />
+      <ScreenHeader title="Expenses" subtitle={`Total ${money(fakeFinanceDisplay ? fakeDisplayAmount(total) : total)}`} topInset={insets.top} onBack={() => router.back()} />
       <ChipRow options={filterOptions as any} value={filter} onChange={setFilter} testIDPrefix="expense-filter" />
 
       {isLoading ? (
@@ -104,7 +106,7 @@ export default function Expenses() {
               <Pressable
                 testID="budget-card"
                 style={styles.budgetCard}
-                onPress={() => { setBudgetInput(String(budget.monthly_amount || "")); setOpeningInput(String(budget.opening_amount || "")); setBudgetOpen(true); }}
+                onPress={() => { if (fakeFinanceDisplay) { toast("Turn off Private Finance in Settings to edit the real budget.", "info"); return; } setBudgetInput(String(budget.monthly_amount || "")); setOpeningInput(String(budget.opening_amount || "")); setBudgetOpen(true); }}
               >
                 <View style={styles.budgetHead}>
                   <Text style={styles.budgetTitle}>Monthly expense budget</Text>
@@ -113,7 +115,7 @@ export default function Expenses() {
                 {budget.monthly_amount > 0 ? (
                   <>
                     <Text style={styles.budgetNums}>
-                      {money(budget.spent_this_month)} <Text style={styles.budgetOf}>of {money(budget.monthly_amount)}</Text>
+                      {money(fakeFinanceDisplay ? fakeDisplayAmount(budget.spent_this_month) : budget.spent_this_month)} <Text style={styles.budgetOf}>of {money(fakeFinanceDisplay ? fakeDisplayAmount(budget.monthly_amount) : budget.monthly_amount)}</Text>
                     </Text>
                     <View style={styles.budgetBarBg}>
                       <View
@@ -128,8 +130,8 @@ export default function Expenses() {
                     </View>
                     <Text style={styles.budgetNote}>
                       {budget.spent_this_month > budget.monthly_amount
-                        ? `Over budget by ${money(budget.spent_this_month - budget.monthly_amount)}`
-                        : `${money(budget.monthly_amount - budget.spent_this_month)} left this month`}
+                        ? `Over budget by ${money(fakeFinanceDisplay ? fakeDisplayAmount(budget.spent_this_month - budget.monthly_amount) : budget.spent_this_month - budget.monthly_amount)}`
+                        : `${money(fakeFinanceDisplay ? fakeDisplayAmount(budget.monthly_amount - budget.spent_this_month) : budget.monthly_amount - budget.spent_this_month)} left this month`}
                     </Text>
                   </>
                 ) : (
@@ -156,7 +158,7 @@ export default function Expenses() {
                   </View>
                 </View>
                 <View style={styles.rowRight}>
-                  <Text style={styles.amount}>{money(item.amount)}</Text>
+                  <Text style={styles.amount}>{money(fakeFinanceDisplay ? fakeDisplayAmount(item.amount) : item.amount)}</Text>
                   {admin && <Pressable testID={`edit-expense-${item.id}`} hitSlop={8} onPress={() => router.push(`/expense-form?id=${item.id}`)}><MaterialDesignIcons name="pencil" size={20} color={colors.brandPrimary} /></Pressable>}
                   {admin && <Pressable testID={`delete-expense-${item.id}`} hitSlop={8} onPress={() => setToDelete(item)}>
                     <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
