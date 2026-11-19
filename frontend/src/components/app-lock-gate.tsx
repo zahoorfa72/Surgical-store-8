@@ -32,6 +32,8 @@ export function AppLockGate({ children }: { children: ReactNode }) {
   const [firstPin, setFirstPin] = useState("");
   const [firstPinConfirm, setFirstPinConfirm] = useState("");
   const [attempts, setAttempts] = useState(0);
+  const [showPinFallback, setShowPinFallback] = useState(false);
+  const fingerprintPromptStarted = useRef(false);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const backgroundAt = useRef<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,6 +48,9 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       setPinConfigured(false);
       setBiometricEnabled(false);
       setUnlocked(false);
+      setAttempts(0);
+      setShowPinFallback(false);
+      fingerprintPromptStarted.current = false;
       setReady(true);
       return;
     }
@@ -168,10 +173,16 @@ export function AppLockGate({ children }: { children: ReactNode }) {
     setError("");
     try {
       const ok = await authenticateWithBiometric();
-      if (ok) setUnlocked(true);
-      else setError("Fingerprint unlock is not available. Use your PIN.");
+      if (ok) { setUnlocked(true); setAttempts(0); setShowPinFallback(false); }
+      else {
+        const next = attempts + 1; setAttempts(next);
+        if (next >= 5) { setShowPinFallback(true); setError("Fingerprint failed five times. Enter your administrator PIN."); }
+        else setError(`Fingerprint not verified (${next}/5). Try again.`);
+      }
     } catch {
-      setError("Fingerprint was cancelled or unavailable. Use your PIN.");
+      const next = attempts + 1; setAttempts(next);
+      if (next >= 5) { setShowPinFallback(true); setError("Fingerprint failed five times. Enter your administrator PIN."); }
+      else setError(`Fingerprint attempt ${next}/5 was unsuccessful. Try again.`);
     } finally {
       setBusy(false);
     }
@@ -237,6 +248,12 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       </SafeAreaView>
     );
   }
+  useEffect(() => {
+    if (!pinConfigured || !biometricEnabled || unlocked || showPinFallback || fingerprintPromptStarted.current) return;
+    fingerprintPromptStarted.current = true;
+    void unlockWithFingerprint();
+  }, [pinConfigured, biometricEnabled, unlocked, showPinFallback]);
+
   if (unlocked) return <>{children}</>;
 
   return (
@@ -267,27 +284,25 @@ export function AppLockGate({ children }: { children: ReactNode }) {
             </View>
           ) : (
             <View style={styles.form}>
-              <TextInput
-                testID="app-lock-pin"
-                style={[styles.input, styles.pinInput]}
-                value={pin}
-                onChangeText={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
-                placeholder="••••••"
-                placeholderTextColor={colors.muted}
-                keyboardType="number-pad"
-                secureTextEntry
-                maxLength={6}
-                autoFocus
-                onSubmitEditing={() => void unlockWithPin()}
-              />
-              <Pressable disabled={busy || pin.length !== 6} style={[styles.primaryButton, (busy || pin.length !== 6) && { opacity: 0.55 }]} onPress={() => void unlockWithPin()}>
-                {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Unlock app</Text>}
-              </Pressable>
-              {biometricEnabled && (
-                <Pressable disabled={busy} style={styles.secondaryButton} onPress={() => void unlockWithFingerprint()}>
-                  <MaterialDesignIcons name="fingerprint" size={22} color={colors.brandPrimary} />
-                  <Text style={styles.secondaryText}>Use fingerprint</Text>
-                </Pressable>
+              {biometricEnabled && !showPinFallback ? (
+                <>
+                  <MaterialDesignIcons name="fingerprint" size={42} color={colors.brandPrimary} />
+                  <Text style={styles.help}>Verify your fingerprint to unlock the store.</Text>
+                  <Pressable disabled={busy} style={styles.primaryButton} onPress={() => void unlockWithFingerprint()}>
+                    {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Try fingerprint again</Text>}
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <TextInput testID="app-lock-pin" style={[styles.input, styles.pinInput]} value={pin}
+                    onChangeText={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Enter 6-digit PIN" placeholderTextColor={colors.muted}
+                    keyboardType="number-pad" secureTextEntry maxLength={6} autoFocus
+                    onSubmitEditing={() => void unlockWithPin()} />
+                  <Pressable disabled={busy || pin.length !== 6} style={[styles.primaryButton, (busy || pin.length !== 6) && { opacity: 0.55 }]} onPress={() => void unlockWithPin()}>
+                    {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Unlock app</Text>}
+                  </Pressable>
+                </>
               )}
               <Pressable style={styles.forgotButton} onPress={() => { setRecoveryOpen(true); setError(""); }}>
                 <Text style={styles.forgotText}>Forgot PIN? Recover with admin account</Text>
@@ -306,13 +321,13 @@ const useStyles = makeStyles((colors) => ({
   overlay: { ...({ flex: 1 } as any), backgroundColor: colors.surface, justifyContent: "center" },
   content: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 26 },
   brandIcon: { width: 68, height: 68, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", marginBottom: 18 },
-  title: { color: colors.onSurface, fontSize: 23, fontWeight: "900", textAlign: "center" },
-  subtitle: { color: colors.muted, fontSize: 13, textAlign: "center", marginTop: 8, marginBottom: 24 },
-  form: { width: "100%", maxWidth: 390, gap: 10 },
+  title: { color: colors.onSurface, fontSize: 21, fontWeight: "900", textAlign: "center" },
+  subtitle: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 8, marginBottom: 18, maxWidth: 330 },
+  form: { width: "100%", maxWidth: 350, gap: 10, alignItems: "stretch" },
   sectionTitle: { color: colors.onSurface, fontSize: 16, fontWeight: "800" },
   help: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   input: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, color: colors.onSurface, backgroundColor: colors.surfaceTertiary, fontSize: 15 },
-  pinInput: { textAlign: "center", fontSize: 24, letterSpacing: 12, fontWeight: "900" },
+  pinInput: { textAlign: "center", fontSize: 18, letterSpacing: 3, fontWeight: "800", minHeight: 54 },
   primaryButton: { minHeight: 48, borderRadius: 12, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4 },
   primaryText: { color: colors.onBrandPrimary, fontSize: 14, fontWeight: "900" },
   secondaryButton: { minHeight: 46, borderWidth: 1, borderColor: colors.border, borderRadius: 12, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
@@ -320,5 +335,5 @@ const useStyles = makeStyles((colors) => ({
   forgotButton: { alignItems: "center", padding: 10 },
   forgotText: { color: colors.brandPrimary, fontWeight: "700", fontSize: 12 },
   error: { color: colors.error, marginTop: 14, fontSize: 12, fontWeight: "700", textAlign: "center" },
-  footer: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 30, textAlign: "center", maxWidth: 360 },
+  footer: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 22, textAlign: "center", maxWidth: 330 },
 }));
