@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 import { useRouter } from "expo-router";
 
@@ -23,7 +22,6 @@ export default function SecuritySettings() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const router = useRouter();
   const { user } = useAuth();
   const admin = isAdmin(user?.role);
