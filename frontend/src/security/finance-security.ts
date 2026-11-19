@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
+import { DeviceEventEmitter } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 const PIN_HASH_KEY = "ssm.security.adminPinHash.v1";
@@ -31,6 +32,7 @@ export async function setAdminPin(pin: string): Promise<void> {
   const digest = await pinDigest(pin, salt);
   await SecureStore.setItemAsync(PIN_SALT_KEY, salt);
   await SecureStore.setItemAsync(PIN_HASH_KEY, digest);
+  DeviceEventEmitter.emit("ssm.admin-pin-configured", true);
 }
 
 export async function verifyAdminPin(pin: string): Promise<boolean> {
