@@ -14,6 +14,7 @@ import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeUnitCost, fakeProfit } from "@/src/utils/finance-display";
+import { useProfitVisibility } from "@/src/security/finance-security";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
 const formatDetailDate = (value: string) => new Date(value).toLocaleString();
@@ -41,6 +42,7 @@ export default function Products() {
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const { grossHidden } = useProfitVisibility();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [detailsProduct, setDetailsProduct] = useState<Product | null>(null);
   const { data: stockMovements = [] } = useStockMovements(detailsProduct?.id);
@@ -306,7 +308,7 @@ export default function Products() {
                         <View style={styles.financeGrid}>
                           <View style={styles.financeCell}><Text style={styles.financeLabel}>Cost value</Text><Text style={styles.financeValue}>{money(inventoryFinance.costValue)}</Text></View>
                           <View style={styles.financeCell}><Text style={styles.financeLabel}>Retail value</Text><Text style={styles.financeValue}>{money(inventoryFinance.retailValue)}</Text></View>
-                          <View style={styles.financeCell}><Text style={styles.financeLabel}>Potential margin</Text><Text style={[styles.financeValue,{color:inventoryFinance.potentialProfit>=0?colors.success:colors.error}]}>{money(inventoryFinance.potentialProfit)}</Text></View>
+                          {!grossHidden && <View style={styles.financeCell}><Text style={styles.financeLabel}>Potential margin</Text><Text style={[styles.financeValue,{color:inventoryFinance.potentialProfit>=0?colors.success:colors.error}]}>{money(inventoryFinance.potentialProfit)}</Text></View>}
                         </View>
                       </Card>
                     )}
@@ -517,7 +519,7 @@ export default function Products() {
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
                           <Text style={styles.detailValue}>Sell {money(sell * qty)}</Text>
-                          <Text style={styles.detailProfit}>Profit {money(profit)}</Text>
+                          {!grossHidden && <Text style={styles.detailProfit}>Profit {money(profit)}</Text>}
                         </View>
                       </View>;
                     })}
