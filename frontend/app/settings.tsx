@@ -454,6 +454,20 @@ export default function Settings() {
           </View>
         )}
 
+        {admin && (
+          <Pressable
+            testID="open-security-settings"
+            style={[styles.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
+            onPress={() => router.push("/security")}
+          >
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={styles.cardTitle}>Security & Privacy</Text>
+              <Text style={styles.cardHint}>Administrator PIN, 30-second app lock, fingerprint unlock and profit visibility controls.</Text>
+            </View>
+            <MaterialDesignIcons name="shield-lock-outline" size={24} color={colors.brandPrimary} />
+          </Pressable>
+        )}
+
         <View style={styles.infoCard}>
           <InfoRow icon="store" label="Store" value={settings?.store_name ?? "Surgical Store"} />
           <InfoRow icon="cash" label="Currency" value="Rs (PKR)" />
