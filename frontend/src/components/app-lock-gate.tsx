@@ -1,5 +1,5 @@
 import React, { ReactNode, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, DeviceEventEmitter, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
@@ -7,7 +7,6 @@ import { useAuth, verifyAdminCredentials } from "@/src/auth";
 import { useTheme, makeStyles } from "@/src/theme";
 import {
   authenticateWithBiometric,
-  disableBiometricUnlock,
   isAdminPinConfigured,
   isBiometricUnlockEnabled,
   setAdminPin,
@@ -66,6 +65,17 @@ export function AppLockGate({ children }: { children: ReactNode }) {
     });
     return () => { active = false; };
   }, [user?.id]);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener("ssm.admin-pin-configured", (enabled: boolean) => {
+      setPinConfigured(enabled);
+      if (enabled) {
+        setUnlocked(false);
+        setPin("");
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (!user || !pinConfigured) return;
@@ -172,7 +182,8 @@ export function AppLockGate({ children }: { children: ReactNode }) {
     }
   };
 
-  if (!ready || !user || !pinConfigured || unlocked) return <>{children}</>;
+  if (user && !ready) return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
+  if (!user || !pinConfigured || unlocked) return <>{children}</>;
 
   return (
     <View style={{ flex: 1 }}>
