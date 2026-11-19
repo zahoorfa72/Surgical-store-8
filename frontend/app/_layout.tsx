@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
 import { AuthProvider } from "@/src/auth";
+import { AppLockGate } from "@/src/components/app-lock-gate";
 import { OfflineProvider } from "@/src/offline";
 import { ToastProvider } from "@/src/ui";
 import { startDailyAutoBackup } from "@/src/auto-backup";
@@ -48,6 +49,7 @@ export default function RootLayout() {
             <AuthProvider>
               <ToastProvider>
                 <OfflineProvider>
+                <AppLockGate>
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="index" />
                   <Stack.Screen name="login" />
@@ -75,10 +77,12 @@ export default function RootLayout() {
                   <Stack.Screen name="reports" options={{ presentation: "modal" }} />
                   <Stack.Screen name="customers-report" options={{ presentation: "modal" }} />
                   <Stack.Screen name="settings" options={{ presentation: "modal" }} />
+                  <Stack.Screen name="security" options={{ presentation: "modal" }} />
                   <Stack.Screen name="notifications" options={{ presentation: "modal" }} />
                   <Stack.Screen name="backup-restore" options={{ presentation: "modal" }} />
                   <Stack.Screen name="trash" options={{ presentation: "modal" }} />
                 </Stack>
+                </AppLockGate>
                 </OfflineProvider>
               </ToastProvider>
             </AuthProvider>
