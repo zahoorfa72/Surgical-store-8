@@ -1,11 +1,53 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
+import * as Crypto from "expo-crypto";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const FAKE_FINANCE_KEY = ["fake-finance-display"] as const;
 export const FAKE_FINANCE_STORAGE_KEY = "ssm.fakeFinanceDisplay.v1";
+const FAKE_MASK_FACTOR_KEY = "ssm.fakeFinanceMaskFactor.v1";
+const FAKE_MASK_SEED_KEY = "ssm.fakeFinanceMaskSeed.v1";
+let privateMaskFactor = 0.825;
+let privateMaskSeed = "private-finance";
+let privateMaskProfilePromise: Promise<void> | null = null;
+
+async function ensurePrivateMaskProfile(): Promise<void> {
+  if (!privateMaskProfilePromise) {
+    privateMaskProfilePromise = (async () => {
+      try {
+        const [factorRaw, seedRaw] = await Promise.all([
+          SecureStore.getItemAsync(FAKE_MASK_FACTOR_KEY),
+          SecureStore.getItemAsync(FAKE_MASK_SEED_KEY),
+        ]);
+        const parsedFactor = Number(factorRaw);
+        if (Number.isFinite(parsedFactor) && parsedFactor >= 0.65 && parsedFactor <= 0.95 && seedRaw) {
+          privateMaskFactor = parsedFactor;
+          privateMaskSeed = seedRaw;
+          return;
+        }
+        const bytes = await Crypto.getRandomBytesAsync(18);
+        const seed = Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
+        const random = ((bytes[0] << 8) | bytes[1]) / 65535;
+        const factor = 0.68 + random * 0.25;
+        await Promise.all([
+          SecureStore.setItemAsync(FAKE_MASK_FACTOR_KEY, factor.toFixed(6)),
+          SecureStore.setItemAsync(FAKE_MASK_SEED_KEY, seed),
+        ]);
+        privateMaskFactor = factor;
+        privateMaskSeed = seed;
+      } catch {
+        // A privacy mask must never block the POS if secure storage is unavailable.
+        privateMaskFactor = 0.825;
+        privateMaskSeed = "private-finance-fallback";
+      }
+    })();
+  }
+  await privateMaskProfilePromise;
+}
 // Display-only finance masking. This file intentionally never changes stored finance values.
 
 export async function getFakeFinanceDisplay(): Promise<boolean> {
+  await ensurePrivateMaskProfile();
   try {
     return (await AsyncStorage.getItem(FAKE_FINANCE_STORAGE_KEY)) === "1";
   } catch {
@@ -41,7 +83,7 @@ function stableHash(value: string): number {
 }
 
 export function fakeMarginPercent(key: string): number {
-  return 15 + (stableHash(key) % 6);
+  return 11 + (stableHash(privateMaskSeed + ":" + key) % 20);
 }
 
 export function fakeUnitCost(salePrice: number, key: string): number {
@@ -94,14 +136,17 @@ export function fakeSaleProfit(sale: {
 }
 
 export function fakeDisplayAmount(value: unknown): number {
-  return Math.max(0, Number(value ?? 0) || 0) * 0.825;
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount * privateMaskFactor : 0;
 }
 
 export function fakeReportRevenue(report: { revenue?: number }): number {
   return fakeDisplayAmount(report.revenue);
 }
 
-export function fakeReportProfit(report: { revenue?: number; lost_stock_gross_profit_transfer?: number }): number {
+export function fakeReportProfit(report: { revenue?: number; gross_profit?: number; lost_stock_gross_profit_transfer?: number }): number {
+  const recordedProfit = Number(report.gross_profit);
+  if (Number.isFinite(recordedProfit)) return fakeDisplayAmount(recordedProfit);
   return fakeReportRevenue(report) * 0.175 - fakeDisplayAmount(report.lost_stock_gross_profit_transfer);
 }
 
@@ -114,7 +159,10 @@ export function fakeReportNetProfit(report: {
   lost_products_net_profit_deduction?: number;
   profit_products_net_profit_addition?: number;
   net_profit_adjustment?: number;
+  net_profit?: number;
 }): number {
+  const recordedNetProfit = Number(report.net_profit);
+  if (Number.isFinite(recordedNetProfit)) return fakeDisplayAmount(recordedNetProfit);
   const gross = fakeReportProfit(report);
   const expenses = fakeDisplayAmount(report.operating_expenses)
     + fakeDisplayAmount(report.personal_expenses)
