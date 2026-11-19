@@ -13,7 +13,7 @@ import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Badge, Card, ConfirmModal, EmptyState, IconButton, Loader, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeUnitCost, fakeProfit } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 import { useProfitVisibility } from "@/src/security/finance-security";
 import { fuzzyFilter } from "@/src/utils/fuzzy-search";
 
@@ -144,14 +144,15 @@ export default function Products() {
 
   const inventoryFinance = useMemo(() => {
     const rows = products ?? [];
-    const costValue = rows.reduce((n, p) => n + (p.cost_layers?.length
-      ? p.cost_layers.reduce((sum, layer, index) => {
-          const unit = fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0);
-          return sum + Number(layer.quantity ?? 0) * unit;
-        }, 0)
-      : Number(p.quantity ?? 0) * (fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id)) : Number(p.purchase_price ?? 0))), 0);
-    const retailValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.sale_price ?? 0), 0);
-    return { costValue, retailValue, potentialProfit: retailValue - costValue };
+    const realCostValue = rows.reduce((n, p) => n + (p.cost_layers?.length
+      ? p.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
+      : Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0)), 0);
+    const realRetailValue = rows.reduce((n, p) => n + Number(p.quantity ?? 0) * Number(p.sale_price ?? 0), 0);
+    return {
+      costValue: fakeFinanceDisplay ? fakeDisplayAmount(realCostValue) : realCostValue,
+      retailValue: fakeFinanceDisplay ? fakeDisplayAmount(realRetailValue) : realRetailValue,
+      potentialProfit: fakeFinanceDisplay ? fakeDisplayAmount(realRetailValue - realCostValue) : realRetailValue - realCostValue,
+    };
   }, [products, fakeFinanceDisplay]);
 
   const confirmDelete = async () => {
@@ -346,7 +347,7 @@ export default function Products() {
                 )
               : Number(item.quantity ?? 0) *
                 (fakeFinanceDisplay
-                  ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id))
+                  ? fakeDisplayAmount(Number(item.purchase_price ?? 0))
                   : Number(item.purchase_price ?? 0));
             const displayMargin = Number(item.quantity ?? 0) * Number(item.sale_price ?? 0) - displayStockCost;
             return (
@@ -361,13 +362,13 @@ export default function Products() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
-                    {item.category || "General Surgical Supplies"} · Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":latest") : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
+                    {item.category || "General Surgical Supplies"} · Sell {money(item.sale_price)} · {item.cost_layers?.length ? "Latest buy " + money(fakeFinanceDisplay ? fakeDisplayAmount(Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : Number(item.cost_layers[item.cost_layers.length - 1]?.unit_cost ?? item.purchase_price ?? 0)) : "Buy " + money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id)) : Number(item.purchase_price ?? 0))}
                   </Text>
                   {!!item.cost_layers?.length && (
                     <View style={{ gap: 2, marginTop: 3 }}>
                       {item.cost_layers.map((layer, index) => (
                         <Text key={`${item.id}-lot-${index}`} style={styles.lotText}>
-                          Lot {index + 1}: {Number(layer.quantity)} × {money(fakeFinanceDisplay ? fakeUnitCost(Number(item.sale_price ?? 0), String(item.id) + ":lot:" + index) : Number(layer.unit_cost ?? 0))}
+                          Lot {index + 1}: {Number(layer.quantity)} × {money(fakeFinanceDisplay ? fakeDisplayAmount(Number(layer.unit_cost ?? 0)) : Number(layer.unit_cost ?? 0))}
                         </Text>
                       ))}
                     </View>
@@ -480,13 +481,13 @@ export default function Products() {
                   <Card>
                     <Text style={styles.detailTitle}>Current stock</Text>
                     <Text style={styles.detailBig}>{Number(p.quantity ?? 0)} units</Text>
-                    <Text style={styles.meta}>Sale price {money(p.sale_price)} · Latest buy {money(fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(p.id) + ":latest") : Number(p.cost_layers?.[p.cost_layers.length - 1]?.unit_cost ?? p.purchase_price ?? 0))}</Text>
+                    <Text style={styles.meta}>Sale price {money(p.sale_price)} · Latest buy {money(fakeFinanceDisplay ? fakeDisplayAmount(Number(p.cost_layers?.[p.cost_layers.length - 1]?.unit_cost ?? p.purchase_price ?? 0)) : Number(p.cost_layers?.[p.cost_layers.length - 1]?.unit_cost ?? p.purchase_price ?? 0))}</Text>
                   </Card>
                   <Card>
                     <Text style={styles.detailTitle}>Purchase lots ({productPurchases.length})</Text>
                     {productPurchases.length === 0 && <Text style={styles.meta}>No purchase history found.</Text>}
                     {productPurchases.map(({ purchase, line }) => {
-                      const unit = fakeFinanceDisplay ? fakeUnitCost(Number(p.sale_price ?? 0), String(purchase.id) + ":" + line.product_id) : Number(line.unit_cost ?? 0);
+                      const unit = fakeFinanceDisplay ? fakeDisplayAmount(Number(line.unit_cost ?? 0)) : Number(line.unit_cost ?? 0);
                       return <View key={purchase.id + ":" + line.product_id + ":" + String(line.quantity)} style={styles.detailRow}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.detailName}>{purchase.ref_no} · {line.quantity} units</Text>
@@ -511,7 +512,7 @@ export default function Products() {
                     {productSales.map(({ sale, line, index }) => {
                       const qty = Number(line.quantity ?? 0);
                       const sell = Number(line.unit_price ?? 0);
-                      const profit = fakeFinanceDisplay ? fakeProfit(sell, String(sale.id) + ":" + index) * qty : (sell - Number(line.purchase_price ?? 0)) * qty;
+                      const profit = fakeFinanceDisplay ? fakeDisplayAmount((sell - Number(line.purchase_price ?? 0)) * qty) : (sell - Number(line.purchase_price ?? 0)) * qty;
                       return <View key={sale.id + ":" + line.product_id + ":" + String(index)} style={styles.detailRow}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.detailName}>{sale.invoice_no} · {qty} units</Text>
