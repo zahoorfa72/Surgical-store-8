@@ -13,14 +13,12 @@ import { useOffline } from "@/src/offline";
 import { EmptyState, ScreenHeader, money, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
 import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeUnitCost } from "@/src/utils/finance-display";
 
 type Line = { id: string; name: string; quantity: number; unit_cost: number; batch_number: string; expiry_date: string; non_expiring: boolean };
 
 export default function Purchase() {
   const styles = useStyles();
   const { colors } = useTheme();
-  const fakeFinanceDisplay = useFakeFinanceDisplay();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -107,7 +105,7 @@ export default function Purchase() {
   }, [isEdit, suggestionsLoaded, productIdsParam, products]);
 
   const lineIds = useMemo(() => new Set(lines.map((l) => l.id)), [lines]);
-  const total = lines.reduce((s, l, index) => { const cost = fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), `${l.id}:${index}`) : l.unit_cost; return s + l.quantity * cost; }, 0);
+  const total = lines.reduce((sum, line) => sum + line.quantity * Math.max(0, Number(line.unit_cost ?? 0)), 0);
   const supplierName = suppliers?.find((s) => s.id === supplierId)?.name ?? "No supplier";
 
   const createSupplier = async () => {
@@ -307,7 +305,7 @@ export default function Purchase() {
                   />
                 </View>
                 <View style={styles.miniField}>
-                  <Text style={styles.miniLabel}>{fakeFinanceDisplay ? "Real unit cost (private)" : "Unit cost"}</Text>
+                  <Text style={styles.miniLabel}>Unit cost</Text>
                   <TextInput
                     testID={`purchase-cost-${l.id}`}
                     style={styles.miniInput}
@@ -324,7 +322,7 @@ export default function Purchase() {
                 </View>
                 <View style={styles.miniField}>
                   <Text style={styles.miniLabel}>Total</Text>
-                  <Text style={styles.lineTotal}>{money(l.quantity * (fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(l.unit_cost ?? 0)), String(l.id)) : l.unit_cost))}</Text>
+                  <Text style={styles.lineTotal}>{money(l.quantity * Math.max(0, Number(l.unit_cost ?? 0)))}</Text>
                 </View>
               </View>
               <Pressable
@@ -378,7 +376,7 @@ export default function Purchase() {
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.totalWrap}>
-          <Text style={styles.totalLabel}>{fakeFinanceDisplay ? "Displayed purchase cost" : "Total cost"}</Text>
+          <Text style={styles.totalLabel}>Total cost (real purchase cost)</Text>
           <Text style={styles.totalValue}>{money(total)}</Text>
         </View>
         <Pressable testID="save-purchase-button" disabled={busy} style={[styles.saveBtn, busy && { opacity: 0.6 }]} onPress={save}>
@@ -417,7 +415,7 @@ export default function Purchase() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pickName}>{p.name}</Text>
-                    <Text style={styles.pickMeta}>Cost {money(fakeFinanceDisplay ? fakeUnitCost(Math.max(0, Number(p.purchase_price ?? 0)), String(p.id)) : Number(p.purchase_price ?? 0))} · {p.quantity} in stock</Text>
+                    <Text style={styles.pickMeta}>Cost {money(Number(p.purchase_price ?? 0))} · {p.quantity} in stock</Text>
                   </View>
                 </Pressable>
               );
