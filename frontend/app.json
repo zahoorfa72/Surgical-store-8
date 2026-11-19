@@ -12,8 +12,8 @@
       "bundleIdentifier": "com.emergent.offlinesync.vbbelt",
       "infoPlist": {
         "NSCameraUsageDescription": "Take order photos for on-device OCR or scan product barcodes",
-        "NSPhotoLibraryUsageDescription": "Choose an order image for OCR or a store logo from your photos"
-        "NSFaceIDUsageDescription": "Use Face ID to unlock Surgical Store",
+        "NSPhotoLibraryUsageDescription": "Choose an order image for OCR or a store logo from your photos",
+        "NSFaceIDUsageDescription": "Use Face ID to unlock Surgical Store"
       }
     },
     "android": {
