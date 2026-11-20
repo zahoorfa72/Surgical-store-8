@@ -19,7 +19,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#FFFFFF"
       },
       "package": "com.emergent.offlinesync.vbbelt",
       "permissions": [
@@ -37,9 +37,9 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
+          "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#FFFFFF"
         }
       ],
       "expo-font",
@@ -58,7 +58,9 @@
       ],
       [
         "expo-secure-store",
-        { "faceIDPermission": "Use Face ID to unlock Surgical Store" }
+        {
+          "faceIDPermission": "Use Face ID to unlock Surgical Store"
+        }
       ],
       "expo-web-browser",
       "expo-status-bar",
