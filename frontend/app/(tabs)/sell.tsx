@@ -141,7 +141,7 @@ export default function Sell() {
     }
   };
 
-  const parsedSearch = useMemo(() => parseSellSearchEntry(search), [search]);
+  const parsedSearch = useMemo(() => parseSellSearchEntry(search, products ?? []), [search, products]);
   const filtered = useMemo(() => {
     if (!parsedSearch.query) return products ?? [];
     if (parsedSearch.query.length < 3 || parsedSearch.invalidQuantity) return [];
@@ -377,7 +377,7 @@ export default function Sell() {
   };
 
   const addSearchSuggestion = (product: Product) => {
-    const { query, quantity, invalidQuantity } = parseSellSearchEntry(search);
+    const { query, quantity, invalidQuantity } = parseSellSearchEntry(search, products ?? []);
     if (invalidQuantity || !Number.isSafeInteger(quantity) || quantity <= 0) {
       toast("Enter a valid whole quantity after the product name", "error");
       return;
@@ -426,7 +426,7 @@ export default function Sell() {
 
   const submitProductSearch = () => {
     if (!searchToAddEnabled) return;
-    const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search);
+    const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search, products ?? []);
     if (!query) {
       toast("Type a product name followed by its quantity, for example S tow 2.", "info");
       return;
@@ -449,7 +449,7 @@ export default function Sell() {
   // an exact full product name can still add one item by default.
   useEffect(() => {
     if (!searchToAddEnabled) return;
-    const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search);
+    const { query, quantity, hasQuantity, invalidQuantity } = parseSellSearchEntry(search, products ?? []);
     if (query.length < 3 || invalidQuantity || voiceNeedsConfirmationRef.current === query) return;
     const exactMatches = (products ?? []).filter((product) =>
       [product.name, product.sku, product.barcode].some(
