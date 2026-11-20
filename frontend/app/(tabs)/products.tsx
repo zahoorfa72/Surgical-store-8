@@ -38,6 +38,12 @@ export default function Products() {
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryBusy, setCategoryBusy] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkTargetCategory, setBulkTargetCategory] = useState("");
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const isAdmin = String(user?.role ?? "").toLowerCase() === "admin";
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [showInventoryProfitMargin, setShowInventoryProfitMargin] = useState(true);
@@ -74,6 +80,23 @@ export default function Products() {
     [(p) => p.name, (p) => p.barcode, (p) => p.category],
   ).filter((product) => selectedCategory === "All" || String(product.category || "General Surgical Supplies") === selectedCategory),
   [products, search, selectedCategory]);
+
+  const toggleProductSelection = (productId: string) => {
+    setSelectedProductIds((current) => current.includes(productId)
+      ? current.filter((id) => id !== productId)
+      : [...current, productId]);
+  };
+  const allFilteredSelected = filtered.length > 0 && filtered.every((product) => selectedProductIds.includes(product.id));
+  const toggleSelectAllFiltered = () => {
+    const visibleIds = new Set(filtered.map((product) => product.id));
+    setSelectedProductIds((current) => allFilteredSelected
+      ? current.filter((id) => !visibleIds.has(id))
+      : Array.from(new Set([...current, ...visibleIds])));
+  };
+  const stopBulkSelection = () => {
+    setSelectionMode(false);
+    setSelectedProductIds([]);
+  };
 
   const [replenishmentRange, setReplenishmentRange] = useState<"month" | "year" | "all">("month");
   const [replenishmentDropdownOpen, setReplenishmentDropdownOpen] = useState(false);
@@ -155,6 +178,61 @@ export default function Products() {
     };
   }, [products, fakeFinanceDisplay]);
 
+  const moveSelectedProducts = async () => {
+    const selected = (products ?? []).filter((product) => selectedProductIds.includes(product.id));
+    const target = bulkTargetCategory.trim();
+    if (!selected.length) return toast("Select at least one product.", "error");
+    if (!target) return toast("Choose a destination category.", "error");
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(selected.map((product) => apiRequest(`/products/${product.id}`, {
+        method: "PUT",
+        body: {
+          name: product.name,
+          barcode: product.barcode ?? "",
+          category: target,
+          purchase_price: Number(product.purchase_price ?? 0),
+          sale_price: Number(product.sale_price ?? 0),
+          low_stock_threshold: Number(product.low_stock_threshold ?? 5),
+          expiry_date: product.expiry_date ?? null,
+        },
+      })));
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+      await queryClient.invalidateQueries({ queryKey: qk.products });
+      setBulkMoveOpen(false);
+      setBulkTargetCategory("");
+      stopBulkSelection();
+      if (failed) toast(`${succeeded} products moved; ${failed} could not be moved.`, "error");
+      else toast(`${succeeded} products moved to ${target}.`, "success");
+    } catch (error: any) {
+      toast(error?.message || "Could not move selected products.", "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const deleteSelectedProducts = async () => {
+    if (!isAdmin) return toast("Only an administrator can delete products.", "error");
+    const ids = [...selectedProductIds];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(ids.map((id) => apiRequest(`/products/${id}`, { method: "DELETE" })));
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+      await queryClient.invalidateQueries({ queryKey: qk.products });
+      setBulkDeleteOpen(false);
+      stopBulkSelection();
+      if (failed) toast(`${succeeded} products removed; ${failed} could not be removed.`, "error");
+      else toast(`${succeeded} products removed from active stock. Transaction history is preserved.`, "success");
+    } catch (error: any) {
+      toast(error?.message || "Could not delete selected products.", "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!toDelete) return;
     try {
@@ -213,12 +291,24 @@ export default function Products() {
                           <Text style={styles.financeTitle}>Product categories</Text>
                           <Text style={styles.financeSub}>Create your own groups and filter stock by category</Text>
                         </View>
-                        {isAdmin ? (
-                          <Pressable testID="manage-product-categories" style={styles.manageCategoriesButton} onPress={() => setCategoryManagerOpen(true)}>
-                            <MaterialDesignIcons name="cog-outline" size={17} color={colors.brandPrimary} />
-                            <Text style={styles.manageCategoriesText}>Manage</Text>
-                          </Pressable>
-                        ) : <MaterialDesignIcons name="shape-outline" size={22} color={colors.brandPrimary} />}
+                        <View style={styles.categoryHeaderActions}>
+                          {staff && (
+                            <Pressable
+                              testID="toggle-product-selection"
+                              style={[styles.bulkToggleButton, selectionMode && styles.bulkToggleButtonActive]}
+                              onPress={() => selectionMode ? stopBulkSelection() : setSelectionMode(true)}
+                            >
+                              <MaterialDesignIcons name={selectionMode ? "close" : "checkbox-multiple-marked-outline"} size={16} color={selectionMode ? colors.onBrandPrimary : colors.brandPrimary} />
+                              <Text style={[styles.bulkToggleText, selectionMode && { color: colors.onBrandPrimary }]}>{selectionMode ? "Done" : "Select items"}</Text>
+                            </Pressable>
+                          )}
+                          {isAdmin ? (
+                            <Pressable testID="manage-product-categories" style={styles.manageCategoriesButton} onPress={() => setCategoryManagerOpen(true)}>
+                              <MaterialDesignIcons name="cog-outline" size={17} color={colors.brandPrimary} />
+                              <Text style={styles.manageCategoriesText}>Manage</Text>
+                            </Pressable>
+                          ) : !staff ? <MaterialDesignIcons name="shape-outline" size={22} color={colors.brandPrimary} /> : null}
+                        </View>
                       </View>
                       <View style={styles.categoryChips}>
                         {categoryOptions.map((category) => {
@@ -231,6 +321,19 @@ export default function Products() {
                           );
                         })}
                       </View>
+                      {selectionMode && (
+                        <View style={styles.bulkSelectControls}>
+                          <Text style={styles.bulkSelectedCount}>{selectedProductIds.length} selected</Text>
+                          <Pressable testID="select-all-visible-products" onPress={toggleSelectAllFiltered}>
+                            <Text style={styles.bulkLinkText}>{allFilteredSelected ? "Unselect visible" : `Select all visible (${filtered.length})`}</Text>
+                          </Pressable>
+                          {selectedProductIds.length > 0 && (
+                            <Pressable testID="clear-product-selection" onPress={() => setSelectedProductIds([])}>
+                              <Text style={styles.bulkLinkText}>Clear</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      )}
                     </Card>
                     <Card style={styles.usageCard}>
                       <View style={{ gap: 10, marginBottom: 10 }}>
@@ -341,12 +444,18 @@ export default function Products() {
             return (
               <Pressable
                 testID={`product-row-${item.id}`}
-                style={styles.row}
-                onPress={() => setDetailsProduct(item)}
+                style={[styles.row, selectionMode && selectedProductIds.includes(item.id) && styles.rowSelected]}
+                onPress={() => selectionMode ? toggleProductSelection(item.id) : setDetailsProduct(item)}
               >
-                <View style={styles.rowIcon}>
-                  <MaterialDesignIcons name="pill" size={22} color={colors.brandPrimary} />
-                </View>
+                {selectionMode ? (
+                  <View style={styles.selectionMarker}>
+                    <MaterialDesignIcons name={selectedProductIds.includes(item.id) ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"} size={25} color={selectedProductIds.includes(item.id) ? colors.brandPrimary : colors.muted} />
+                  </View>
+                ) : (
+                  <View style={styles.rowIcon}>
+                    <MaterialDesignIcons name="pill" size={22} color={colors.brandPrimary} />
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
@@ -371,7 +480,7 @@ export default function Products() {
                   <Text style={[styles.qty, low && { color: colors.warning }]}>{item.quantity}</Text>
                   {low ? <Badge text="Low" tone="warning" /> : <Text style={styles.inStock}>in stock</Text>}
                 </View>
-                {staff && (
+                {staff && !selectionMode && (
                   <Pressable testID={`delete-product-${item.id}`} hitSlop={8} onPress={() => setToDelete(item)} style={styles.delBtn}>
                     <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
                   </Pressable>
@@ -382,7 +491,36 @@ export default function Products() {
         />
       )}
 
-      {staff && (
+      {staff && selectionMode && selectedProductIds.length > 0 && (
+        <View style={[styles.bulkActionBar, { bottom: insets.bottom + 12 }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bulkActionCount}>{selectedProductIds.length} selected</Text>
+            <Text style={styles.bulkActionHint}>Choose an action for these products</Text>
+          </View>
+          <Pressable
+            testID="move-selected-products"
+            disabled={bulkBusy}
+            onPress={() => { setBulkTargetCategory(""); setBulkMoveOpen(true); }}
+            style={[styles.bulkActionButton, bulkBusy && { opacity: 0.55 }]}
+          >
+            <MaterialDesignIcons name="folder-move-outline" size={17} color={colors.onBrandPrimary} />
+            <Text style={styles.bulkActionButtonText}>Move to</Text>
+          </Pressable>
+          {isAdmin && (
+            <Pressable
+              testID="delete-selected-products"
+              disabled={bulkBusy}
+              onPress={() => setBulkDeleteOpen(true)}
+              style={[styles.bulkDeleteButton, bulkBusy && { opacity: 0.55 }]}
+            >
+              <MaterialDesignIcons name="trash-can-outline" size={17} color={colors.error} />
+              <Text style={styles.bulkDeleteButtonText}>Delete</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {staff && !selectionMode && (
         <Pressable
           testID="add-product-fab"
           style={[styles.fab, { bottom: 16 }]}
@@ -391,6 +529,41 @@ export default function Products() {
           <MaterialDesignIcons name="plus" size={22} color={colors.onBrandPrimary} /><Text style={styles.fabText}>Add product</Text>
         </Pressable>
       )}
+
+      <Modal visible={bulkMoveOpen} transparent animationType="fade" onRequestClose={() => setBulkMoveOpen(false)}>
+        <Pressable style={styles.bulkBackdrop} onPress={() => setBulkMoveOpen(false)}>
+          <Pressable style={styles.bulkDialog} onPress={() => {}}>
+            <Text style={styles.bulkDialogTitle}>Move selected products</Text>
+            <Text style={styles.bulkDialogHint}>{selectedProductIds.length} products will be moved to the category you choose. Existing purchase and sales records will not be changed.</Text>
+            <Text style={styles.categoryListHeading}>Destination category</Text>
+            <ScrollView style={{ maxHeight: 280 }} contentContainerStyle={{ gap: 8 }}>
+              {categoryOptions.slice(1).map((category) => (
+                <Pressable
+                  key={category}
+                  testID={`bulk-move-category-${category.replace(/[^a-z0-9]+/gi, "-")}`}
+                  onPress={() => setBulkTargetCategory(category)}
+                  style={[styles.bulkCategoryOption, bulkTargetCategory === category && styles.bulkCategoryOptionSelected]}
+                >
+                  <Text style={[styles.bulkCategoryText, bulkTargetCategory === category && styles.bulkCategoryTextSelected]}>{category}</Text>
+                  {bulkTargetCategory === category && <MaterialDesignIcons name="check-circle" size={19} color={colors.brandPrimary} />}
+                </Pressable>
+              ))}
+              {categoryOptions.length <= 1 && <Text style={styles.financeSub}>No categories are available yet. Close this window and create a category using Manage.</Text>}
+            </ScrollView>
+            <Pressable
+              testID="confirm-move-selected-products"
+              disabled={bulkBusy || !bulkTargetCategory}
+              onPress={() => void moveSelectedProducts()}
+              style={[styles.bulkModalButton, (bulkBusy || !bulkTargetCategory) && { opacity: 0.5 }]}
+            >
+              <Text style={styles.bulkModalButtonText}>{bulkBusy ? "Moving…" : `Move ${selectedProductIds.length} products`}</Text>
+            </Pressable>
+            <Pressable style={styles.bulkCancelButton} onPress={() => setBulkMoveOpen(false)}>
+              <Text style={styles.bulkCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={categoryManagerOpen} animationType="slide" onRequestClose={() => setCategoryManagerOpen(false)}>
         <View style={styles.root}>
@@ -583,6 +756,15 @@ export default function Products() {
       />
 
       <ConfirmModal
+        visible={bulkDeleteOpen}
+        title={`Delete ${selectedProductIds.length} selected products?`}
+        message="These products will be removed from active stock. Existing sales and purchase history will remain recorded. This action can only be reversed by restoring the products through support."
+        confirmLabel={bulkBusy ? "Deleting…" : "Delete selected"}
+        onConfirm={deleteSelectedProducts}
+        onCancel={() => setBulkDeleteOpen(false)}
+      />
+
+      <ConfirmModal
         visible={!!toDelete}
         title="Remove product?"
         message={`"${toDelete?.name}" will be removed from stock. This can be restored by support if needed.`}
@@ -626,6 +808,34 @@ const useStyles = makeStyles((colors) => ({
   categoryManageRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }, 
   categoryManageName: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
   categoryManageMeta: { fontSize: 11, color: colors.muted, marginTop: 3 },
+  categoryHeaderActions: { flexDirection: "row", alignItems: "center", gap: 7 },
+  bulkToggleButton: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, borderRadius: 9, borderWidth: 1, borderColor: colors.brandSecondary, backgroundColor: colors.brandTertiary },
+  bulkToggleButtonActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  bulkToggleText: { fontSize: 11, fontWeight: "800", color: colors.brandPrimary },
+  bulkSelectControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.divider },
+  bulkSelectedCount: { flex: 1, color: colors.onSurface, fontSize: 12, fontWeight: "800" },
+  bulkLinkText: { color: colors.brandPrimary, fontSize: 11, fontWeight: "800" },
+  rowSelected: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  selectionMarker: { width: 34, alignItems: "center", justifyContent: "center" },
+  bulkActionBar: { position: "absolute", left: 12, right: 12, flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, elevation: 8 },
+  bulkActionCount: { color: colors.onSurface, fontSize: 13, fontWeight: "900" },
+  bulkActionHint: { color: colors.muted, fontSize: 10, marginTop: 2 },
+  bulkActionButton: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 11, borderRadius: 10, backgroundColor: colors.brandPrimary },
+  bulkActionButtonText: { color: colors.onBrandPrimary, fontSize: 11, fontWeight: "900" },
+  bulkDeleteButton: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 10, borderRadius: 10, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
+  bulkDeleteButtonText: { color: colors.error, fontSize: 11, fontWeight: "900" },
+  bulkBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.48)", justifyContent: "center", padding: 20 },
+  bulkDialog: { width: "100%", maxWidth: 460, alignSelf: "center", gap: 12, backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.border },
+  bulkDialogTitle: { color: colors.onSurface, fontSize: 18, fontWeight: "900" },
+  bulkDialogHint: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  bulkCategoryOption: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceTertiary },
+  bulkCategoryOptionSelected: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  bulkCategoryText: { color: colors.onSurface, fontSize: 13, fontWeight: "700" },
+  bulkCategoryTextSelected: { color: colors.brandPrimary, fontWeight: "900" },
+  bulkModalButton: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: colors.brandPrimary },
+  bulkModalButtonText: { color: colors.onBrandPrimary, fontSize: 13, fontWeight: "900" },
+  bulkCancelButton: { minHeight: 38, alignItems: "center", justifyContent: "center" },
+  bulkCancelText: { color: colors.muted, fontSize: 13, fontWeight: "800" },
   categoryChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   categoryChipText: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary },
   categoryChipTextActive: { color: colors.onBrandPrimary },
