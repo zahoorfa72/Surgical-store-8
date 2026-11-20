@@ -66,11 +66,34 @@ export type ParsedSellSearchEntry = {
 
 // Parse a trailing numeric quantity from a single typed Sell command.
 // Example: "S tow 2" becomes query "s tow" and quantity 2.
-export function parseSellSearchEntry(value: string): ParsedSellSearchEntry {
+export function parseSellSearchEntry(
+  value: string,
+  products: VoiceCatalogItem[] = [],
+): ParsedSellSearchEntry {
   const normalized = normalizeDigits(String(value ?? ""))
     .normalize("NFKC")
     .trim()
     .replace(/\s+/g, " ");
+
+  // A trailing number may be part of a product name, not a requested
+  // quantity. Prefer a catalogue-name match when the complete typed text
+  // matches a product name or a safe prefix such as "N/S 1000" → "N/S 1000ml".
+  const fullQuery = normalizeSellSearch(normalized);
+  const productNamePrefixExists = /\d$/u.test(fullQuery) && products.some((product) => {
+    const name = normalizeSellSearch(product.name);
+    if (!name.startsWith(fullQuery)) return false;
+    const nextCharacter = name.charAt(fullQuery.length);
+    return !nextCharacter || !/\d/u.test(nextCharacter);
+  });
+  if (productNamePrefixExists) {
+    return {
+      query: fullQuery,
+      quantity: 1,
+      hasQuantity: false,
+      invalidQuantity: false,
+    };
+  }
+
   const match = normalized.match(/^(.*?)\s+([0-9]+)$/u);
   if (!match) {
     return {
@@ -246,13 +269,18 @@ export function rankVoiceProductMatches<T extends VoiceCatalogItem>(
         index,
         name: normalizeSellSearch(product.name),
       }))
-      .filter((row) =>
-        row.name === normalizedQuery || row.name.startsWith(normalizedQuery + " "),
-      )
+      .filter((row) => {
+        if (!row.name.startsWith(normalizedQuery)) return false;
+        const nextCharacter = row.name.charAt(normalizedQuery.length);
+        // Allow letter/unit suffixes (1000 → 1000ml), but not adjacent
+        // numeric sizes (1000 must not accidentally match 10000).
+        return !nextCharacter || !/\d/u.test(nextCharacter);
+      })
       .map(({ product, name }) => ({
         product,
         score: name === normalizedQuery ? 1 : Math.min(0.98, normalizedQuery.length / name.length),
       }))
+      .sort((a, b) => b.score - a.score)
       .slice(0, 8);
   }
 
