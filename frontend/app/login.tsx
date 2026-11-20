@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+import brandLogo from "../assets/images/brand-logo.png";
 
 import { useAuth } from "@/src/auth";
 import { useSettings } from "@/src/data";
@@ -61,7 +62,12 @@ export default function Login() {
               contentFit="cover"
             />
           ) : (
-            <MaterialDesignIcons name="medical-bag" size={40} color={colors.onBrandPrimary} />
+            <Image
+              testID="default-login-logo"
+              source={brandLogo}
+              style={styles.brandLogo}
+              contentFit="contain"
+            />
           )}
         </View>
         <Text style={styles.title}>{settings?.store_name ?? "Surgical Store"}</Text>
@@ -124,10 +130,12 @@ const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   content: { paddingHorizontal: 24, gap: 6, alignItems: "center" },
   brandMark: {
-    width: 84,
-    height: 84,
+    width: 148,
+    height: 148,
     borderRadius: 24,
-    backgroundColor: colors.brandPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
