@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+import brandLogo from "../assets/images/brand-logo.png";
 
 import { useAuth, isAdmin } from "@/src/auth";
 import { useSettings, useParties, qk } from "@/src/data";
@@ -194,7 +195,12 @@ export default function Settings() {
                     contentFit="contain"
                   />
                 ) : (
-                  <MaterialDesignIcons name="storefront-outline" size={30} color={colors.muted} />
+                  <Image
+                    testID="settings-default-brand-logo"
+                    source={brandLogo}
+                    style={styles.logoImg}
+                    contentFit="contain"
+                  />
                 )}
               </View>
               <Pressable testID="upload-logo-button" style={styles.uploadBtn} onPress={pickLogo} disabled={uploading}>
