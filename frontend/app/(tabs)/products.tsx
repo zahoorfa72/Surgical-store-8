@@ -86,13 +86,6 @@ export default function Products() {
       ? current.filter((id) => id !== productId)
       : [...current, productId]);
   };
-  const allFilteredSelected = filtered.length > 0 && filtered.every((product) => selectedProductIds.includes(product.id));
-  const toggleSelectAllFiltered = () => {
-    const visibleIds = new Set(filtered.map((product) => product.id));
-    setSelectedProductIds((current) => allFilteredSelected
-      ? current.filter((id) => !visibleIds.has(id))
-      : Array.from(new Set([...current, ...visibleIds])));
-  };
   const stopBulkSelection = () => {
     setSelectionMode(false);
     setSelectedProductIds([]);
