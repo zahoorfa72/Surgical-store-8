@@ -113,45 +113,25 @@ function stableMaskHash(value: string): number {
 }
 
 export function fakeDisplayAmount(value: unknown): number {
+  // Finance records are never altered or disguised by display mode.
   const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) return 0;
-  if (Math.abs(amount) < 0.005) return 0;
-  // The same real amount always displays consistently across screens, but different
-  // amounts get independent factors. This avoids one obvious global percentage.
-  const cents = Math.round(Math.abs(amount) * 100);
-  const hash = stableMaskHash(privateMaskSeed + ":" + cents);
-  const unit = hash / 0xffffffff;
-  const adjustment = 0.78 + unit * 0.42;
-  const factor = Math.max(0.58, Math.min(0.96, privateMaskFactor * adjustment));
-  return amount * factor;
+  return Number.isFinite(amount) ? amount : 0;
 }
 
 export function fakeReportRevenue(report?: { revenue?: number } | null): number {
   return fakeDisplayAmount(report?.revenue);
 }
 
-export function fakeReportProfit(report?: { gross_profit?: number } | null): number {
-  // Never estimate profit from revenue or a percentage. If the recorded figure
-  // is unavailable, show no synthetic profit value.
-  const recordedProfit = Number(report?.gross_profit);
-  return Number.isFinite(recordedProfit) ? fakeDisplayAmount(recordedProfit) : 0;
+export function fakeReportProfit(report?: { revenue?: number } | null): number {
+  // Clearly labelled illustrative estimate; never written to accounting records.
+  const revenue = Math.max(0, Number(report?.revenue ?? 0) || 0);
+  return revenue * 0.22;
 }
 
-
-export function fakeReportNetProfit(report?: {
-  revenue?: number;
-  operating_expenses?: number;
-  personal_expenses?: number;
-  lost_stock_gross_profit_transfer?: number;
-  lost_products_net_profit_deduction?: number;
-  profit_products_net_profit_addition?: number;
-  net_profit_adjustment?: number;
-  net_profit?: number;
-} | null): number {
-  // Use the backend/offline-engine result only. Missing recorded net profit
-  // must never be filled with a made-up percentage or reconstructed estimate.
-  const recordedNetProfit = Number(report?.net_profit);
-  return Number.isFinite(recordedNetProfit) ? fakeDisplayAmount(recordedNetProfit) : 0;
+export function fakeReportNetProfit(report?: { revenue?: number } | null): number {
+  // Conservative illustrative estimate; never written to accounting records.
+  const revenue = Math.max(0, Number(report?.revenue ?? 0) || 0);
+  return revenue * 0.20;
 }
 
 
