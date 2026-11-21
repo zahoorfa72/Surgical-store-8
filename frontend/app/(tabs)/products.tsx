@@ -86,13 +86,6 @@ export default function Products() {
       ? current.filter((id) => id !== productId)
       : [...current, productId]);
   };
-  const allFilteredSelected = filtered.length > 0 && filtered.every((product) => selectedProductIds.includes(product.id));
-  const toggleSelectAllFiltered = () => {
-    const visibleIds = new Set(filtered.map((product) => product.id));
-    setSelectedProductIds((current) => allFilteredSelected
-      ? current.filter((id) => !visibleIds.has(id))
-      : Array.from(new Set([...current, ...visibleIds])));
-  };
   const stopBulkSelection = () => {
     setSelectionMode(false);
     setSelectedProductIds([]);
@@ -292,16 +285,6 @@ export default function Products() {
                           <Text style={styles.financeSub}>Create your own groups and filter stock by category</Text>
                         </View>
                         <View style={styles.categoryHeaderActions}>
-                          {staff && (
-                            <Pressable
-                              testID="toggle-product-selection"
-                              style={[styles.bulkToggleButton, selectionMode && styles.bulkToggleButtonActive]}
-                              onPress={() => selectionMode ? stopBulkSelection() : setSelectionMode(true)}
-                            >
-                              <MaterialDesignIcons name={selectionMode ? "close" : "checkbox-multiple-marked-outline"} size={16} color={selectionMode ? colors.onBrandPrimary : colors.brandPrimary} />
-                              <Text style={[styles.bulkToggleText, selectionMode && { color: colors.onBrandPrimary }]}>{selectionMode ? "Done" : "Select items"}</Text>
-                            </Pressable>
-                          )}
                           {isAdmin ? (
                             <Pressable testID="manage-product-categories" style={styles.manageCategoriesButton} onPress={() => setCategoryManagerOpen(true)}>
                               <MaterialDesignIcons name="cog-outline" size={17} color={colors.brandPrimary} />
@@ -321,19 +304,6 @@ export default function Products() {
                           );
                         })}
                       </View>
-                      {selectionMode && (
-                        <View style={styles.bulkSelectControls}>
-                          <Text style={styles.bulkSelectedCount}>{selectedProductIds.length} selected</Text>
-                          <Pressable testID="select-all-visible-products" onPress={toggleSelectAllFiltered}>
-                            <Text style={styles.bulkLinkText}>{allFilteredSelected ? "Unselect visible" : `Select all visible (${filtered.length})`}</Text>
-                          </Pressable>
-                          {selectedProductIds.length > 0 && (
-                            <Pressable testID="clear-product-selection" onPress={() => setSelectedProductIds([])}>
-                              <Text style={styles.bulkLinkText}>Clear</Text>
-                            </Pressable>
-                          )}
-                        </View>
-                      )}
                     </Card>
                     <Card style={styles.usageCard}>
                       <View style={{ gap: 10, marginBottom: 10 }}>
@@ -446,6 +416,13 @@ export default function Products() {
                 testID={`product-row-${item.id}`}
                 style={[styles.row, selectionMode && selectedProductIds.includes(item.id) && styles.rowSelected]}
                 onPress={() => selectionMode ? toggleProductSelection(item.id) : setDetailsProduct(item)}
+                onLongPress={() => {
+                  if (!selectionMode) {
+                    setSelectionMode(true);
+                    setSelectedProductIds([item.id]);
+                  }
+                }}
+                delayLongPress={450}
               >
                 {selectionMode ? (
                   <View style={styles.selectionMarker}>
@@ -495,7 +472,7 @@ export default function Products() {
         <View style={[styles.bulkActionBar, { bottom: insets.bottom + 12 }]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.bulkActionCount}>{selectedProductIds.length} selected</Text>
-            <Text style={styles.bulkActionHint}>Choose an action for these products</Text>
+            <Text style={styles.bulkActionHint}>Tap other products to add them</Text>
           </View>
           <Pressable
             testID="move-selected-products"
@@ -517,6 +494,14 @@ export default function Products() {
               <Text style={styles.bulkDeleteButtonText}>Delete</Text>
             </Pressable>
           )}
+          <Pressable
+            testID="finish-product-selection"
+            disabled={bulkBusy}
+            onPress={stopBulkSelection}
+            style={styles.bulkDeleteButton}
+          >
+            <Text style={styles.bulkLinkText}>Done</Text>
+          </Pressable>
         </View>
       )}
 
