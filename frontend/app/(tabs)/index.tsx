@@ -471,13 +471,13 @@ export default function Dashboard() {
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <View style={styles.statPressable}>
               <Pressable onPress={() => { if (!handleProfitTileTap("net") && !netHidden && financeDetailDrilldown) setFinanceDetailsOpen("net"); }}>
-                <StatTile label="Net Profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0)))))} icon="trending-up" tone="success" testID="stat-net-profit" />
+                <StatTile label={fakeFinanceDisplay ? "Simulated Net Profit (20%)" : "Net Profit"} value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0)))))} icon="trending-up" tone="success" testID="stat-net-profit" />
               </Pressable>
               <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="net" /></View>
             </View>
             <View style={styles.statPressable}>
               <Pressable onPress={() => { handleProfitTileTap("gross"); }}>
-                <StatTile label="Gross Profit" value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
+                <StatTile label={fakeFinanceDisplay ? "Simulated Gross Profit (22%)" : "Gross Profit"} value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
               </Pressable>
               <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="gross" /></View>
             </View>
@@ -607,7 +607,7 @@ export default function Dashboard() {
                 {financeDetailsOpen === "purchases" && (
                   <Card>
                     <Text style={styles.detailHeader}>Purchases — selected period</Text>
-                    <Text style={styles.detailBig}>{money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)}</Text>
+                    <Text style={styles.detailBig}>{money(displayFinanceAmount(data.purchase_total, fakeFinanceDisplay))}</Text>
                     {detailPurchases.map((x:any) => (
                       <View key={x.id} style={styles.detailLine}>
                         <View style={{flex:1}}>
@@ -785,7 +785,7 @@ export default function Dashboard() {
             <PLRow label="Net sales" value={money(displayFinanceAmount(data.revenue, fakeFinanceDisplay))} />
             <PLRow label="Inventory purchase (goods sold)" value={"- " + money(displayFinanceAmount(data.cogs_goods, fakeFinanceDisplay))} muted />
             <View style={styles.plDivider} />
-            <PLRow label="Gross profit" value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
+            <PLRow label={fakeFinanceDisplay ? "Simulated gross profit (22%)" : "Gross profit"} value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} bold tone="info" />
             <PLRow label="Personal expenses" value={"- " + money(displayFinanceAmount(data.personal_expenses, fakeFinanceDisplay))} muted />
             <PLRow label="Operating expenses" value={"- " + money(displayFinanceAmount(data.operating_expenses, fakeFinanceDisplay))} muted />
             {!netHidden && <>
@@ -794,7 +794,7 @@ export default function Dashboard() {
               {Number(data.net_profit_adjustment ?? 0) !== 0 && <PLRow label="Other admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(displayFinanceAmount(Math.abs(Number(data.net_profit_adjustment)), fakeFinanceDisplay))} muted />}
               <View style={styles.plDivider} />
             </>}
-            <PLRow label="Net profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
+            <PLRow label={fakeFinanceDisplay ? "Simulated net profit (20%)" : "Net profit"} value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit)} bold tone={(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit) >= 0 ? "success" : "error"} />
           </Card>}
 
           {/* Remaining balance (cash) */}
