@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
 
 import { makeStyles, useTheme } from "@/src/theme";
-import { isAdminPinConfigured, updateProfitVisibilityCache, useProfitVisibility, verifyAdminPin } from "@/src/security/finance-security";
+import { authenticateWithBiometric, isAdminPinConfigured, isBiometricUnlockEnabled, updateProfitVisibilityCache, useProfitVisibility, verifyAdminPin } from "@/src/security/finance-security";
 
 export function ProfitVisibilityToggle({ kind }: { kind: "gross" | "net" }) {
   const styles = useStyles();
@@ -25,14 +25,32 @@ export function ProfitVisibilityToggle({ kind }: { kind: "gross" | "net" }) {
       await updateProfitVisibilityCache(queryClient, kind, true);
       return;
     }
-    const configured = await isAdminPinConfigured();
-    if (!configured) {
-      setError("Ask the administrator to set an app PIN in Security & Privacy first.");
-    } else {
-      setError("");
+    setBusy(true);
+    try {
+      if (await isBiometricUnlockEnabled()) {
+        try {
+          const verified = await authenticateWithBiometric();
+          if (verified) {
+            await updateProfitVisibilityCache(queryClient, kind, false);
+            setError("");
+            return;
+          }
+        } catch {
+          // A cancelled or unsuccessful fingerprint prompt falls back to the admin PIN.
+        }
+        setError("Fingerprint was not verified. Enter the administrator PIN to unhide this value.");
+      } else {
+        setError("");
+      }
+      const configured = await isAdminPinConfigured();
+      if (!configured) {
+        setError("Fingerprint was not verified. Ask the administrator to set a 6-digit app PIN in Security & Privacy.");
+      }
+      setPin("");
+      setModalOpen(true);
+    } finally {
+      setBusy(false);
     }
-    setPin("");
-    setModalOpen(true);
   };
 
   const reveal = async () => {
