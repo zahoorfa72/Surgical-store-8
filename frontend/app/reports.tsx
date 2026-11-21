@@ -108,7 +108,7 @@ export default function Reports() {
           </View>
 
           {!netHidden && <StatTile
-            label={fakeFinanceDisplay ? "Simulated net profit (20%)" : "Net profit"}
+            label={fakeFinanceDisplay ? "Net profit" : "Net profit"}
             value={money(displayNetProfit)}
             icon="trending-up"
             tone={displayNetProfit >= 0 ? "success" : "error"}
@@ -174,7 +174,7 @@ export default function Reports() {
               <Row label="Gross profit before stock transfer" value={money(fakeFinanceDisplay ? fakeDisplayAmount(grossProfitBeforeLostStock) : grossProfitBeforeLostStock)} />
               <Row label="Less: lost stock moved to Remaining Balance" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(lostStockTransfer) : lostStockTransfer)} muted />
             </>}
-            {!grossHidden && <Row label={fakeFinanceDisplay ? "Simulated gross profit (22%)" : "Gross profit"} value={money(displayGrossProfit)} />}
+            {!grossHidden && <Row label={fakeFinanceDisplay ? "Gross profit" : "Gross profit"} value={money(displayGrossProfit)} />}
             <Row label="Less: personal expenses" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.personal_expenses) : data.personal_expenses)} muted />
             <Row label="Less: operating expenses" value={"- " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.operating_expenses) : data.operating_expenses)} muted />
             {!netHidden && <>
@@ -182,7 +182,7 @@ export default function Reports() {
               <Row label="Add: profit product value" value={"+ " + money(fakeFinanceDisplay ? fakeDisplayAmount(data.profit_products_net_profit_addition ?? 0) : data.profit_products_net_profit_addition ?? 0)} muted />
               {Number(data.net_profit_adjustment ?? 0) !== 0 && <Row label="Admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(fakeFinanceDisplay ? fakeDisplayAmount(Math.abs(Number(data.net_profit_adjustment))) : Math.abs(Number(data.net_profit_adjustment)))} muted />}
               <Divider />
-              <Row label={fakeFinanceDisplay ? "Simulated net profit (20%)" : "Net profit"} value={money(displayNetProfit)} bold tone={data.net_profit >= 0 ? "success" : "error"} />
+              <Row label={fakeFinanceDisplay ? "Net profit" : "Net profit"} value={money(displayNetProfit)} bold tone={data.net_profit >= 0 ? "success" : "error"} />
             </>}
           </Card>}
 
