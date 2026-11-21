@@ -125,13 +125,13 @@ export function fakeReportRevenue(report?: { revenue?: number } | null): number 
 export function fakeReportProfit(report?: { revenue?: number } | null): number {
   // Clearly labelled illustrative estimate; never written to accounting records.
   const revenue = Math.max(0, Number(report?.revenue ?? 0) || 0);
-  return revenue * 0.22;
+  return revenue * 0.21;
 }
 
 export function fakeReportNetProfit(report?: { revenue?: number } | null): number {
   // Conservative illustrative estimate; never written to accounting records.
   const revenue = Math.max(0, Number(report?.revenue ?? 0) || 0);
-  return revenue * 0.20;
+  return revenue * 0.21;
 }
 
 
