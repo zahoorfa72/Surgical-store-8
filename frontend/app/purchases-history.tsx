@@ -92,7 +92,7 @@ export default function PurchasesHistory() {
               refundByPurchase[p.id] ?? 0,
             ), 0)
           : data.reduce((s, p) => s + Number(p.total ?? 0), 0);
-        const refunded = fakeFinanceDisplay ? 0 : data.reduce((s, p) => s + (refundByPurchase[p.id] ?? 0), 0);
+        const refunded = data.reduce((s, p) => s + (refundByPurchase[p.id] ?? 0), 0);
         return { title, data, gross, refunded, net: Math.max(0, gross - refunded) };
       })
       .sort((a, b) => a.title.localeCompare(b.title));
@@ -205,7 +205,7 @@ export default function PurchasesHistory() {
                         <Text style={styles.pendingText}>Pending</Text>
                       </View>
                     )}
-                    {!fakeFinanceDisplay && refunded > 0 && (
+                    {refunded > 0 && (
                       <View style={styles.returnedTag} testID={`purchase-returned-tag-${item.id}`}>
                         <MaterialDesignIcons name="undo-variant" size={11} color={colors.error} />
                         <Text style={styles.returnedText}>Returned</Text>
