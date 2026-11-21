@@ -178,13 +178,13 @@ export function AppLockGate({ children }: { children: ReactNode }) {
       if (ok) { setUnlocked(true); setAttempts(0); setShowPinFallback(false); }
       else {
         const next = attempts + 1; setAttempts(next);
-        if (next >= 5) { setShowPinFallback(true); setError("Fingerprint failed five times. Enter your administrator PIN."); }
-        else setError(`Fingerprint not verified (${next}/5). Try again.`);
+        setShowPinFallback(true);
+        setError("Fingerprint was not verified. Enter your administrator PIN to continue.");
       }
     } catch {
       const next = attempts + 1; setAttempts(next);
-      if (next >= 5) { setShowPinFallback(true); setError("Fingerprint failed five times. Enter your administrator PIN."); }
-      else setError(`Fingerprint attempt ${next}/5 was unsuccessful. Try again.`);
+      setShowPinFallback(true);
+      setError("Fingerprint attempt was unsuccessful. Enter your administrator PIN to continue.");
     } finally {
       setBusy(false);
     }
