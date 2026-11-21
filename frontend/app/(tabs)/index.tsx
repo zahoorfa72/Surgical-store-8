@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
@@ -12,7 +12,7 @@ import { useAuth } from "@/src/auth";
 import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
-import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown } from "@/src/utils/finance-display";
+import { useFakeFinanceDisplay, fakeDisplayAmount, fakeReportRevenue, fakeReportProfit, fakeReportNetProfit, getFinanceDetailDrilldown, setFakeFinanceDisplay, notifyFakeFinanceDisplay } from "@/src/utils/finance-display";
 import { useProfitVisibility, updateProfitVisibilityCache } from "@/src/security/finance-security";
 import { ProfitVisibilityToggle } from "@/src/components/profit-visibility-toggle";
 
@@ -143,6 +143,21 @@ export default function Dashboard() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
+  const profitTapState = useRef<{ kind: "gross" | "net"; count: number; lastTapAt: number }>({ kind: "gross", count: 0, lastTapAt: 0 });
+  const handleProfitTileTap = useCallback((kind: "gross" | "net") => {
+    const now = Date.now();
+    const previous = profitTapState.current;
+    const count = previous.kind === kind && now - previous.lastTapAt <= 1200 ? previous.count + 1 : 1;
+    profitTapState.current = { kind, count, lastTapAt: now };
+    if (count >= 3) {
+      profitTapState.current = { kind, count: 0, lastTapAt: 0 };
+      if (!fakeFinanceDisplay) {
+        void setFakeFinanceDisplay(true).then(() => notifyFakeFinanceDisplay(queryClient, true)).catch(() => {});
+      }
+      return true;
+    }
+    return false;
+  }, [fakeFinanceDisplay, queryClient]);
   const { grossHidden, netHidden } = useProfitVisibility();
   const { user } = useAuth();
   const hideDashboardProfits = useCallback(() => {
@@ -455,13 +470,15 @@ export default function Dashboard() {
           <View style={styles.financeGrid}>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <View style={styles.statPressable}>
-              <Pressable disabled={netHidden || !financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("net")}>
+              <Pressable onPress={() => { if (!handleProfitTileTap("net") && !netHidden && financeDetailDrilldown) setFinanceDetailsOpen("net"); }}>
                 <StatTile label="Net Profit" value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0)))))} icon="trending-up" tone="success" testID="stat-net-profit" />
               </Pressable>
               <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="net" /></View>
             </View>
             <View style={styles.statPressable}>
-              <StatTile label="Gross Profit" value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
+              <Pressable onPress={() => { handleProfitTileTap("gross"); }}>
+                <StatTile label="Gross Profit" value={grossHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit)} icon="chart-line" tone="info" />
+              </Pressable>
               <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="gross" /></View>
             </View>
             <Pressable disabled={!financeDetailDrilldown} onPress={() => { setBalanceDetailDate(localDay); setBalanceFromDate(""); setBalanceToDate(""); setFinanceDetailsOpen("balance"); }} style={styles.statPressable}><StatTile label="All-time Remaining Balance" value={money(displayFinanceAmount(allTimeReport?.remaining_balance ?? 0, fakeFinanceDisplay))} icon="wallet" tone={(allTimeReport?.remaining_balance ?? 0) >= 0 ? "success" : "error"} secondaryLabel={periodBalanceLabel} secondaryValue={money(displayFinanceAmount(selectedPeriodRemaining, fakeFinanceDisplay))} testID="stat-remaining-balance" /></Pressable>
