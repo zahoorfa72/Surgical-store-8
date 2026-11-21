@@ -825,8 +825,8 @@ export default function Dashboard() {
 
           <View style={styles.grid}>
             <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("units")}><StatTile label="Units sold" value={String(data.units_sold)} icon="cube-outline" tone="brand" /></Pressable>
-            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("purchases")}><StatTile label="Purchases" value={money(fakeFinanceDisplay ? Number(data.purchase_total ?? 0) * 0.825 : data.purchase_total)} icon="truck" tone="warning" /></Pressable>
-            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("inventory")}><StatTile label="Inventory value" value={money(fakeFinanceDisplay ? Number(data.inventory_value ?? 0) * 0.825 : data.inventory_value)} icon="warehouse" tone="info" /></Pressable>
+            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("purchases")}><StatTile label="Purchases" value={money(Number(data.purchase_total ?? 0))} icon="truck" tone="warning" /></Pressable>
+            <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("inventory")}><StatTile label="Inventory value" value={money(Number(data.inventory_value ?? 0))} icon="warehouse" tone="info" /></Pressable>
             <Pressable style={styles.statPressable} onPress={() => setFinanceDetailsOpen("products")}><StatTile label="Products" value={String(data.product_count)} icon="package-variant-closed" tone="muted" /></Pressable>
           </View>
 
