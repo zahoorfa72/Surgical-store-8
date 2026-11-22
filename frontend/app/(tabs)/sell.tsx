@@ -285,6 +285,7 @@ export default function Sell() {
     setCart([]);
     setTransactionDate(todayIsoDate());
     setDiscount("0");
+    setSaleDescription("");
     setCustomerId(null);
     setCredit(false);
     setAllowNegativeStock(false);
@@ -469,7 +470,7 @@ export default function Sell() {
     toast(`Added ${quantity} × ${product.name}`, "success");
     // With auto-add disabled, keep the query visible so more items/quantities
     // can be added from the same suggestions without retyping.
-    if (searchToAddEnabled) setSearch("");
+    if (searchToAddEnabled) { searchInputRef.current = ""; setSearch(""); }
     voiceNeedsConfirmationRef.current = null;
   };
 
