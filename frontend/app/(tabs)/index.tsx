@@ -404,11 +404,10 @@ export default function Dashboard() {
   const chartPercent = (value: number, base: number) =>
     base > 0 ? (value / base * 100).toFixed(1) + "%" : "—";
   const chartItems = [
-    { key: "gross-sales", label: "Sales (gross)", value: chartGrossSales, percent: "100% sales baseline", hidden: false, tone: colors.brandPrimary },
-    { key: "revenue", label: "Revenue (after returns)", value: chartRevenue, percent: chartPercent(chartRevenue, chartGrossSales) + " of gross sales", hidden: false, tone: colors.success },
-    { key: "gross-profit", label: "Gross Profit", value: chartGrossProfit, percent: grossHidden ? "Hidden" : chartPercent(chartGrossProfit, chartRevenue) + " gross profit margin", hidden: grossHidden, tone: colors.info },
-    { key: "net-profit", label: "Net Profit", value: chartNetProfit, percent: netHidden ? "Hidden" : chartPercent(chartNetProfit, chartRevenue) + " net profit margin", hidden: netHidden, tone: colors.warning },
-    { key: "inventory", label: "Inventory value · current stock", value: chartInventoryValue, percent: chartPercent(chartInventoryValue, chartRevenue) + " of selected-period revenue", hidden: false, tone: colors.muted },
+    { key: "gross-sales", label: "Sales", value: chartGrossSales, percent: "Gross sales", hidden: false, tone: colors.brandPrimary },
+    { key: "revenue", label: "Revenue", value: chartRevenue, percent: chartPercent(chartRevenue, chartGrossSales) + " of sales", hidden: false, tone: colors.success },
+    { key: "gross-profit", label: "Gross Profit", value: chartGrossProfit, percent: grossHidden ? "Hidden" : chartPercent(chartGrossProfit, chartRevenue) + " margin", hidden: grossHidden, tone: colors.info },
+    { key: "net-profit", label: "Net Profit", value: chartNetProfit, percent: netHidden ? "Hidden" : chartPercent(chartNetProfit, chartRevenue) + " margin", hidden: netHidden, tone: colors.warning },
   ];
   const chartMaximum = Math.max(1, ...chartItems.filter((item) => !item.hidden).map((item) => Math.abs(item.value)));
 
@@ -791,7 +790,14 @@ export default function Dashboard() {
                 </View>
               );
             })}
-            <Text style={styles.chartFootnote}>Inventory value is the current stock snapshot. Sales, revenue and profit figures follow the selected period.</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.border, marginTop: 12, paddingTop: 12 }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={styles.chartLabel}>Inventory value</Text>
+                <Text style={styles.chartPercent}>Current stock valuation</Text>
+              </View>
+              <Text style={styles.chartValue}>{money(chartInventoryValue)}</Text>
+            </View>
+            <Text style={styles.chartFootnote}>Sales, revenue and profit follow the selected period. Inventory is valued separately using current on-hand stock and weighted unit cost; it is not divided by period revenue.</Text>
           </Card>
           {/* Profit & loss breakdown */}
           {<Card>
