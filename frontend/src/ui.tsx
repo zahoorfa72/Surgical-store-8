@@ -491,7 +491,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     [anim]
   );
 
-  useEffect(() => () => timer.current && clearTimeout(timer.current), []);
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
 
   const kindColor = toast
     ? { success: colors.success, error: colors.error, info: colors.info }[toast.kind]
