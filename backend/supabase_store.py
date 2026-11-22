@@ -1,4 +1,4 @@
-import base64, json
+import base64, json, re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -64,6 +64,19 @@ def _matches(doc,q):
                 if op=="$lte" and (got is None or _cmp(got)>_cmp(val)): return False
                 if op=="$in" and not any(_eq(got,x) for x in val): return False
                 if op=="$exists" and ((k in doc) != bool(val)): return False
+                if op=="$regex":
+                    if got is None: return False
+                    options = str(want.get("$options", ""))
+                    flags = 0
+                    if "i" in options: flags |= re.IGNORECASE
+                    if "m" in options: flags |= re.MULTILINE
+                    if "s" in options: flags |= re.DOTALL
+                    try:
+                        if re.search(str(val), str(got), flags) is None: return False
+                    except re.error:
+                        return False
+                if op=="$options" and "$regex" not in want: return False
+                if op not in ("$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$exists", "$regex", "$options"): return False
         elif not _eq(got,want): return False
     return True
 
