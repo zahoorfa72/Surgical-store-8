@@ -266,7 +266,7 @@ export default function BackupRestore() {
       try {
         const partialKeys = (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
         if (partialKeys.length) await AsyncStorage.multiRemove(partialKeys);
-        if (currentPairs.length) await AsyncStorage.multiSet(currentPairs);
+        if (currentPairs.length) await AsyncStorage.multiSet(currentPairs.map(([key, value]) => [key, value] as [string, string]));
       } catch {}
       throw error;
     }
