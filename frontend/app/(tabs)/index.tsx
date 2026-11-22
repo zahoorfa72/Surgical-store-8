@@ -394,13 +394,13 @@ export default function Dashboard() {
 
   // All period-based values below come from the same report response selected
   // by the Day / Week / Month / Year / All Time / custom-date filter.
-  const chartGrossSales = Math.max(0, Number(data.gross_revenue ?? 0));
-  const chartRevenue = Math.max(0, Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0));
-  const chartGrossProfit = grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0);
-  const chartNetProfit = netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0);
+  const chartGrossSales = Math.max(0, Number(data?.gross_revenue ?? 0));
+  const chartRevenue = Math.max(0, Number(fakeFinanceDisplay ? fakeReportRevenue(data ?? ({} as any)) : data?.revenue ?? 0));
+  const chartGrossProfit = grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data ?? ({} as any)) : data?.gross_profit ?? 0);
+  const chartNetProfit = netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data ?? ({} as any)) : data?.net_profit ?? 0);
   // Inventory is a current-stock valuation snapshot, not a historical value
   // that can be reconstructed for an earlier date from the available data.
-  const chartInventoryValue = Math.max(0, Number(data.inventory_value ?? 0));
+  const chartInventoryValue = Math.max(0, Number(data?.inventory_value ?? 0));
   const chartPercent = (value: number, base: number) =>
     base > 0 ? (value / base * 100).toFixed(1) + "%" : "—";
   const chartItems = [
