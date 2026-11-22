@@ -120,6 +120,78 @@ export default function Sell() {
   const [newSellProductBarcode, setNewSellProductBarcode] = useState("");
   const [newSellProductSalePrice, setNewSellProductSalePrice] = useState("");
 
+  // Keep the active, unfinished sale safe when this screen unmounts or the
+  // app is backgrounded/reopened. This is a local draft only; stock changes
+  // only after checkout succeeds.
+  const [cartDraftReady, setCartDraftReady] = useState(false);
+  const cartDraftKey = "ssm.activeSellCart.v1";
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(cartDraftKey);
+        if (raw && active) {
+          const draft = JSON.parse(raw);
+          if (draft && Array.isArray(draft.cart)) {
+            const restored = draft.cart.filter((line: any) =>
+              line && typeof line.id === "string" &&
+              typeof line.name === "string" &&
+              Number.isFinite(Number(line.quantity)) &&
+              Number.isFinite(Number(line.unit_price))
+            ).map((line: any) => ({
+              ...line,
+              quantity: Number(line.quantity),
+              unit_price: Number(line.unit_price),
+              stock: Number(line.stock ?? 0),
+              threshold: Number(line.threshold ?? 0),
+            }));
+            setCart(restored);
+            if (typeof draft.transactionDate === "string") setTransactionDate(draft.transactionDate);
+            if (typeof draft.customerId === "string" || draft.customerId === null) setCustomerId(draft.customerId);
+            if (typeof draft.discount === "string") setDiscount(draft.discount);
+            if (typeof draft.credit === "boolean") setCredit(draft.credit);
+            if (typeof draft.allowNegativeStock === "boolean") setAllowNegativeStock(draft.allowNegativeStock);
+            if (typeof draft.includePreviousBalance === "boolean") setIncludePreviousBalance(draft.includePreviousBalance);
+            if (typeof draft.applyCustomerCredit === "boolean") setApplyCustomerCredit(draft.applyCustomerCredit);
+            if (Number.isFinite(Number(draft.pendingBalanceAdjustment))) setPendingBalanceAdjustment(Number(draft.pendingBalanceAdjustment));
+            if (typeof draft.activeHeldSaleId === "string" || draft.activeHeldSaleId === null) setActiveHeldSaleId(draft.activeHeldSaleId);
+          }
+        }
+      } catch {
+        // Ignore a damaged local draft; never block the Sell screen.
+      } finally {
+        if (active) setCartDraftReady(true);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!cartDraftReady) return;
+    if (cart.length === 0) {
+      void AsyncStorage.removeItem(cartDraftKey).catch(() => {});
+      return;
+    }
+    const draft = {
+      version: 1,
+      cart,
+      transactionDate,
+      customerId,
+      discount,
+      credit,
+      allowNegativeStock,
+      includePreviousBalance,
+      applyCustomerCredit,
+      pendingBalanceAdjustment,
+      activeHeldSaleId,
+      savedAt: new Date().toISOString(),
+    };
+    void AsyncStorage.setItem(cartDraftKey, JSON.stringify(draft)).catch(() => {
+      // The cart remains usable even if device storage is temporarily unavailable.
+    });
+  }, [cartDraftReady, cart, transactionDate, customerId, discount, credit, allowNegativeStock, includePreviousBalance, applyCustomerCredit, pendingBalanceAdjustment, activeHeldSaleId]);
+
   useFocusEffect(
     useCallback(() => {
       let active = true;
