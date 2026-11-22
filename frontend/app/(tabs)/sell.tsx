@@ -645,7 +645,6 @@ export default function Sell() {
       setVoiceMessage(`Recognized ${entry.name} × ${entry.quantity}. Keep speaking for the next item, or press Done.`);
     }
     setSearch("");
-    setSearchQuantity("1");
   };
   processVoiceResultsRef.current = processVoiceResults;
 
