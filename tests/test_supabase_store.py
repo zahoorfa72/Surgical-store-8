@@ -42,7 +42,7 @@ class SupabaseDocumentQueryTests(unittest.TestCase):
 
     def test_invalid_regex_fails_closed(self):
         product = {"name": "Sterile Gloves"}
-        self.assertFalse(_matches(product, {"name": {"$regex": "["}})
+        self.assertFalse(_matches(product, {"name": {"$regex": "["}}))
 
 
 if __name__ == "__main__":
