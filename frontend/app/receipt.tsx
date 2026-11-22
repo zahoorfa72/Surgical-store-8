@@ -80,6 +80,7 @@ function receiptHtml(sale: Sale, format: "thermal" | "a4", widthMm: 72, logo?: s
       <div><b>Date:</b> ${formatTransactionDateTime(sale.transaction_date, sale.created_at)}</div>
       <div><b>Customer:</b> ${sale.customer_name}</div>
       <div><b>Served by:</b> ${sale.cashier_name}</div>
+      ${sale.note?.trim() ? `<div><b>Description:</b> ${sale.note.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>` : ""}
     </div>
     <table>
       <thead><tr><th style="text-align:center;width:9%">No.</th><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead>
@@ -178,6 +179,7 @@ export default function Receipt() {
             <Meta label="Date" value={formatTransactionDateTime(sale.transaction_date, sale.created_at)} />
             <Meta label="Customer" value={sale.customer_name} />
             <Meta label="Served by" value={sale.cashier_name} />
+            {!!sale.note?.trim() && <Meta label="Description" value={sale.note} />}
           </View>
 
           <View style={styles.tableHead}>
