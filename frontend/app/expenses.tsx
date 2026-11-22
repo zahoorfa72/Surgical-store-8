@@ -20,7 +20,7 @@ const FILTERS = [
   { key: "personal", label: "Personal" },
 ] as const;
 
-function bucketBadge(bucket: ExpenseBucket): { text: string; tone: "warning" | "muted" | "info" } {
+function bucketBadge(bucket: ExpenseBucket): { text: string; tone: "warning" | "muted" | "error" } {
   if (bucket === "cogs") return { text: "Direct cost", tone: "warning" };
   if (bucket === "personal") return { text: "Personal", tone: "info" };
   return { text: "Operating", tone: "muted" };
