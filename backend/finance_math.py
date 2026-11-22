@@ -68,17 +68,20 @@ def calculate_finance_totals(
         if row.get("accounting_target", "none") in ("remaining_balance", "both", "split_50_50", "net_profit_to_remaining_balance")
     ), 2)
 
-    # Net Profit includes every expense class. COGS expenses were previously
-    # present in total_expenses but omitted from this final calculation.
+    # COGS expenses are routed to Remaining Balance, not Net Profit.
+    # Operating and personal expenses both reduce Net Profit.
     net_profit = round(
-        gross_profit - cogs_expenses - operating_expenses - personal_expenses + net_profit_adjustment,
+        gross_profit - operating_expenses - personal_expenses + net_profit_adjustment,
         2,
     )
 
-    # This is the store's defined remaining-balance calculation. It is not
-    # changed by gross-profit stock transfers or by unselected adjustment fields.
+    # Store formula:
+    # Net Sales - Gross Profit - Supplier Payments - Operating Expenses
+    # - COGS Expenses + Supplier Refunds + both budget amounts.
+    # Keep the two expense buckets in this formula exactly once.
     remaining_balance = round(
-        revenue - gross_profit - cogs_expenses - supplier_payments + supplier_refunds
+        revenue - gross_profit - supplier_payments - operating_expenses - cogs_expenses
+        + supplier_refunds
         + float(opening_purchase_budget or 0.0)
         + float(monthly_expenses_budget or 0.0)
         + remaining_balance_adjustment,
