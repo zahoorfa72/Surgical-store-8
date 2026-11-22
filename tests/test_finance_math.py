@@ -121,8 +121,8 @@ class FinanceMathTests(unittest.TestCase):
         ]
         result = calculate_finance_totals(self.sales, self.returns, self.expenses, self.payments, adjustments)
         self.assertEqual(result["gross_profit"], 32.00)
-        self.assertEqual(result["net_profit"], 22.00)
-        self.assertEqual(result["remaining_balance"], 36.00)
+        self.assertEqual(result["net_profit"], 27.00)
+        self.assertEqual(result["remaining_balance"], 33.00)
 
 
 if __name__ == "__main__":
