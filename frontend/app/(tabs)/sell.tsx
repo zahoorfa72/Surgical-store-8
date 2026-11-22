@@ -32,7 +32,7 @@ import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { normalizeSellSearch, parseSellSearchEntry, parseVoiceProductCommand, rankVoiceProductMatches } from "@/src/utils/sell-voice";
 
 type CartLine = { id: string; name: string; stock: number; quantity: number; unit_price: number; threshold: number; kitNames?: string[] };
-type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean; transactionDate?: string };
+type HeldSale = { id: string; createdAt: string; cart: CartLine[]; customerId: string | null; discount: string; credit: boolean; description?: string; transactionDate?: string };
 type ProductKit = { id: string; name: string; components: { product_id: string; quantity: number }[] };
 type VoiceDraftItem = {
   id: string;
@@ -67,6 +67,7 @@ export default function Sell() {
   productsRef.current = products ?? [];
 
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef("");
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceSessionOpen, setVoiceSessionOpen] = useState(false);
   const [voiceDraftItems, setVoiceDraftItems] = useState<VoiceDraftItem[]>([]);
@@ -99,6 +100,7 @@ export default function Sell() {
   const [newCustomerAddress, setNewCustomerAddress] = useState("");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [discount, setDiscount] = useState("0");
+  const [saleDescription, setSaleDescription] = useState("");
   const [credit, setCredit] = useState(false);
   const [includePreviousBalance, setIncludePreviousBalance] = useState(false);
   const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
@@ -150,6 +152,7 @@ export default function Sell() {
             if (typeof draft.transactionDate === "string") setTransactionDate(draft.transactionDate);
             if (typeof draft.customerId === "string" || draft.customerId === null) setCustomerId(draft.customerId);
             if (typeof draft.discount === "string") setDiscount(draft.discount);
+            if (typeof draft.saleDescription === "string") setSaleDescription(draft.saleDescription);
             if (typeof draft.credit === "boolean") setCredit(draft.credit);
             if (typeof draft.allowNegativeStock === "boolean") setAllowNegativeStock(draft.allowNegativeStock);
             if (typeof draft.includePreviousBalance === "boolean") setIncludePreviousBalance(draft.includePreviousBalance);
@@ -179,6 +182,7 @@ export default function Sell() {
       transactionDate,
       customerId,
       discount,
+      saleDescription,
       credit,
       allowNegativeStock,
       includePreviousBalance,
@@ -190,7 +194,7 @@ export default function Sell() {
     void AsyncStorage.setItem(cartDraftKey, JSON.stringify(draft)).catch(() => {
       // The cart remains usable even if device storage is temporarily unavailable.
     });
-  }, [cartDraftReady, cart, transactionDate, customerId, discount, credit, allowNegativeStock, includePreviousBalance, applyCustomerCredit, pendingBalanceAdjustment, activeHeldSaleId]);
+  }, [cartDraftReady, cart, transactionDate, customerId, discount, credit, allowNegativeStock, includePreviousBalance, applyCustomerCredit, pendingBalanceAdjustment, activeHeldSaleId, saleDescription]);
 
   useFocusEffect(
     useCallback(() => {
@@ -273,6 +277,7 @@ export default function Sell() {
       customerId,
       discount,
       credit,
+      description: saleDescription,
       transactionDate,
     };
     await persistHeldSales([held, ...heldSales.filter((item) => item.id !== held.id)]);
@@ -310,6 +315,7 @@ export default function Sell() {
     setTransactionDate(held.transactionDate || todayIsoDate());
     setCustomerId(held.customerId);
     setDiscount(held.discount);
+    setSaleDescription(held.description ?? "");
     setCredit(held.credit);
     // Do not remove the saved draft until the user completes this sale. A
     // failed checkout, app close, or further edit must not destroy the draft.
@@ -445,6 +451,7 @@ export default function Sell() {
     handledSearchAddRef.current = null;
     setVoiceMessage("");
     setVoiceTranscript("");
+    searchInputRef.current = value;
     setSearch(value);
   };
 
@@ -491,6 +498,7 @@ export default function Sell() {
       addToCart(product, quantity);
       toast(`Added ${quantity} × ${product.name}`, "success");
     }
+    searchInputRef.current = "";
     setSearch("");
     voiceNeedsConfirmationRef.current = null;
     return true;
@@ -539,7 +547,10 @@ export default function Sell() {
       handledSearchAddRef.current = addKey;
       addToCart(product, quantity);
       toast(`Added ${quantity} × ${product.name}`, "success");
-      setSearch("");
+      if (normalizeSellSearch(searchInputRef.current) === query) {
+        searchInputRef.current = "";
+        setSearch("");
+      }
       voiceNeedsConfirmationRef.current = null;
     }, hasQuantity ? 700 : 900);
     return () => clearTimeout(timeout);
@@ -1048,6 +1059,7 @@ export default function Sell() {
           apply_customer_credit: applyCustomerCredit,
           include_previous_balance: includePreviousBalance,
           previous_balance: includePreviousBalance ? previousBalance : applyCustomerCredit ? Number(selectedCustomer?.balance ?? 0) : 0,
+          note: saleDescription.trim(),
         } as any,
         user?.name || user?.email || "Staff",
       );
@@ -1083,6 +1095,7 @@ export default function Sell() {
       setCart([]);
       setTransactionDate(todayIsoDate());
       setDiscount("0");
+      setSaleDescription("");
       setCustomerId(null);
       setCredit(false);
       setAllowNegativeStock(false);
@@ -1452,6 +1465,21 @@ export default function Sell() {
             {reviewSearch.trim() && reviewedCart.length === 0 && reviewInventoryMatches.length === 0 && (
               <Text style={styles.reviewNoMatch}>No matching product in the cart or inventory.</Text>
             )}
+
+            <View style={{ gap: 6 }}>
+              <Text style={styles.discountLabel}>Bill description (optional)</Text>
+              <TextInput
+                testID="sale-description-input"
+                style={[styles.miniInput, { minHeight: 76, textAlignVertical: "top", paddingVertical: 10 }]}
+                value={saleDescription}
+                onChangeText={setSaleDescription}
+                placeholder="e.g. Surgery name, patient/procedure purpose"
+                placeholderTextColor={colors.muted}
+                multiline
+                maxLength={240}
+              />
+              <Text style={styles.creditHint}>This description will be printed on the receipt.</Text>
+            </View>
 
             {showSellProfitDiscount && ( 
               <>
