@@ -392,6 +392,26 @@ export default function Dashboard() {
   const detailReturns = returns.filter((x:any) => inDetailRange(x.created_at));
   const detailPurchases = purchases.filter((x:any) => inDetailRange(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
 
+  // All period-based values below come from the same report response selected
+  // by the Day / Week / Month / Year / All Time / custom-date filter.
+  const chartGrossSales = Math.max(0, Number(data.gross_revenue ?? 0));
+  const chartRevenue = Math.max(0, Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0));
+  const chartGrossProfit = grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0);
+  const chartNetProfit = netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0);
+  // Inventory is a current-stock valuation snapshot, not a historical value
+  // that can be reconstructed for an earlier date from the available data.
+  const chartInventoryValue = Math.max(0, Number(data.inventory_value ?? 0));
+  const chartPercent = (value: number, base: number) =>
+    base > 0 ? (value / base * 100).toFixed(1) + "%" : "—";
+  const chartItems = [
+    { key: "gross-sales", label: "Sales (gross)", value: chartGrossSales, percent: "100% sales baseline", hidden: false, tone: colors.brandPrimary },
+    { key: "revenue", label: "Revenue (after returns)", value: chartRevenue, percent: chartPercent(chartRevenue, chartGrossSales) + " of gross sales", hidden: false, tone: colors.success },
+    { key: "gross-profit", label: "Gross Profit", value: chartGrossProfit, percent: grossHidden ? "Hidden" : chartPercent(chartGrossProfit, chartRevenue) + " gross profit margin", hidden: grossHidden, tone: colors.info },
+    { key: "net-profit", label: "Net Profit", value: chartNetProfit, percent: netHidden ? "Hidden" : chartPercent(chartNetProfit, chartRevenue) + " net profit margin", hidden: netHidden, tone: colors.warning },
+    { key: "inventory", label: "Inventory value · current stock", value: chartInventoryValue, percent: chartPercent(chartInventoryValue, chartRevenue) + " of selected-period revenue", hidden: false, tone: colors.muted },
+  ];
+  const chartMaximum = Math.max(1, ...chartItems.filter((item) => !item.hidden).map((item) => Math.abs(item.value)));
+
   return (
     <View style={styles.root}>
       <ScreenHeader
@@ -747,25 +767,23 @@ export default function Dashboard() {
 
           <Card>
             <View style={styles.chartHeader}>
-              <View>
-                <Text style={styles.cardTitle}>Finance chart</Text>
-                <Text style={styles.chartSub}>Quick view for {range === "day" ? (exactDate || "selected day") : range === "month" ? (validMonth || "selected month") : range === "year" ? (validYear || "selected year") : range === "custom" ? (validFrom && validTo ? validFrom + " to " + validTo : "selected dates") : range === "all" ? "all time" : range}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Business performance</Text>
+                <Text style={styles.chartSub}>{range === "day" ? (exactDate || "Selected day") : range === "month" ? (validMonth || "Selected month") : range === "year" ? (validYear || "Selected year") : range === "custom" ? (validFrom && validTo ? validFrom + " to " + validTo : "Selected dates") : range === "all" ? "All time" : range} · {Number(data.transactions ?? 0)} sales · {Number(data.units_sold ?? 0)} units sold</Text>
               </View>
               <MaterialDesignIcons name="chart-bar" size={22} color={colors.brandPrimary} />
             </View>
-            {[
-              { label: "Revenue", value: Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0), tone: colors.brandPrimary },
-              { label: "Gross Profit", value: grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0), display: grossHidden ? "Rs ****" : null, tone: colors.info },
-              { label: "Net Profit", value: netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0), display: netHidden ? "Rs ****" : null, tone: colors.success },
-              { label: "Remaining Balance", value: Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0), tone: data.remaining_balance >= 0 ? colors.success : colors.error },
-            ].map((item) => {
-              const max = Math.max(1, ...[Number(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue ?? 0), !grossHidden ? Number(fakeFinanceDisplay ? fakeReportProfit(data) : data.gross_profit ?? 0) : 0, !netHidden ? Number(fakeFinanceDisplay ? fakeReportNetProfit(data) : data.net_profit ?? 0) : 0, Number(fakeFinanceDisplay ? fakeDisplayAmount(data.remaining_balance) : data.remaining_balance ?? 0)].map((value) => Math.abs(value)));
-              const width = Math.max(3, Math.min(100, Math.abs(item.value) / max * 100));
+            <Text style={styles.chartLegend}>Amount bars use the same PKR scale. Percentages show the labelled margin or ratio.</Text>
+            {chartItems.map((item) => {
+              const width = item.hidden ? 0 : Math.max(0, Math.min(100, Math.abs(item.value) / chartMaximum * 100));
               return (
-                <View key={item.label} style={styles.chartRow}>
+                <View key={item.key} style={styles.chartRow}>
                   <View style={styles.chartLabelRow}>
-                    <Text style={styles.chartLabel}>{item.label}</Text>
-                    <Text style={[styles.chartValue, item.value < 0 && { color: colors.error }]}>{item.display || money(item.value)}</Text>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={styles.chartLabel}>{item.label}</Text>
+                      <Text style={styles.chartPercent}>{item.percent}</Text>
+                    </View>
+                    <Text style={styles.chartValue}>{item.hidden ? "Rs ****" : money(item.value)}</Text>
                   </View>
                   <View style={styles.chartTrack}>
                     <View style={[styles.chartBar, { width: `${width}%`, backgroundColor: item.tone }]} />
@@ -773,6 +791,7 @@ export default function Dashboard() {
                 </View>
               );
             })}
+            <Text style={styles.chartFootnote}>Inventory value is the current stock snapshot. Sales, revenue and profit figures follow the selected period.</Text>
           </Card>
           {/* Profit & loss breakdown */}
           {<Card>
@@ -903,7 +922,10 @@ const useStyles = makeStyles((colors) => ({
   chartRow: { gap: 5, marginBottom: 10 },
   chartLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   chartLabel: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  chartPercent: { fontSize: 11, fontWeight: "700", color: colors.muted, marginTop: 2 },
   chartValue: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  chartLegend: { fontSize: 11, color: colors.muted, marginTop: -6, marginBottom: 10 },
+  chartFootnote: { fontSize: 10, lineHeight: 15, color: colors.muted, marginTop: 4 },
   chartTrack: { height: 9, borderRadius: 5, backgroundColor: colors.surfaceTertiary, overflow: "hidden" },
   chartBar: { height: "100%", borderRadius: 5 },
   cashierGreeting: { fontSize: 13, color: colors.muted, marginBottom: 12 },
