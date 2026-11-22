@@ -53,6 +53,31 @@ export function ProfitVisibilityToggle({ kind }: { kind: "gross" | "net" }) {
     }
   };
 
+  const retryFingerprint = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const enabled = await isBiometricUnlockEnabled();
+      if (!enabled) {
+        setError("Fingerprint unlock is not enabled. Enter the administrator PIN instead.");
+        return;
+      }
+      const verified = await authenticateWithBiometric();
+      if (verified) {
+        await updateProfitVisibilityCache(queryClient, kind, false);
+        setModalOpen(false);
+        setError("");
+        setPin("");
+      } else {
+        setError("Fingerprint was not verified. You can enter the administrator PIN or try fingerprint again.");
+      }
+    } catch {
+      setError("Fingerprint was not verified. You can enter the administrator PIN or try fingerprint again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const reveal = async () => {
     if (busy || pin.length !== 6) return;
     setBusy(true);
@@ -100,6 +125,9 @@ export function ProfitVisibilityToggle({ kind }: { kind: "gross" | "net" }) {
               style={styles.input}
             />
             {!!error && <Text style={styles.error}>{error}</Text>}
+            <Pressable disabled={busy} onPress={() => void retryFingerprint()} style={[styles.secondary, busy && { opacity: 0.5 }]}>
+              <Text style={styles.secondaryText}>Try fingerprint again</Text>
+            </Pressable>
             <Pressable disabled={busy || pin.length !== 6} onPress={() => void reveal()} style={[styles.primary, (busy || pin.length !== 6) && { opacity: 0.5 }]}>
               <Text style={styles.primaryText}>Verify and unhide</Text>
             </Pressable>
@@ -125,6 +153,8 @@ const useStyles = makeStyles((colors) => ({
   input: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, color: colors.onSurface, backgroundColor: colors.surfaceTertiary, textAlign: "center", fontSize: 20, letterSpacing: 8 },
   error: { color: colors.error, fontSize: 12, fontWeight: "700" },
   primary: { minHeight: 44, borderRadius: 10, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  secondary: { minHeight: 42, borderRadius: 10, borderWidth: 1, borderColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  secondaryText: { color: colors.brandPrimary, fontWeight: "800" },
   primaryText: { color: colors.onBrandPrimary, fontWeight: "900" },
   cancel: { minHeight: 38, alignItems: "center", justifyContent: "center" },
   cancelText: { color: colors.muted, fontWeight: "700" },
