@@ -255,6 +255,7 @@ export default function Dashboard() {
     balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_cogs ?? 0), 0);
   const balanceDayGrossProfit = balanceDaySales.reduce((n: number, s: any) => n + Number(s.profit ?? 0), 0) - balanceDayReturns.reduce((n: number, r: any) => n + Number(r.refund_profit ?? 0), 0);
   const balanceDayCogsExpense = balanceDayExpenses.filter((e: any) => e.bucket === "cogs").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
+  const balanceDayOperatingExpense = balanceDayExpenses.filter((e: any) => e.bucket === "operating").reduce((n: number, e: any) => n + Number(e.amount ?? 0), 0);
   const balanceSupplierPayments = balanceDayPayments.filter((p: any) => p.kind === "pay").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const balanceSupplierRefunds = balanceDayPayments.filter((p: any) => p.kind === "supplier_refund").reduce((n: number, p: any) => n + Number(p.amount ?? 0), 0);
   const monthlyExpensesBudget = Number(budget?.monthly_amount ?? 0);
@@ -263,7 +264,7 @@ export default function Dashboard() {
     .reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0);
   const balanceAllTime = Number(allTimeReport?.remaining_balance ?? 0);
   const balanceDayRemaining =
-    balanceDayRevenue - balanceDayGrossProfit - balanceDayCogsExpense
+    balanceDayRevenue - balanceDayGrossProfit - balanceDayCogsExpense - balanceDayOperatingExpense
     - balanceSupplierPayments + balanceSupplierRefunds
     + openingBudgetForBalanceRange + monthlyExpensesBudget;
   // Use the same canonical report calculation for a custom range. This includes
@@ -368,7 +369,7 @@ export default function Dashboard() {
   const selectedPeriodRemaining =
     periodSales.reduce((n: number, x: any) => n + Number(x.total ?? 0) - Number(x.profit ?? 0), 0)
     - periodReturns.reduce((n: number, x: any) => n + Number(x.refund_total ?? 0) - Number(x.refund_profit ?? 0), 0)
-    - periodExpenses.filter((x: any) => x.bucket === "cogs").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
+    - periodExpenses.filter((x: any) => x.bucket === "cogs" || x.bucket === "operating").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     - periodPayments.filter((x: any) => x.kind === "pay").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + periodPayments.filter((x: any) => x.kind === "supplier_refund").reduce((n: number, x: any) => n + Number(x.amount ?? 0), 0)
     + (budget?.opening_transactions ?? []).filter((entry: any) => inOverviewBalancePeriod(entry.date)).reduce((sum: number, entry: any) => sum + Number(entry.amount ?? 0), 0)
