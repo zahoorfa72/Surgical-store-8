@@ -1937,9 +1937,10 @@ async def _party_balances() -> dict:
         if not cid:
             continue
         if s.get("credit"):
-            # A credit sale adds only the unpaid amount to receivables.
-            # `total` is the gross bill; `amount_due` accounts for applied customer credit.
-            balances[cid] = balances.get(cid, 0.0) + float(s.get("amount_due") if s.get("amount_due") is not None else (s.get("total", 0) or 0))
+            # Credit sales add the gross bill to the signed ledger. This also consumes
+            # any existing negative customer credit; using amount_due here would
+            # subtract that credit a second time.
+            balances[cid] = balances.get(cid, 0.0) + float(s.get("total", 0) or 0)
         else:
             # Cash sales consume stored customer credit without inventing a cash receipt.
             balances[cid] = balances.get(cid, 0.0) + float(s.get("credit_applied", 0) or 0)
