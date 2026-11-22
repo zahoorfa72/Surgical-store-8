@@ -286,25 +286,23 @@ export function AppLockGate({ children }: { children: ReactNode }) {
             </View>
           ) : (
             <View style={styles.form}>
-              {biometricEnabled && !showPinFallback ? (
-                <>
-                  <MaterialDesignIcons name="fingerprint" size={42} color={colors.brandPrimary} />
-                  <Text style={styles.help}>Verify your fingerprint to unlock the store.</Text>
-                  <Pressable disabled={busy} style={styles.primaryButton} onPress={() => void unlockWithFingerprint()}>
-                    {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Try fingerprint again</Text>}
-                  </Pressable>
-                </>
-              ) : (
-                <>
-                  <TextInput testID="app-lock-pin" style={[styles.input, styles.pinInput]} value={pin}
-                    onChangeText={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
-                    placeholder="Enter 6-digit PIN" placeholderTextColor={colors.muted}
-                    keyboardType="number-pad" secureTextEntry maxLength={6} autoFocus
-                    onSubmitEditing={() => void unlockWithPin()} />
-                  <Pressable disabled={busy || pin.length !== 6} style={[styles.primaryButton, (busy || pin.length !== 6) && { opacity: 0.55 }]} onPress={() => void unlockWithPin()}>
-                    {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Unlock app</Text>}
-                  </Pressable>
-                </>
+              <TextInput testID="app-lock-pin" style={[styles.input, styles.pinInput]} value={pin}
+                onChangeText={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
+                placeholder="Enter 6-digit PIN" placeholderTextColor={colors.muted}
+                keyboardType="number-pad" secureTextEntry maxLength={6} autoFocus
+                onSubmitEditing={() => void unlockWithPin()} />
+              <Pressable disabled={busy || pin.length !== 6} style={[styles.primaryButton, (busy || pin.length !== 6) && { opacity: 0.55 }]} onPress={() => void unlockWithPin()}>
+                {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Unlock app</Text>}
+              </Pressable>
+              {biometricEnabled && (
+                <Pressable disabled={busy} style={styles.secondaryButton} onPress={() => void unlockWithFingerprint()}>
+                  {busy ? <ActivityIndicator color={colors.brandPrimary} /> : (
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                      <MaterialDesignIcons name="fingerprint" size={22} color={colors.brandPrimary} />
+                      <Text style={styles.secondaryText}>Try fingerprint again</Text>
+                    </View>
+                  )}
+                </Pressable>
               )}
               <Pressable style={styles.forgotButton} onPress={() => { setRecoveryOpen(true); setError(""); }}>
                 <Text style={styles.forgotText}>Forgot PIN? Recover with admin account</Text>

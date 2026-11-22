@@ -247,11 +247,23 @@ function localReport(range: string): ReportSummary {
   const purchaseReturnsTotal = purchaseReturns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
   const purchaseTotal = purchaseGross - purchaseReturnsTotal;
   const inventoryValue = products.reduce((n, p) => {
+    const onHand = Math.max(0, Number(p.quantity ?? 0));
+    if (!onHand) return n;
     const layers = Array.isArray((p as any).cost_layers) ? (p as any).cost_layers : [];
-    const value = layers.length
-      ? layers.reduce((sum: number, layer: any) => sum + Number(layer.quantity ?? 0) * Number(layer.unit_cost ?? 0), 0)
-      : Number(p.quantity ?? 0) * Number(p.purchase_price ?? 0);
-    return n + value;
+    const validLayers = layers.filter((layer: any) =>
+      Number.isFinite(Number(layer.quantity)) && Number(layer.quantity) > 0 &&
+      Number.isFinite(Number(layer.unit_cost)) && Number(layer.unit_cost) >= 0
+    );
+    // Cost layers determine weighted-average unit cost, while the current
+    // product quantity is authoritative for how many units remain on hand.
+    const layerQuantity = validLayers.reduce((sum: number, layer: any) => sum + Number(layer.quantity), 0);
+    const weightedUnitCost = layerQuantity > 0
+      ? validLayers.reduce((sum: number, layer: any) => sum + Number(layer.quantity) * Number(layer.unit_cost), 0) / layerQuantity
+      : Number(p.purchase_price ?? 0);
+    const unitCost = Number.isFinite(weightedUnitCost) && weightedUnitCost >= 0
+      ? weightedUnitCost
+      : Math.max(0, Number(p.purchase_price ?? 0));
+    return n + onHand * unitCost;
   }, 0);
 
   return {
