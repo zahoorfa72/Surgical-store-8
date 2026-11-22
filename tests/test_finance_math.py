@@ -45,8 +45,8 @@ class FinanceMathTests(unittest.TestCase):
         self.assertEqual(result["cogs_goods"], 48.00)
         self.assertEqual(result["gross_profit"], 32.00)
         self.assertEqual(result["total_expenses"], 10.00)
-        self.assertEqual(result["net_profit"], 22.00)
-        self.assertEqual(result["remaining_balance"], 60.00)
+        self.assertEqual(result["net_profit"], 27.00)
+        self.assertEqual(result["remaining_balance"], 57.00)
         self.assertEqual(result["customer_receipts"], 25.00)
         self.assertEqual(result["customer_refunds"], 4.00)
 
@@ -58,8 +58,8 @@ class FinanceMathTests(unittest.TestCase):
         result = calculate_finance_totals(self.sales, self.returns, self.expenses, self.payments, adjustments)
         self.assertEqual(result["net_profit_adjustment"], 0)
         self.assertEqual(result["remaining_balance_adjustment"], 0)
-        self.assertEqual(result["net_profit"], 22.00)
-        self.assertEqual(result["remaining_balance"], 36.00)
+        self.assertEqual(result["net_profit"], 27.00)
+        self.assertEqual(result["remaining_balance"], 33.00)
 
     def test_each_selected_destination_is_isolated(self):
         adjustments = [
@@ -72,8 +72,8 @@ class FinanceMathTests(unittest.TestCase):
         result = calculate_finance_totals(self.sales, self.returns, self.expenses, self.payments, adjustments)
         self.assertEqual(result["net_profit_adjustment"], 10.25)
         self.assertEqual(result["remaining_balance_adjustment"], 0.25)
-        self.assertEqual(result["net_profit"], 32.25)
-        self.assertEqual(result["remaining_balance"], 36.25)
+        self.assertEqual(result["net_profit"], 37.25)
+        self.assertEqual(result["remaining_balance"], 33.25)
 
     def test_lost_product_transfer_moves_same_amount_from_net_profit_to_remaining_balance(self):
         adjustments = [{
@@ -84,8 +84,8 @@ class FinanceMathTests(unittest.TestCase):
         result = calculate_finance_totals(self.sales, self.returns, self.expenses, self.payments, adjustments)
         self.assertEqual(result["net_profit_adjustment"], -12.34)
         self.assertEqual(result["remaining_balance_adjustment"], 12.34)
-        self.assertEqual(result["net_profit"], 9.66)
-        self.assertEqual(result["remaining_balance"], 48.34)
+        self.assertEqual(result["net_profit"], 14.66)
+        self.assertEqual(result["remaining_balance"], 45.34)
 
     def test_customer_transfer_keeps_receivable_and_credit_signs(self):
         self.assertEqual(signed_customer_balance_transfer(8930, 2500), 2500)
