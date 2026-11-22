@@ -43,7 +43,7 @@ export default function ReturnForm() {
       return { ...it, already, remaining };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sale]);
+  }, [sale, returnedMap, editing, existingReturn]);
 
   const refundTotal = rows.reduce((s, r) => {
     const q = Math.min(parseFloat(qtys[r.product_id] || "0") || 0, r.remaining);
