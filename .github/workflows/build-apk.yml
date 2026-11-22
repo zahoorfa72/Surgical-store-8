@@ -29,10 +29,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Backend syntax and finance regression tests
+      - name: Install backend dependencies
+        working-directory: .
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Backend syntax and regression tests
         working-directory: .
         run: |
-          python -m py_compile backend/server.py backend/finance_math.py backend/report_dates.py
+          python -m py_compile backend/server.py backend/finance_math.py backend/report_dates.py backend/supabase_store.py
           python -m unittest discover -s tests -v
 
       - name: Setup Node.js
