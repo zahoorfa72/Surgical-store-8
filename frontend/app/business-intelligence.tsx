@@ -217,7 +217,7 @@ export default function BusinessIntelligence() {
     } else {
       for (const s of sales) if (s.customer_id === selectedParty.id)
         rows.push({ date: s.created_at, type: "Sale", amount: Number(s.total ?? 0), detail: s.invoice_no });
-      for (const r of returns) if (r.customer_id === selectedParty.id)
+      for (const r of returns as any[]) if (r.customer_id === selectedParty.id)
         rows.push({ date: r.created_at, type: "Sale return", amount: -Number(r.refund_total ?? 0), detail: r.ref_no });
       for (const p of payments) if (p.party_id === selectedParty.id)
         rows.push({ date: p.created_at, type: p.kind === "customer_refund" ? "Customer refund" : "Receipt", amount: signedAmount(p.kind, Number(p.amount ?? 0)), detail: p.note || p.kind });
@@ -286,7 +286,7 @@ export default function BusinessIntelligence() {
               <View style={styles.headRow}><Text style={styles.cardTitle}>Smart reorder</Text><Badge text={reorderRows.length ? `${reorderRows.length} items` : "Good"} tone={reorderRows.length ? "warning" : "success"} /></View>
               {reorderRows.slice(0, 10).map((r) => (
                 <Pressable key={r.p.id} style={styles.listRow} onPress={() => { setSelectedProductId(r.p.id); setTab("stock"); }}>
-                  <MaterialDesignIcons name="package-variant-closed-alert" size={20} color={colors.warning} />
+                  <MaterialDesignIcons name="package-variant-closed" size={20} color={colors.warning} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowTitle}>{r.p.name}</Text>
                     <Text style={styles.rowSub}>{r.p.quantity} in stock · {r.daily > 0 ? `${Math.max(0, Math.floor(r.daysLeft))} days estimated` : "no recent sales"} · suggest {r.suggested}</Text>
