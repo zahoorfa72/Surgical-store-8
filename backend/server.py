@@ -445,6 +445,7 @@ class PurchaseIn(BaseModel):
     transaction_date: Optional[str] = None
     supplier_id: Optional[str] = None
     note: str = ""
+    expiry_required_categories: List[str] = Field(default_factory=list)
 
 
 class InventoryAdjustmentIn(BaseModel):
@@ -2955,14 +2956,17 @@ async def create_purchase(body: PurchaseIn, user: Staff):
         if it.quantity <= 0:
             raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
         expiry = str(it.expiry_date or "").strip()
-        if not it.non_expiring:
+        expiry_required = str(p.get("category") or "").strip() in {
+            str(category).strip() for category in (body.expiry_required_categories or []) if str(category).strip()
+        }
+        if expiry_required and not it.non_expiring:
             try:
                 parsed_expiry = datetime.strptime(expiry, "%Y-%m-%d").date()
                 if parsed_expiry.isoformat() != expiry:
                     raise ValueError("invalid date")
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Expiry date is required for {p['name']} (YYYY-MM-DD), or mark it as non-expiring")
-        elif expiry:
+        elif it.non_expiring and expiry:
             raise HTTPException(status_code=400, detail=f"Non-expiring item {p['name']} must not have an expiry date")
         line_total = round(it.quantity * it.unit_cost, 2)
         total += line_total
@@ -3108,14 +3112,17 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
         if it.quantity <= 0:
             raise HTTPException(status_code=400, detail=f"Quantity must be > 0 for {p['name']}")
         expiry = str(it.expiry_date or "").strip()
-        if not it.non_expiring:
+        expiry_required = str(p.get("category") or "").strip() in {
+            str(category).strip() for category in (body.expiry_required_categories or []) if str(category).strip()
+        }
+        if expiry_required and not it.non_expiring:
             try:
                 parsed_expiry = datetime.strptime(expiry, "%Y-%m-%d").date()
                 if parsed_expiry.isoformat() != expiry:
                     raise ValueError("invalid date")
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Expiry date is required for {p['name']} (YYYY-MM-DD), or mark it as non-expiring")
-        elif expiry:
+        elif it.non_expiring and expiry:
             raise HTTPException(status_code=400, detail=f"Non-expiring item {p['name']} must not have an expiry date")
         line_total = round(it.quantity * it.unit_cost, 2)
         total += line_total
