@@ -9,7 +9,7 @@ import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-
 import brandLogo from "../assets/images/brand-logo.png";
 
 import { useAuth, isAdmin } from "@/src/auth";
-import { useSettings, useParties, qk } from "@/src/data";
+import { useSettings, useParties, useProducts, qk } from "@/src/data";
 import {
   getApiBaseOverride,
   logoUrl,
@@ -33,6 +33,7 @@ export default function Settings() {
   const admin = isAdmin(user?.role);
   const { data: settings } = useSettings();
   const { data: suppliers = [] } = useParties("supplier");
+  const { data: products = [] } = useProducts();
 
   const [confirm, setConfirm] = useState(false);
   const [storeName, setStoreName] = useState("");
@@ -51,6 +52,9 @@ export default function Settings() {
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [financeDetailDrilldown, setFinanceDetailDrilldownState] = useState(true);
+  const [expiryRequiredCategories, setExpiryRequiredCategories] = useState<string[]>([]);
+
+  useEffect(() => { void storage.getItem("ssm.expiryRequiredCategories", []).then((value) => setExpiryRequiredCategories(Array.isArray(value) ? value : [])); }, []);
 
   useEffect(() => {
     if (settings?.store_name) setStoreName(settings.store_name);
@@ -347,6 +351,29 @@ export default function Settings() {
               >
                 <View style={[styles.visibilityThumb, showInventoryProfitMargin && styles.visibilityThumbOn]} />
               </Pressable>
+            </View>
+          </View>
+        )}
+
+        {admin && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Expiry date requirements</Text>
+            <Text style={styles.cardHint}>Select the product categories that must have an expiry date when stock is purchased. Expiry dates remain optional for every category not selected here.</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+              {[...new Set((products ?? []).map((product: any) => String(product.category ?? "").trim()).filter(Boolean))].sort().map((category) => {
+                const selected = expiryRequiredCategories.includes(category);
+                return (
+                  <Pressable key={category} testID={"expiry-required-category-" + category.replace(/[^a-z0-9]+/gi, "-")} onPress={async () => {
+                    const next = selected ? expiryRequiredCategories.filter((item) => item !== category) : [...expiryRequiredCategories, category];
+                    setExpiryRequiredCategories(next);
+                    await storage.setItem("ssm.expiryRequiredCategories", next);
+                    toast(selected ? category + ": expiry optional" : category + ": expiry required", "success");
+                  }} style={[styles.supplierChip, selected && styles.supplierChipActive]}>
+                    <Text style={[styles.supplierChipText, selected && styles.supplierChipTextActive]}>{selected ? "✓ " : ""}{category}</Text>
+                  </Pressable>
+                );
+              })}
+              {products.length === 0 && <Text style={styles.cardHint}>Add products with categories first to configure expiry rules.</Text>}
             </View>
           </View>
         )}
