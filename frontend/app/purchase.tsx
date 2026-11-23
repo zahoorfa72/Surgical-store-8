@@ -13,6 +13,7 @@ import { useOffline } from "@/src/offline";
 import { EmptyState, ScreenHeader, money, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
 import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
+import { storage } from "@/src/utils/storage";
 
 type Line = { id: string; name: string; quantity: number; unit_cost: number; batch_number: string; expiry_date: string; non_expiring: boolean };
 
@@ -54,6 +55,10 @@ export default function Purchase() {
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
   const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
+  const [expiryRequiredCategories, setExpiryRequiredCategories] = useState<string[]>([]);
+
+  useEffect(() => { void storage.getItem("ssm.expiryRequiredCategories", []).then((value) => setExpiryRequiredCategories(Array.isArray(value) ? value : [])); }, []);
+  const isExpiryRequired = (productId: string) => { const category = String(products?.find((product) => product.id === productId)?.category ?? "").trim(); return !!category && expiryRequiredCategories.includes(category); };
 
   // Prefill the form once when editing an existing purchase.
   useEffect(() => {
@@ -226,7 +231,7 @@ export default function Purchase() {
     }
     const valid = lines.filter((l) => l.quantity > 0);
     const invalidExpiry = valid.find((line) => {
-      if (line.non_expiring) return false;
+      if (line.non_expiring || !isExpiryRequired(line.id)) return false;
       const expiry = line.expiry_date.trim();
       if (!expiry || !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return true;
       const parsed = new Date(`${expiry}T00:00:00.000Z`);
@@ -244,9 +249,10 @@ export default function Purchase() {
     const body = {
       supplier_id: supplierId,
       transaction_date: transactionDate,
+      expiry_required_categories: expiryRequiredCategories,
       items: valid.map((l) => ({
         product_id: l.id, quantity: l.quantity, unit_cost: l.unit_cost,
-        batch_number: l.batch_number.trim(), expiry_date: l.non_expiring ? null : l.expiry_date.trim(), non_expiring: !!l.non_expiring,
+        batch_number: l.batch_number.trim(), expiry_date: l.non_expiring || !l.expiry_date.trim() ? null : l.expiry_date.trim(), non_expiring: !!l.non_expiring,
       })),
     };
     try {
@@ -347,13 +353,13 @@ export default function Purchase() {
                 </View>
                 {!l.non_expiring ? (
                   <View style={[styles.miniField, { flex: 1 }]}>
-                    <Text style={styles.miniLabel}>Expiry date *</Text>
+                    <Text style={styles.miniLabel}>Expiry date{isExpiryRequired(l.id) ? " *" : " (optional)"}</Text>
                     <TextInput
                       testID={`purchase-expiry-${l.id}`}
                       style={styles.miniInput}
                       value={l.expiry_date}
                       onChangeText={(value) => setLotField(l.id, "expiry_date", value)}
-                      placeholder="YYYY-MM-DD"
+                      placeholder={isExpiryRequired(l.id) ? "YYYY-MM-DD (required)" : "YYYY-MM-DD (optional)"}
                       placeholderTextColor={colors.muted}
                       autoCapitalize="none"
                     />

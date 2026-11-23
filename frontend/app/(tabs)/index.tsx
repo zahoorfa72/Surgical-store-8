@@ -390,6 +390,7 @@ export default function Dashboard() {
     return inSelectedReport(iso);
   };
   const detailSales = sales.filter((x:any) => inDetailRange(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
+  const periodDiscount = detailSales.reduce((sum: number, sale: any) => sum + Math.max(0, Number(sale.discount ?? 0) || 0), 0);
   const detailReturns = returns.filter((x:any) => inDetailRange(x.created_at));
   const detailPurchases = purchases.filter((x:any) => inDetailRange(x.transaction_date ? x.transaction_date + "T00:00:00" : x.created_at));
 
@@ -807,6 +808,7 @@ export default function Dashboard() {
               <View />
             </View>
             <PLRow label="Gross sales" value={money(displayFinanceAmount(data.gross_revenue, fakeFinanceDisplay))} />
+            <PLRow label="Discount given" value={"- " + money(displayFinanceAmount(periodDiscount, fakeFinanceDisplay))} muted />
             <PLRow label="Returns / refunds" value={"- " + money(displayFinanceAmount(data.returns_total, fakeFinanceDisplay))} muted />
             <PLRow label="Net sales" value={money(displayFinanceAmount(data.revenue, fakeFinanceDisplay))} />
             <PLRow label="Inventory purchase (goods sold)" value={"- " + money(displayFinanceAmount(data.cogs_goods, fakeFinanceDisplay))} muted />
