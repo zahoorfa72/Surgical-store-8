@@ -252,7 +252,7 @@ export default function Purchase() {
       expiry_required_categories: expiryRequiredCategories,
       items: valid.map((l) => ({
         product_id: l.id, quantity: l.quantity, unit_cost: l.unit_cost,
-        batch_number: l.batch_number.trim(), expiry_date: l.non_expiring ? null : l.expiry_date.trim(), non_expiring: !!l.non_expiring,
+        batch_number: l.batch_number.trim(), expiry_date: l.non_expiring || !l.expiry_date.trim() ? null : l.expiry_date.trim(), non_expiring: !!l.non_expiring,
       })),
     };
     try {
