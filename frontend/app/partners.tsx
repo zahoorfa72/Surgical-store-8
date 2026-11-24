@@ -54,9 +54,9 @@ export default function Partners() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const summaryQuery = useQuery({ queryKey: ["partners/summary"], queryFn: () => apiRequest<PartnerSummary>("/partners/summary") });
-  const partnersQuery = useQuery({ queryKey: ["partners"], queryFn: () => apiRequest<Partner[]>("/partners") });
-  const txQuery = useQuery({ queryKey: ["partner-transactions"], queryFn: () => apiRequest<PartnerTx[]>("/partner-transactions") });
+  const summaryQuery = useQuery({ queryKey: ["partners/summary"], queryFn: () => apiRequest<PartnerSummary>("/partners/summary"), enabled: admin });
+  const partnersQuery = useQuery({ queryKey: ["partners"], queryFn: () => apiRequest<Partner[]>("/partners"), enabled: admin });
+  const txQuery = useQuery({ queryKey: ["partner-transactions"], queryFn: () => apiRequest<PartnerTx[]>("/partner-transactions"), enabled: admin });
   const partners = partnersQuery.data ?? summaryQuery.data?.partners ?? [];
   const transactions = txQuery.data ?? [];
   const selected = partners.find((p) => p.id === selectedId) ?? partners[0] ?? null;
