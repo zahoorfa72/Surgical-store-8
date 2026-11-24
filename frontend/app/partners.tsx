@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FlatList, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
