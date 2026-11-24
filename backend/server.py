@@ -4534,7 +4534,7 @@ async def _partner_totals(partner_id: Optional[str] = None) -> dict:
     query = {"deleted": {"$ne": True}}
     if partner_id:
         query["partner_id"] = partner_id
-    rows = await db["partner_transactions"].find(query).to_list(100000)
+    rows = await db["partner_transactions"].find(query).to_list(None)
     totals = {"cash_in": 0.0, "cash_out": 0.0, "profit_allocation": 0.0, "profit_payment": 0.0}
     for row in rows:
         kind = row.get("kind")
@@ -4625,7 +4625,7 @@ async def list_partner_transactions(_: AdminOnly, partner_id: Optional[str] = No
     query = {"deleted": {"$ne": True}}
     if partner_id:
         query["partner_id"] = partner_id
-    rows = await db["partner_transactions"].find(query).sort([("transaction_date", -1), ("created_at", -1)]).to_list(100000)
+    rows = await db["partner_transactions"].find(query).sort([("transaction_date", -1), ("created_at", -1)]).to_list(None)
     return [_partner_tx_public(row) for row in rows]
 
 
