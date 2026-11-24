@@ -199,11 +199,11 @@ export default function Partners() {
       <ScreenHeader title="Partner accounts" subtitle="Net-profit allocations and partner ledger" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32, gap: 14 }}>
         <View style={styles.profitCard}>
-          <Text style={styles.cardEyebrow}>BUSINESS NET PROFIT · ALL TIME</Text>
-          <Text style={styles.profitValue}>{money(totals?.net_profit ?? 0)}</Text>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Allocated to partners</Text><Text style={styles.summaryValue}>{money(totals?.allocated_profit ?? 0)}</Text></View>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Remaining business net profit</Text><Text style={styles.availableValue}>{money(totals?.available_net_profit ?? 0)}</Text></View>
-          <Text style={styles.helper}>Every partner profit allocation is deducted from the business's available net profit. Editing or deleting an allocation recalculates the remaining amount.</Text>
+          <Text style={styles.cardEyebrow}>AVAILABLE BUSINESS NET PROFIT · ALL TIME</Text>
+          <Text style={styles.profitValue}>{money(totals?.available_net_profit ?? ((totals?.net_profit ?? 0) - (totals?.allocated_profit ?? 0)))}</Text>
+          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total business net profit</Text><Text style={styles.summaryValue}>{money(totals?.net_profit ?? 0)}</Text></View>
+          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Less: allocated to partners</Text><Text style={styles.summaryValue}>−{money(totals?.allocated_profit ?? 0)}</Text></View>
+          <Text style={styles.helper}>The main amount above is the business net profit remaining after all partner allocations. Creating, editing or deleting an allocation recalculates this amount and the partner ledger.</Text>
         </View>
 
         <View style={styles.sectionHead}>
