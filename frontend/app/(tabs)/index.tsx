@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -9,6 +9,7 @@ import { getAppNotifications } from "@/src/notification-center";
 import { notifyLowStock } from "@/src/low-stock-notifications";
 
 import { useAuth } from "@/src/auth";
+import { apiRequest } from "@/src/api";
 import { useDayClose, useReport, useSales, usePurchases, usePayments, useExpenses, useReturns, useProducts, useBudget } from "@/src/data";
 import { Badge, Card, ChipRow, IconButton, Loader, ScreenHeader, StatTile, money } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -205,6 +206,12 @@ export default function Dashboard() {
     range === "day" ? "today" : range;
   const { data, isLoading, refetch, isRefetching } = useReport(reportRange, !cashier);
   const { data: allTimeReport } = useReport("all", !cashier);
+  const { data: partnerLedger = [] } = useQuery({
+    queryKey: ["partner-transactions"],
+    queryFn: () => apiRequest<any[]>("/partner-transactions"),
+    enabled: !cashier,
+    staleTime: 0,
+  });
   const balanceDetailReportRange = balanceFromDate && balanceToDate
     ? `date-range:${balanceFromDate}:${balanceToDate}`
     : balanceFromDate ? `date-range:${balanceFromDate}:`
@@ -399,7 +406,9 @@ export default function Dashboard() {
   const chartGrossSales = Math.max(0, Number(data?.gross_revenue ?? 0));
   const chartRevenue = Math.max(0, Number(fakeFinanceDisplay ? fakeReportRevenue(data ?? ({} as any)) : data?.revenue ?? 0));
   const chartGrossProfit = grossHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportProfit(data ?? ({} as any)) : data?.gross_profit ?? 0);
-  const chartNetProfit = netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data ?? ({} as any)) : data?.net_profit ?? 0);
+  const allocatedProfitForPeriod = partnerLedger.filter((row: any) => row.kind === "profit_allocation" && !row.deleted && inSelectedReport(row.transaction_date)).reduce((sum: number, row: any) => sum + Number(row.amount ?? 0), 0);
+  const overviewNetProfit = Number(data?.net_profit ?? 0) - allocatedProfitForPeriod;
+  const chartNetProfit = netHidden ? 0 : Number(fakeFinanceDisplay ? fakeReportNetProfit(data ?? ({} as any)) : overviewNetProfit);
   // Inventory is a current-stock valuation snapshot, not a historical value
   // that can be reconstructed for an earlier date from the available data.
   const chartInventoryValue = Math.max(0, Number(data?.inventory_value ?? 0));
@@ -492,7 +501,7 @@ export default function Dashboard() {
             <Pressable disabled={!financeDetailDrilldown} onPress={() => setFinanceDetailsOpen("revenue")} style={styles.statPressable}><StatTile label="Revenue" value={money(fakeFinanceDisplay ? fakeReportRevenue(data) : data.revenue)} icon="cash" tone="brand" testID="stat-revenue" /></Pressable>
             <View style={styles.statPressable}>
               <Pressable onPress={() => { if (!handleProfitTileTap("net") && !netHidden && financeDetailDrilldown) setFinanceDetailsOpen("net"); }}>
-                <StatTile label={fakeFinanceDisplay ? "Net Profit" : "Net Profit"} value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0)))))} icon="trending-up" tone="success" testID="stat-net-profit" />
+                <StatTile label={fakeFinanceDisplay ? "Net Profit" : "Net Profit"} value={netHidden ? "Rs ****" : money(fakeFinanceDisplay ? fakeReportNetProfit(data) : (Number(data.net_profit ?? (Number(data.gross_profit ?? 0) - Number(data.personal_expenses ?? 0) - Number(data.operating_expenses ?? 0) - Number(data.lost_products_net_profit_deduction ?? 0) + Number(data.profit_products_net_profit_addition ?? 0) + Number(data.net_profit_adjustment ?? 0))) - allocatedProfitForPeriod))} icon="trending-up" tone="success" testID="stat-net-profit" />
               </Pressable>
               <View style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}><ProfitVisibilityToggle kind="net" /></View>
             </View>
@@ -541,7 +550,7 @@ export default function Dashboard() {
                     <PLRow label="Profit product addition" value={"+ " + money(displayFinanceAmount(data.profit_products_net_profit_addition ?? 0, fakeFinanceDisplay))} muted />
                     {Number(data.net_profit_adjustment ?? 0) !== 0 && <PLRow label="Other admin-selected stock adjustments" value={(Number(data.net_profit_adjustment) > 0 ? "+ " : "- ") + money(displayFinanceAmount(Math.abs(Number(data.net_profit_adjustment)), fakeFinanceDisplay))} muted />}
                     <View style={styles.plDivider} />
-                    {!netHidden && <PLRow label="Net profit" value={money(displayFinanceAmount(data.net_profit, fakeFinanceDisplay))} bold tone={Number(data.net_profit ?? 0) >= 0 ? "success" : "error"} />}
+                    {!netHidden && <PLRow label="Net profit" value={money(displayFinanceAmount(overviewNetProfit, fakeFinanceDisplay))} bold tone={overviewNetProfit >= 0 ? "success" : "error"} />}
                     {!grossHidden && sales.filter((s:any) => inSelectedReport(s.transaction_date ? s.transaction_date + "T00:00:00" : s.created_at)).map((s:any) => (
                       <View key={s.id} style={styles.detailLine}>
                         <Text style={styles.detailLabel}>{s.invoice_no} · Gross profit</Text>
