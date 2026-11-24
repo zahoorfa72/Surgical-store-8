@@ -14,12 +14,12 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 type Partner = { id: string; name: string; phone?: string; address?: string; note?: string; balance: number; pending?: boolean };
 type PartnerTx = { id: string; partner_id: string; partner_name: string; kind: string; source?: string; amount: number; transaction_date: string; note: string; created_at?: string; user_name?: string; pending?: boolean };
-type PartnerSummary = { gross_profit: number; profit_after_business_expenses: number; allocated_profit: number; available_gross_profit: number; partners: Partner[] };
+type PartnerSummary = { net_profit: number; allocated_profit: number; available_net_profit: number; partners: Partner[] };
 
 const TX_TYPES = [
   { key: "cash_in", label: "Cash In", detail: "Partner adds money to the business" },
   { key: "cash_out", label: "Cash Out", detail: "Business pays or withdraws partner funds" },
-  { key: "profit_allocation", label: "Profit Allocation", detail: "Allocate gross profit; not a cash payment" },
+  { key: "profit_allocation", label: "Profit Allocation", detail: "Allocate net profit; not a cash payment" },
   { key: "profit_payment", label: "Pay Allocated Profit", detail: "Cash paid against already allocated profit" },
 ] as const;
 
@@ -57,11 +57,15 @@ export default function Partners() {
 
   const summaryQuery = useQuery({ queryKey: ["partners/summary"], queryFn: () => apiRequest<PartnerSummary>("/partners/summary"), enabled: admin });
   const partnersQuery = useQuery({ queryKey: ["partners"], queryFn: () => apiRequest<Partner[]>("/partners"), enabled: admin });
-  const txQuery = useQuery({ queryKey: ["partner-transactions"], queryFn: () => apiRequest<PartnerTx[]>("/partner-transactions"), enabled: admin });
   const partners = partnersQuery.data ?? summaryQuery.data?.partners ?? [];
+  const selected = partners.find((p) => p.id === selectedId) ?? null;
+  const txQuery = useQuery({
+    queryKey: ["partner-transactions", selectedId],
+    queryFn: () => apiRequest<PartnerTx[]>(`/partner-transactions?partner_id=${encodeURIComponent(selectedId as string)}`),
+    enabled: admin && !!selectedId && !!selected,
+  });
   const transactions = txQuery.data ?? [];
-  const selected = partners.find((p) => p.id === selectedId) ?? partners[0] ?? null;
-  const statement = useMemo(() => transactions.filter((row) => !selected || row.partner_id === selected.id), [transactions, selected?.id]);
+  const statement = useMemo(() => selected ? transactions.filter((row) => row.partner_id === selected.id) : [], [transactions, selected?.id]);
   const statementWithBalance = useMemo(() => {
     let running = 0;
     return [...statement].sort((a, b) => String(a.transaction_date).localeCompare(String(b.transaction_date)) || String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).map((row) => {
@@ -115,8 +119,8 @@ export default function Partners() {
   const exportStatement = async () => {
     if (!selected) return;
     const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (ch) => { const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }; return entities[ch]; });
-    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc((row.kind === "cash_in" || row.kind === "cash_out") ? (row.source === "gross_profit" ? "Gross Profit" : "Other") : "Gross Profit")}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
-    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='6'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are based on gross profit and are recorded separately from cash payments and operating expenses.</p></body></html>`;
+    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc((row.kind === "cash_in" || row.kind === "cash_out") ? (row.source === "gross_profit" ? "Gross Profit" : "Other") : "Net Profit")}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
+    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='6'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are deducted from Net Profit and recorded separately from cash payments and operating expenses.</p></body></html>`;
     try {
       const file = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: `${selected.name} statement` });
@@ -148,14 +152,14 @@ export default function Partners() {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title="Partner accounts" subtitle="Gross-profit allocations and partner ledger" topInset={insets.top} onBack={() => router.back()} />
+      <ScreenHeader title="Partner accounts" subtitle="Net-profit allocations and partner ledger" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32, gap: 14 }}>
         <View style={styles.profitCard}>
-          <Text style={styles.cardEyebrow}>BUSINESS AMOUNT · ALL TIME</Text>
-          <Text style={styles.profitValue}>{money(totals?.profit_after_business_expenses ?? 0)}</Text>
+          <Text style={styles.cardEyebrow}>NET PROFIT · ALL TIME</Text>
+          <Text style={styles.profitValue}>{money(totals?.net_profit ?? 0)}</Text>
           <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Allocated to partners</Text><Text style={styles.summaryValue}>{money(totals?.allocated_profit ?? 0)}</Text></View>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Available for allocation</Text><Text style={styles.availableValue}>{money(totals?.available_gross_profit ?? 0)}</Text></View>
-          <Text style={styles.helper}>Profit allocation is based on lifetime gross profit after sales returns. It is not recorded as an operating expense and does not change gross profit.</Text>
+          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Available for allocation</Text><Text style={styles.availableValue}>{money(totals?.available_net_profit ?? 0)}</Text></View>
+          <Text style={styles.helper}>Partner allocations are deducted from lifetime Net Profit. Allocations reduce the amount remaining available to allocate.</Text>
         </View>
 
         <View style={styles.sectionHead}>
@@ -164,13 +168,14 @@ export default function Partners() {
         </View>
         {partners.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No partners added yet.</Text></View> : partners.map((p) => {
           const active = selected?.id === p.id;
-          return <Pressable key={p.id} onPress={() => setSelectedId(p.id)} style={[styles.partnerRow, active && styles.partnerActive]}>
+          return <Pressable key={p.id} onPress={() => setSelectedId(active ? null : p.id)} style={[styles.partnerRow, active && styles.partnerActive]}>
             <View style={styles.avatar}><MaterialDesignIcons name="account" size={22} color={colors.brandPrimary} /></View>
             <View style={{ flex: 1, gap: 3 }}><Text style={styles.partnerName}>{p.name}</Text><Text style={styles.muted}>{p.phone || "No phone number"}</Text></View>
             <View style={{ alignItems: "flex-end", gap: 3 }}><Text style={styles.balance}>{money(p.balance ?? 0)}</Text><Text style={styles.muted}>Account balance</Text></View>
           </Pressable>;
         })}
 
+        {!selected && partners.length > 0 && <View style={styles.empty}><Text style={styles.muted}>Select a partner above to view that partner's account balance, cash details and complete transaction history. No partner details are shown until an account is selected.</Text></View>}
         {selected && <>
           <View style={styles.sectionHead}>
             <View><Text style={styles.sectionTitle}>{selected.name} statement</Text><Text style={styles.muted}>Date-wise account activity</Text></View>
