@@ -1498,11 +1498,6 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
   for (; i < queue.length; i++) {
     const op = queue[i];
     // Skip edits/deletes that target a record still only living locally.
-    const targetId = idFromPath(op.path);
-    if (op.method !== "POST" && targetId && targetId.startsWith("local-")) {
-      dropped++;
-      continue;
-    }
     try {
       const resolveRefs = (value: any): any => {
         if (typeof value === "string") return idMap[value] ?? value;
@@ -1514,6 +1509,11 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
       };
       const resolvedPath = resolveRefs(op.path);
       const resolvedBody = resolveRefs(op.body);
+      const targetId = idFromPath(resolvedPath);
+      if (op.method !== "POST" && targetId && targetId.startsWith("local-")) {
+        dropped++;
+        continue;
+      }
       const result = await rawRequest<any>(resolvedPath, {
         method: op.method,
         body: resolvedBody,
@@ -1678,16 +1678,29 @@ function getCachedUpdatedAt(path: string): string | undefined {
 }
 
 function localCacheForPath(path: string): any {
-  if (path === "/partners") return queryClient.getQueryData(["partners"]);
-  if (path === "/partner-transactions") return queryClient.getQueryData(["partner-transactions"]);
-  if (path.startsWith("/partners/summary")) {
+  const route = path.split("?")[0];
+  if (route === "/partners") return queryClient.getQueryData(["partners"]);
+  if (route === "/partner-transactions") {
+    const rows = queryClient.getQueryData<any[]>(["partner-transactions"]);
+    if (rows === undefined) return undefined;
+    const partnerId = new URLSearchParams(path.split("?")[1] ?? "").get("partner_id");
+    return partnerId ? rows.filter((row) => String(row.partner_id) === partnerId) : rows;
+  }
+  if (route === "/partners/summary") {
     const partners = queryClient.getQueryData<any[]>(["partners"]) ?? [];
-    const transactions = queryClient.getQueryData<any[]>(["partner-transactions"]) ?? [];
-    const sales = queryClient.getQueryData<any[]>(["sales"]) ?? [];
-    const returns = queryClient.getQueryData<any[]>(["returns"]) ?? [];
+    const transactions = (queryClient.getQueryData<any[]>(["partner-transactions"]) ?? []).filter((row) => !row.deleted);
+    const sales = (queryClient.getQueryData<any[]>(["sales"]) ?? []).filter((row) => !row.deleted);
+    const returns = (queryClient.getQueryData<any[]>(["returns"]) ?? []).filter((row) => !row.deleted);
+    const expenses = (queryClient.getQueryData<any[]>(["expenses", "all"]) ?? []).filter((row) => !row.deleted);
+    const adjustments = (queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).filter((row) => !row.deleted);
     const gross_profit = sales.reduce((n, row) => n + Number(row.profit ?? 0), 0) - returns.reduce((n, row) => n + Number(row.refund_profit ?? 0), 0);
+    const cogs_expenses = expenses.filter((row) => row.bucket === "cogs").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    const personal = expenses.filter((row) => row.bucket === "personal").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    const operating = expenses.filter((row) => row.bucket === "operating").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    const net_profit_adjustment = adjustments.filter((row) => ["net_profit", "both", "split_50_50", "net_profit_to_remaining_balance"].includes(String(row.accounting_target ?? "none"))).reduce((n, row) => n + Number(row.net_profit_adjustment ?? 0), 0);
+    const net_profit = gross_profit - cogs_expenses - personal - operating + net_profit_adjustment;
     const allocated_profit = transactions.filter((row) => row.kind === "profit_allocation").reduce((n, row) => n + Number(row.amount ?? 0), 0);
-    return { gross_profit, allocated_profit, available_gross_profit: gross_profit - allocated_profit, partners };
+    return { net_profit, allocated_profit, available_net_profit: net_profit - allocated_profit, partners };
   }
   if (path === "/products") return queryClient.getQueryData(["products"]);
   if (path.startsWith("/parties")) {
