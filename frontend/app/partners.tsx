@@ -19,7 +19,7 @@ type PartnerSummary = { net_profit: number; allocated_profit: number; available_
 const TX_TYPES = [
   { key: "cash_in", label: "Cash In", detail: "Partner adds money to the business" },
   { key: "cash_out", label: "Cash Out", detail: "Business pays or withdraws partner funds" },
-  { key: "profit_allocation", label: "Profit Allocation", detail: "Allocate gross profit; not a cash payment" },
+  { key: "profit_allocation", label: "Profit Allocation", detail: "Allocate net profit; not a cash payment" },
   { key: "profit_payment", label: "Pay Allocated Profit", detail: "Cash paid against already allocated profit" },
 ] as const;
 
@@ -115,7 +115,7 @@ export default function Partners() {
   const exportStatement = async () => {
     if (!selected) return;
     const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (ch) => { const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }; return entities[ch]; });
-    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc((row.kind === "cash_in" || row.kind === "cash_out") ? (row.source === "gross_profit" ? "Gross Profit" : "Other") : "Gross Profit")}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
+    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc((row.kind === "cash_in" || row.kind === "cash_out") ? (row.source === "gross_profit" ? "Gross Profit" : "Other") : "Net Profit")}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
     const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='6'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are deducted from Net Profit and recorded separately from cash payments and operating expenses.</p></body></html>`;
     try {
       const file = await Print.printToFileAsync({ html });
