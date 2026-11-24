@@ -93,11 +93,11 @@ const WRITE_SEQ = "ssm.writeseq.v1";
 
 type WriteOp = { id: string; method: string; path: string; body: any; expected_updated_at?: string };
 
-const QUEUEABLE = ["/opening-budget-transactions", "/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments"];
+const QUEUEABLE = ["/opening-budget-transactions", "/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments", "/partners", "/partner-transactions"];
 function isQueueable(path: string): boolean {
   return QUEUEABLE.some((p) => path === p || path.startsWith(p + "/"));
 }
-function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | "opening-budget-transactions" | null {
+function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | "opening-budget-transactions" | "partners" | "partner-transactions" | null {
   if (path.startsWith("/opening-budget-transactions")) return "opening-budget-transactions";
   if (path.startsWith("/products")) return "products";
   if (path.startsWith("/parties")) return "parties";
@@ -114,6 +114,8 @@ function entityOf(path: string): "products" | "parties" | "expenses" | "payments
   if (path.startsWith("/stock-transfers")) return "stock-transfers";
   if (path.startsWith("/cash-shifts")) return "cash-shifts";
   if (path.startsWith("/attachments")) return "attachments";
+  if (path.startsWith("/partners")) return "partners";
+  if (path.startsWith("/partner-transactions")) return "partner-transactions";
   return null;
 }
 function idFromPath(path: string): string | null {
@@ -356,6 +358,31 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       keys.forEach((k) => queryClient.setQueryData<any[]>(k, (old) => (old ?? []).map((e) => e.id === id ? { ...e, ...body, pending: true } : e)));
     } else if (method === "DELETE" && id) {
       keys.forEach((k) => queryClient.setQueryData<any[]>(k, (old) => (old ?? []).filter((e) => e.id !== id)));
+    }
+  } else if (entity === "partners") {
+    if (method === "POST") {
+      const rec = { id: tempId, ...body, created_at: now(), balance: 0, pending: true };
+      queryClient.setQueryData<any[]>(["partners"], (old) => [rec, ...(old ?? [])]);
+    } else if (method === "PUT" && id) {
+      queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
+    } else if (method === "DELETE" && id) {
+      queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).filter((p) => p.id !== id));
+    }
+  } else if (entity === "partner-transactions") {
+    if (method === "POST") {
+      const partner = (queryClient.getQueryData<any[]>(["partners"]) ?? []).find((p) => p.id === body.partner_id);
+      const rec = { id: tempId, ...body, partner_name: partner?.name ?? "", created_at: now(), pending: true };
+      queryClient.setQueryData<any[]>(["partner-transactions"], (old) => [rec, ...(old ?? [])]);
+      queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === body.partner_id
+        ? { ...p, balance: Number(p.balance ?? 0) + (body.kind === "cash_in" || body.kind === "profit_allocation" ? Number(body.amount) : -Number(body.amount)) }
+        : p));
+    } else if (method === "DELETE" && id) {
+      const rows = queryClient.getQueryData<any[]>(["partner-transactions"]) ?? [];
+      const removed = rows.find((row) => row.id === id);
+      queryClient.setQueryData<any[]>(["partner-transactions"], rows.filter((row) => row.id !== id));
+      if (removed) queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === removed.partner_id
+        ? { ...p, balance: Number(p.balance ?? 0) - (removed.kind === "cash_in" || removed.kind === "profit_allocation" ? Number(removed.amount) : -Number(removed.amount)) }
+        : p));
     }
   } else if (entity === "returns") {
     const allReturns = queryClient.getQueryData<any[]>(["returns"]) ?? [];
@@ -1631,6 +1658,17 @@ function getCachedUpdatedAt(path: string): string | undefined {
 }
 
 function localCacheForPath(path: string): any {
+  if (path === "/partners") return queryClient.getQueryData(["partners"]);
+  if (path === "/partner-transactions") return queryClient.getQueryData(["partner-transactions"]);
+  if (path.startsWith("/partners/summary")) {
+    const partners = queryClient.getQueryData<any[]>(["partners"]) ?? [];
+    const transactions = queryClient.getQueryData<any[]>(["partner-transactions"]) ?? [];
+    const sales = queryClient.getQueryData<any[]>(["sales"]) ?? [];
+    const returns = queryClient.getQueryData<any[]>(["returns"]) ?? [];
+    const gross_profit = sales.reduce((n, row) => n + Number(row.profit ?? 0), 0) - returns.reduce((n, row) => n + Number(row.refund_profit ?? 0), 0);
+    const allocated_profit = transactions.filter((row) => row.kind === "profit_allocation").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    return { gross_profit, allocated_profit, available_gross_profit: gross_profit - allocated_profit, partners };
+  }
   if (path === "/products") return queryClient.getQueryData(["products"]);
   if (path.startsWith("/parties")) {
     const type = new URLSearchParams(path.split("?")[1] ?? "").get("type");
