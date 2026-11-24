@@ -61,8 +61,10 @@ export default function Partners() {
   const partners = partnersQuery.data ?? summaryQuery.data?.partners ?? [];
   const selected = partners.find((p) => p.id === selectedId) ?? null;
   const txQuery = useQuery({
-    queryKey: ["partner-transactions", selectedId],
-    queryFn: () => apiRequest<PartnerTx[]>(`/partner-transactions?partner_id=${encodeURIComponent(selectedId as string)}`),
+    // Keep one complete local ledger cache. Filtering only in the view means
+    // partner statements work offline and edits/deletes always update the same data.
+    queryKey: ["partner-transactions"],
+    queryFn: () => apiRequest<PartnerTx[]>("/partner-transactions"),
     enabled: admin && !!selectedId && !!selected,
   });
   const transactions = txQuery.data ?? [];
