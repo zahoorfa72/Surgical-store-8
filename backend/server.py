@@ -4654,7 +4654,8 @@ async def create_partner_transaction(body: PartnerTransactionIn, user: AdminOnly
         if body.amount > available + 0.005:
             raise HTTPException(status_code=400, detail=f"Allocation exceeds available net profit ({available:.2f}).")
     if body.kind == "profit_payment":
-        rows = await db["partner_transactions"].find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
+        partner_query = {"$or": [{"partner_id": body.partner_id}, {"partner_id": ObjectId(body.partner_id)}], "deleted": {"$ne": True}}
+        rows = await db["partner_transactions"].find(partner_query).to_list(100000)
         allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation")
         paid = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment")
         if body.amount > allocated - paid + 0.005:
@@ -4693,7 +4694,8 @@ async def update_partner_transaction(transaction_id: str, body: PartnerTransacti
         if body.amount > available + 0.005:
             raise HTTPException(status_code=400, detail=f"Allocation exceeds available net profit ({available:.2f}).")
     if body.kind == "profit_payment":
-        rows = await db["partner_transactions"].find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
+        partner_query = {"$or": [{"partner_id": body.partner_id}, {"partner_id": ObjectId(body.partner_id)}], "deleted": {"$ne": True}}
+        rows = await db["partner_transactions"].find(partner_query).to_list(100000)
         allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation" and oid(row["_id"]) != transaction_id)
         paid_other = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment" and oid(row["_id"]) != transaction_id)
         if body.amount > allocated - paid_other + 0.005:
@@ -4715,11 +4717,27 @@ async def delete_partner_transaction(transaction_id: str, _: AdminOnly):
     if not row:
         raise HTTPException(status_code=404, detail="Transaction not found")
     if row.get("kind") == "profit_allocation":
-        rows = await db["partner_transactions"].find({"partner_id": row.get("partner_id"), "deleted": {"$ne": True}}).to_list(100000)
-        allocated = sum(float(item.get("amount", 0) or 0) for item in rows if item.get("kind") == "profit_allocation")
-        paid = sum(float(item.get("amount", 0) or 0) for item in rows if item.get("kind") == "profit_payment")
-        if allocated - float(row.get("amount", 0) or 0) < paid - 0.005:
-            raise HTTPException(status_code=400, detail="This allocation has already been paid. Remove or correct the related profit payment first.")
+        partner_id = str(row.get("partner_id", "") or "")
+        partner_query = {"$or": [{"partner_id": partner_id}]}
+        if ObjectId.is_valid(partner_id):
+            partner_query["$or"].append({"partner_id": ObjectId(partner_id)})
+        partner_query["deleted"] = {"$ne": True}
+        rows = await db["partner_transactions"].find(partner_query).to_list(100000)
+        allocated_after = sum(float(item.get("amount", 0) or 0) for item in rows if item.get("kind") == "profit_allocation" and oid(item["_id"]) != transaction_id)
+        payment_rows = [item for item in rows if item.get("kind") == "profit_payment"]
+        paid = sum(float(item.get("amount", 0) or 0) for item in payment_rows)
+        # Keep the oldest payments supported by the remaining allocations.
+        # Any newer payments that would become unsupported are soft-deleted
+        # together with this allocation so the ledger never becomes invalid.
+        excess = max(0.0, paid - allocated_after)
+        for payment in sorted(payment_rows, key=lambda item: str(item.get("created_at", "")), reverse=True):
+            if excess <= 0.005:
+                break
+            await db["partner_transactions"].update_one(
+                {"_id": payment["_id"]},
+                {"$set": {"deleted": True, "edited_at": now_iso()}},
+            )
+            excess -= float(payment.get("amount", 0) or 0)
     await db["partner_transactions"].update_one({"_id": ObjectId(transaction_id)}, {"$set": {"deleted": True, "edited_at": now_iso()}})
     return {"ok": True}
 
@@ -4731,10 +4749,14 @@ async def delete_partner(partner_id: str, _: AdminOnly):
     partner = await db["partners"].find_one({"_id": ObjectId(partner_id), "deleted": {"$ne": True}})
     if not partner:
         raise HTTPException(status_code=404, detail="Partner not found")
-    history = await db["partner_transactions"].find({"partner_id": partner_id, "deleted": {"$ne": True}}).to_list(1)
-    if history:
-        raise HTTPException(status_code=400, detail="This partner has account history. Keep the record instead of deleting it.")
-    await db["partners"].update_one({"_id": ObjectId(partner_id)}, {"$set": {"deleted": True}})
+    # Remove the partner and hide all of that partner's ledger entries together.
+    # Soft deletion preserves the audit trail while excluding its allocations
+    # from the active business allocation total and partner balances.
+    await db["partner_transactions"].update_many(
+        {"$or": [{"partner_id": partner_id}, {"partner_id": ObjectId(partner_id)}], "deleted": {"$ne": True}},
+        {"$set": {"deleted": True, "edited_at": now_iso()}},
+    )
+    await db["partners"].update_one({"_id": ObjectId(partner_id)}, {"$set": {"deleted": True, "edited_at": now_iso()}})
     return {"ok": True}
 
 app.include_router(api)

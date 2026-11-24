@@ -376,6 +376,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
     } else if (method === "DELETE" && id) {
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).filter((p) => p.id !== id));
+      queryClient.setQueryData<any[]>(["partner-transactions"], (old) => (old ?? []).filter((row) => String(row.partner_id) !== id));
     }
   } else if (entity === "partner-transactions") {
     if (method === "POST") {
@@ -1451,6 +1452,17 @@ async function queueWrite(method: string, path: string, body: any, expectedUpdat
         queue[postIndex] = { ...queue[postIndex], body: { ...(queue[postIndex].body ?? {}), ...(body ?? {}) } };
       } else if (method === "DELETE") {
         queue.splice(postIndex, 1);
+        // If an unsynced partner is removed, also cancel its queued ledger
+        // entries. Otherwise they would replay with a partner ID that was
+        // deliberately never created on the server.
+        if (entityOf(path) === "partners") {
+          for (let index = queue.length - 1; index >= 0; index--) {
+            const op = queue[index];
+            if (entityOf(op.path) === "partner-transactions" && String(op.body?.partner_id ?? "") === targetId) {
+              queue.splice(index, 1);
+            }
+          }
+        }
       }
       await setWriteQueue(queue);
       await persistLiveCache();
@@ -1498,11 +1510,6 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
   for (; i < queue.length; i++) {
     const op = queue[i];
     // Skip edits/deletes that target a record still only living locally.
-    const targetId = idFromPath(op.path);
-    if (op.method !== "POST" && targetId && targetId.startsWith("local-")) {
-      dropped++;
-      continue;
-    }
     try {
       const resolveRefs = (value: any): any => {
         if (typeof value === "string") return idMap[value] ?? value;
@@ -1514,6 +1521,11 @@ export async function flushWriteQueue(idMap: Record<string, string> = {}): Promi
       };
       const resolvedPath = resolveRefs(op.path);
       const resolvedBody = resolveRefs(op.body);
+      const targetId = idFromPath(resolvedPath);
+      if (op.method !== "POST" && targetId && targetId.startsWith("local-")) {
+        dropped++;
+        continue;
+      }
       const result = await rawRequest<any>(resolvedPath, {
         method: op.method,
         body: resolvedBody,
@@ -1646,6 +1658,12 @@ export async function apiRequest<T = any>(
     return result;
   } catch (e) {
     if (e instanceof ApiError) throw e;
+    // Partner account screens are usable without a server connection when
+    // their previously synchronized local ledger is available.
+    if (method === "GET" && (path.startsWith("/partners") || path.startsWith("/partner-transactions"))) {
+      const local = localCacheForPath(path);
+      if (local !== undefined) return local as T;
+    }
     if (method !== "GET" && isQueueable(path)) {
       const queued = await queueWrite(method, path, options.body, expectedUpdatedAt);
       await recordLocalAudit(method, path, undefined, options.body);
@@ -1677,17 +1695,40 @@ function getCachedUpdatedAt(path: string): string | undefined {
   return found?.updated_at ? String(found.updated_at) : undefined;
 }
 
+function cachedPartnerTransactions(): any[] {
+  const cached = queryClient.getQueriesData<any[]>({ queryKey: ["partner-transactions"] });
+  const unique = new Map<string, any>();
+  for (const [, rows] of cached) {
+    for (const row of rows ?? []) unique.set(String(row.id), row);
+  }
+  return [...unique.values()];
+}
+
 function localCacheForPath(path: string): any {
-  if (path === "/partners") return queryClient.getQueryData(["partners"]);
-  if (path === "/partner-transactions") return queryClient.getQueryData(["partner-transactions"]);
-  if (path.startsWith("/partners/summary")) {
+  const route = path.split("?")[0];
+  if (route === "/partners") return queryClient.getQueryData(["partners"]);
+  if (route === "/partner-transactions") {
+    const cachedRows = cachedPartnerTransactions();
+    if (!cachedRows.length && queryClient.getQueriesData({ queryKey: ["partner-transactions"] }).length === 0) return undefined;
+    const rows = cachedRows;
+    const partnerId = new URLSearchParams(path.split("?")[1] ?? "").get("partner_id");
+    return partnerId ? rows.filter((row) => String(row.partner_id) === partnerId) : rows;
+  }
+  if (route === "/partners/summary") {
     const partners = queryClient.getQueryData<any[]>(["partners"]) ?? [];
-    const transactions = queryClient.getQueryData<any[]>(["partner-transactions"]) ?? [];
-    const sales = queryClient.getQueryData<any[]>(["sales"]) ?? [];
-    const returns = queryClient.getQueryData<any[]>(["returns"]) ?? [];
+    const transactions = cachedPartnerTransactions().filter((row) => !row.deleted);
+    const sales = (queryClient.getQueryData<any[]>(["sales"]) ?? []).filter((row) => !row.deleted);
+    const returns = (queryClient.getQueryData<any[]>(["returns"]) ?? []).filter((row) => !row.deleted);
+    const expenses = (queryClient.getQueryData<any[]>(["expenses", "all"]) ?? []).filter((row) => !row.deleted);
+    const adjustments = (queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).filter((row) => !row.deleted);
     const gross_profit = sales.reduce((n, row) => n + Number(row.profit ?? 0), 0) - returns.reduce((n, row) => n + Number(row.refund_profit ?? 0), 0);
+    const cogs_expenses = expenses.filter((row) => row.bucket === "cogs").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    const personal = expenses.filter((row) => row.bucket === "personal").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    const operating = expenses.filter((row) => row.bucket === "operating").reduce((n, row) => n + Number(row.amount ?? 0), 0);
+    const net_profit_adjustment = adjustments.filter((row) => ["net_profit", "both", "split_50_50", "net_profit_to_remaining_balance"].includes(String(row.accounting_target ?? "none"))).reduce((n, row) => n + Number(row.net_profit_adjustment ?? 0), 0);
+    const net_profit = gross_profit - cogs_expenses - personal - operating + net_profit_adjustment;
     const allocated_profit = transactions.filter((row) => row.kind === "profit_allocation").reduce((n, row) => n + Number(row.amount ?? 0), 0);
-    return { gross_profit, allocated_profit, available_gross_profit: gross_profit - allocated_profit, partners };
+    return { net_profit, allocated_profit, available_net_profit: net_profit - allocated_profit, partners };
   }
   if (path === "/products") return queryClient.getQueryData(["products"]);
   if (path.startsWith("/parties")) {

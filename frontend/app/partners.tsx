@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +41,7 @@ export default function Partners() {
   const admin = isAdmin(user?.role);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [partnerModal, setPartnerModal] = useState(false);
+  const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
   const [txModal, setTxModal] = useState(false);
   const [editingTx, setEditingTx] = useState<PartnerTx | null>(null);
   const [name, setName] = useState("");
@@ -60,8 +61,10 @@ export default function Partners() {
   const partners = partnersQuery.data ?? summaryQuery.data?.partners ?? [];
   const selected = partners.find((p) => p.id === selectedId) ?? null;
   const txQuery = useQuery({
-    queryKey: ["partner-transactions", selectedId],
-    queryFn: () => apiRequest<PartnerTx[]>(`/partner-transactions?partner_id=${encodeURIComponent(selectedId as string)}`),
+    // Keep one complete local ledger cache. Filtering only in the view means
+    // partner statements work offline and edits/deletes always update the same data.
+    queryKey: ["partner-transactions"],
+    queryFn: () => apiRequest<PartnerTx[]>("/partner-transactions"),
     enabled: admin && !!selectedId && !!selected,
   });
   const transactions = txQuery.data ?? [];
@@ -88,18 +91,54 @@ export default function Partners() {
     ]);
   };
 
+  const resetPartnerForm = () => {
+    setEditingPartner(null); setName(""); setPhone(""); setAddress(""); setPartnerNote(""); setOpeningBalance("0");
+  };
+
+  const openAddPartner = () => {
+    resetPartnerForm();
+    setPartnerModal(true);
+  };
+
+  const editPartner = (partner: Partner) => {
+    setEditingPartner(partner);
+    setName(partner.name ?? ""); setPhone(partner.phone ?? ""); setAddress(partner.address ?? "");
+    setPartnerNote(partner.note ?? ""); setOpeningBalance("0");
+    setPartnerModal(true);
+  };
+
   const savePartner = async () => {
     if (!name.trim()) return toast("Enter partner name", "error");
     setBusy(true);
     try {
-      const result = await apiRequest<Partner>("/partners", { method: "POST", body: { name: name.trim(), phone: phone.trim(), address: address.trim(), note: partnerNote.trim(), opening_balance: Number(openingBalance) || 0 } });
+      const editing = !!editingPartner;
+      const result = await apiRequest<Partner>(editing ? `/partners/${editingPartner!.id}` : "/partners", {
+        method: editing ? "PUT" : "POST",
+        body: { name: name.trim(), phone: phone.trim(), address: address.trim(), note: partnerNote.trim(), opening_balance: editing ? 0 : (Number(openingBalance) || 0) },
+      });
       setSelectedId(result.id);
       setPartnerModal(false);
-      setName(""); setPhone(""); setAddress(""); setPartnerNote(""); setOpeningBalance("0");
+      resetPartnerForm();
       await reload();
-      toast("Partner added", "success");
-    } catch (e: any) { toast(e?.message || "Could not add partner", "error"); }
+      toast(editing ? "Partner updated" : "Partner added", "success");
+    } catch (e: any) { toast(e?.message || "Could not save partner", "error"); }
     finally { setBusy(false); }
+  };
+
+  const deletePartner = (partner: Partner) => {
+    Alert.alert("Delete partner?", `Delete ${partner.name} and remove their account transactions from active records? This cannot be undone from the app. Historical records are retained in the database.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+        setBusy(true);
+        try {
+          await apiRequest(`/partners/${partner.id}`, { method: "DELETE" });
+          if (selectedId === partner.id) setSelectedId(null);
+          await reload();
+          toast("Partner deleted", "success");
+        } catch (e: any) { toast(e?.message || "Could not delete partner", "error"); }
+        finally { setBusy(false); }
+      } },
+    ]);
   };
 
   const saveTransaction = async () => {
@@ -138,12 +177,17 @@ export default function Partners() {
     setTxModal(true);
   };
 
-  const deleteTransaction = async (row: PartnerTx) => {
-    try {
-      await apiRequest(`/partner-transactions/${row.id}`, { method: "DELETE" });
-      await reload();
-      toast("Transaction removed", "success");
-    } catch (e: any) { toast(e?.message || "Could not remove transaction", "error"); }
+  const deleteTransaction = (row: PartnerTx) => {
+    Alert.alert("Delete transaction?", `Delete this ${txLabel(row.kind).toLowerCase()} entry of ${money(row.amount)}? The partner balance and available business net profit will be recalculated. If this is a profit allocation, any newer profit payments that are no longer covered by the remaining allocations will also be removed.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+        try {
+          await apiRequest(`/partner-transactions/${row.id}`, { method: "DELETE" });
+          await reload();
+          toast("Transaction deleted", "success");
+        } catch (e: any) { toast(e?.message || "Could not delete transaction", "error"); }
+      } },
+    ]);
   };
 
   if (!admin) {
@@ -164,15 +208,21 @@ export default function Partners() {
 
         <View style={styles.sectionHead}>
           <Text style={styles.sectionTitle}>Partners</Text>
-          <Pressable style={styles.primarySmall} onPress={() => setPartnerModal(true)}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Add partner</Text></Pressable>
+          <Pressable style={styles.primarySmall} onPress={openAddPartner}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Add partner</Text></Pressable>
         </View>
         {partners.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No partners added yet.</Text></View> : partners.map((p) => {
           const active = selected?.id === p.id;
-          return <Pressable key={p.id} onPress={() => setSelectedId(active ? null : p.id)} style={[styles.partnerRow, active && styles.partnerActive]}>
-            <View style={styles.avatar}><MaterialDesignIcons name="account" size={22} color={colors.brandPrimary} /></View>
-            <View style={{ flex: 1, gap: 3 }}><Text style={styles.partnerName}>{p.name}</Text><Text style={styles.muted}>{p.phone || "No phone number"}</Text></View>
-            <View style={{ alignItems: "flex-end", gap: 3 }}><Text style={styles.balance}>{money(p.balance ?? 0)}</Text><Text style={styles.muted}>Account balance</Text></View>
-          </Pressable>;
+          return <View key={p.id} style={[styles.partnerRow, active && styles.partnerActive]}>
+            <Pressable onPress={() => setSelectedId(active ? null : p.id)} style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View style={styles.avatar}><MaterialDesignIcons name="account" size={22} color={colors.brandPrimary} /></View>
+              <View style={{ flex: 1, gap: 3 }}><Text style={styles.partnerName}>{p.name}</Text><Text style={styles.muted}>{p.phone || "No phone number"}</Text></View>
+              <View style={{ alignItems: "flex-end", gap: 3 }}><Text style={styles.balance}>{money(p.balance ?? 0)}</Text><Text style={styles.muted}>Account balance</Text></View>
+            </Pressable>
+            <View style={styles.partnerActions}>
+              <Pressable onPress={() => editPartner(p)} hitSlop={8}><Text style={styles.editText}>Edit</Text></Pressable>
+              <Pressable onPress={() => deletePartner(p)} hitSlop={8}><Text style={styles.deleteText}>Delete</Text></Pressable>
+            </View>
+          </View>;
         })}
 
         {!selected && partners.length > 0 && <View style={styles.empty}><Text style={styles.muted}>Select a partner above to view that partner's account balance, cash details and complete transaction history. No partner details are shown until an account is selected.</Text></View>}
@@ -208,13 +258,13 @@ export default function Partners() {
 
       <Modal visible={partnerModal} transparent animationType="slide" onRequestClose={() => setPartnerModal(false)}>
         <View style={styles.scrim}><View style={styles.modal}>
-          <Text style={styles.modalTitle}>Add partner</Text>
+          <Text style={styles.modalTitle}>{editingPartner ? "Edit partner" : "Add partner"}</Text>
           <TextInput style={styles.input} placeholder="Partner name *" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
           <TextInput style={styles.input} placeholder="Phone" placeholderTextColor={colors.muted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
           <TextInput style={styles.input} placeholder="Address" placeholderTextColor={colors.muted} value={address} onChangeText={setAddress} />
-          <TextInput style={styles.input} placeholder="Opening balance (positive = business owes partner)" placeholderTextColor={colors.muted} value={openingBalance} onChangeText={setOpeningBalance} keyboardType="decimal-pad" />
+          {!editingPartner && <TextInput style={styles.input} placeholder="Opening balance (positive = business owes partner)" placeholderTextColor={colors.muted} value={openingBalance} onChangeText={setOpeningBalance} keyboardType="decimal-pad" />}
           <TextInput style={styles.input} placeholder="Notes" placeholderTextColor={colors.muted} value={partnerNote} onChangeText={setPartnerNote} />
-          <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => setPartnerModal(false)}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={savePartner}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : "Save partner"}</Text></Pressable></View>
+          <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => { setPartnerModal(false); resetPartnerForm(); }}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={savePartner}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : editingPartner ? "Update partner" : "Save partner"}</Text></Pressable></View>
         </View></View>
       </Modal>
 
@@ -255,6 +305,7 @@ const useStyles = makeStyles((colors) => ({
   exportText: { color: colors.brandPrimary, fontSize: 12, fontWeight: "800" },
   partnerRow: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, flexDirection: "row", alignItems: "center", gap: 10 },
   partnerActive: { borderColor: colors.brandPrimary, borderWidth: 2 },
+  partnerActions: { flexDirection: "row", gap: 12, paddingTop: 8, justifyContent: "flex-end" },
   avatar: { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
   partnerName: { color: colors.onSurface, fontSize: 14, fontWeight: "800" },
   balance: { color: colors.onSurface, fontSize: 14, fontWeight: "900" },
