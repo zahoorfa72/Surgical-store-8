@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MaterialDesignIcons } from "@react-native-vector-icons/material-design-icons";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 
 import { apiRequest } from "@/src/api";
 import { isAdmin, useAuth } from "@/src/auth";
@@ -57,6 +59,13 @@ export default function Partners() {
   const transactions = txQuery.data ?? [];
   const selected = partners.find((p) => p.id === selectedId) ?? partners[0] ?? null;
   const statement = useMemo(() => transactions.filter((row) => !selected || row.partner_id === selected.id), [transactions, selected?.id]);
+  const statementWithBalance = useMemo(() => {
+    let running = 0;
+    return [...statement].sort((a, b) => String(a.transaction_date).localeCompare(String(b.transaction_date)) || String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).map((row) => {
+      running += txEffect(row.kind, Number(row.amount));
+      return { ...row, running_balance: Math.round(running * 100) / 100 };
+    }).reverse();
+  }, [statement]);
   const totals = summaryQuery.data;
   const reload = async () => {
     await Promise.all([
@@ -93,6 +102,18 @@ export default function Partners() {
       toast("Partner transaction saved", "success");
     } catch (e: any) { toast(e?.message || "Could not save transaction", "error"); }
     finally { setBusy(false); }
+  };
+
+  const exportStatement = async () => {
+    if (!selected) return;
+    const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] as string));
+    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
+    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='5'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are based on gross profit and are recorded separately from cash payments and operating expenses.</p></body></html>`;
+    try {
+      const file = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: `${selected.name} statement` });
+      else toast(`PDF created at ${file.uri}`, "success");
+    } catch (e: any) { toast(e?.message || "Could not export statement", "error"); }
   };
 
   const deleteTransaction = async (row: PartnerTx) => {
@@ -135,19 +156,20 @@ export default function Partners() {
         {selected && <>
           <View style={styles.sectionHead}>
             <View><Text style={styles.sectionTitle}>{selected.name} statement</Text><Text style={styles.muted}>Date-wise account activity</Text></View>
-            <Pressable style={styles.primarySmall} onPress={() => setTxModal(true)}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Entry</Text></Pressable>
+            <View style={{ flexDirection: "row", gap: 7 }}><Pressable style={styles.exportSmall} onPress={exportStatement}><MaterialDesignIcons name="file-pdf-box" size={17} color={colors.brandPrimary} /><Text style={styles.exportText}>PDF</Text></Pressable>
+            <Pressable style={styles.primarySmall} onPress={() => setTxModal(true)}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Entry</Text></Pressable></View>
           </View>
           <View style={styles.accountCard}>
             <Text style={styles.cardEyebrow}>CURRENT PARTNER ACCOUNT</Text>
             <Text style={styles.profitValue}>{money(selected.balance ?? 0)}</Text>
             <Text style={styles.helper}>Positive balance means the business owes this partner. Negative balance means the partner has withdrawn more than their recorded contributions and allocations.</Text>
           </View>
-          {statement.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No transactions for this partner.</Text></View> : statement.map((row) => {
+          {statementWithBalance.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No transactions for this partner.</Text></View> : statementWithBalance.map((row) => {
             const positive = txEffect(row.kind, row.amount) >= 0;
             return <View key={row.id} style={styles.txRow}>
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.txTitle}>{txLabel(row.kind)}</Text>
-                <Text style={styles.muted}>{row.transaction_date} · {row.note || "No description"}</Text>
+                <Text style={styles.muted}>{row.transaction_date} · {row.note || "No description"}</Text><Text style={styles.muted}>Running balance: {money(row.running_balance)}</Text>
                 {row.pending ? <Text style={styles.pending}>Waiting to sync</Text> : null}
               </View>
               <View style={{ alignItems: "flex-end", gap: 5 }}>
@@ -202,6 +224,8 @@ const useStyles = makeStyles((colors) => ({
   sectionTitle: { color: colors.onSurface, fontSize: 16, fontWeight: "900" },
   primarySmall: { backgroundColor: colors.brandPrimary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 4 },
   primarySmallText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
+  exportSmall: { borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 4 },
+  exportText: { color: colors.brandPrimary, fontSize: 12, fontWeight: "800" },
   partnerRow: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, flexDirection: "row", alignItems: "center", gap: 10 },
   partnerActive: { borderColor: colors.brandPrimary, borderWidth: 2 },
   avatar: { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
