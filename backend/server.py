@@ -4609,6 +4609,8 @@ async def list_partner_transactions(_: AdminOnly, partner_id: Optional[str] = No
 
 @api.post("/partner-transactions", status_code=201)
 async def create_partner_transaction(body: PartnerTransactionIn, user: AdminOnly):
+    if body.partner_id != str(existing.get("partner_id", "")):
+        raise HTTPException(status_code=400, detail="A ledger entry cannot be moved to another partner account.")
     if not ObjectId.is_valid(body.partner_id):
         raise HTTPException(status_code=404, detail="Partner not found")
     partner = await db["partners"].find_one({"_id": ObjectId(body.partner_id), "deleted": {"$ne": True}})
