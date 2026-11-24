@@ -4489,6 +4489,7 @@ class PartnerIn(BaseModel):
     phone: str = Field(default="", max_length=40)
     address: str = Field(default="", max_length=300)
     note: str = Field(default="", max_length=500)
+    opening_balance: float = Field(default=0, allow_inf_nan=False)
 
 
 class PartnerTransactionIn(BaseModel):
@@ -4557,7 +4558,17 @@ async def create_partner(body: PartnerIn, user: AdminOnly):
     doc.update({"deleted": False, "created_at": now_iso(), "created_by": user.get("name", user.get("email", ""))})
     result = await db.partners.insert_one(doc)
     doc["_id"] = result.inserted_id
-    return _partner_public(doc)
+    opening = round(float(body.opening_balance or 0), 2)
+    if opening:
+        tx = {
+            "partner_id": oid(doc["_id"]), "partner_name": doc["name"],
+            "kind": "cash_in" if opening > 0 else "cash_out", "amount": abs(opening),
+            "transaction_date": datetime.now().date().isoformat(),
+            "note": "Opening balance", "user_name": user.get("name", user.get("email", "")),
+            "created_at": now_iso(), "deleted": False,
+        }
+        await db.partner_transactions.insert_one(tx)
+    return _partner_public(doc, opening)
 
 
 @api.put("/partners/{partner_id}")
@@ -4635,6 +4646,12 @@ async def delete_partner_transaction(transaction_id: str, _: AdminOnly):
     row = await db.partner_transactions.find_one({"_id": ObjectId(transaction_id), "deleted": {"$ne": True}})
     if not row:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    if row.get("kind") == "profit_allocation":
+        rows = await db.partner_transactions.find({"partner_id": row.get("partner_id"), "deleted": {"$ne": True}}).to_list(100000)
+        allocated = sum(float(item.get("amount", 0) or 0) for item in rows if item.get("kind") == "profit_allocation")
+        paid = sum(float(item.get("amount", 0) or 0) for item in rows if item.get("kind") == "profit_payment")
+        if allocated - float(row.get("amount", 0) or 0) < paid - 0.005:
+            raise HTTPException(status_code=400, detail="This allocation has already been paid. Remove or correct the related profit payment first.")
     await db.partner_transactions.update_one({"_id": ObjectId(transaction_id)}, {"$set": {"deleted": True, "edited_at": now_iso()}})
     return {"ok": True}
 
