@@ -38,6 +38,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
       { label: "Offline Tools", sub: "Adjustments, expiry, transfers, shifts & attachments", icon: "toolbox-outline", route: "/offline-tools", testID: "more-offline-tools" },
       { label: "Expenses", sub: "Operating, direct & personal", icon: "cash-multiple", route: "/expenses", testID: "more-expenses" },
       { label: "Payments", sub: "Pay suppliers, receive from customers", icon: "cash-sync", route: "/payments", testID: "more-payments" },
+      { label: "Partner accounts", sub: "Partner cash ledger & gross-profit distributions", icon: "account-cash", route: "/partners", testID: "more-partners", adminOnly: true },
       { label: "Customer report", sub: "Who bought how much", icon: "chart-donut", route: "/customers-report", testID: "more-customer-report" },
       { label: "Day close", sub: "Sales per cashier & shift", icon: "account-clock", route: "/day-close", testID: "more-day-close" },
     ],
