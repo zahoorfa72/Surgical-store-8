@@ -46,6 +46,7 @@ export default function Partners() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [partnerNote, setPartnerNote] = useState("");
+  const [openingBalance, setOpeningBalance] = useState("0");
   const [kind, setKind] = useState<string>("cash_in");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayIsoDate());
@@ -80,10 +81,10 @@ export default function Partners() {
     if (!name.trim()) return toast("Enter partner name", "error");
     setBusy(true);
     try {
-      const result = await apiRequest<Partner>("/partners", { method: "POST", body: { name: name.trim(), phone: phone.trim(), address: address.trim(), note: partnerNote.trim() } });
+      const result = await apiRequest<Partner>("/partners", { method: "POST", body: { name: name.trim(), phone: phone.trim(), address: address.trim(), note: partnerNote.trim(), opening_balance: Number(openingBalance) || 0 } });
       setSelectedId(result.id);
       setPartnerModal(false);
-      setName(""); setPhone(""); setAddress(""); setPartnerNote("");
+      setName(""); setPhone(""); setAddress(""); setPartnerNote(""); setOpeningBalance("0");
       await reload();
       toast("Partner added", "success");
     } catch (e: any) { toast(e?.message || "Could not add partner", "error"); }
@@ -187,6 +188,7 @@ export default function Partners() {
           <TextInput style={styles.input} placeholder="Partner name *" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
           <TextInput style={styles.input} placeholder="Phone" placeholderTextColor={colors.muted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
           <TextInput style={styles.input} placeholder="Address" placeholderTextColor={colors.muted} value={address} onChangeText={setAddress} />
+          <TextInput style={styles.input} placeholder="Opening balance (positive = business owes partner)" placeholderTextColor={colors.muted} value={openingBalance} onChangeText={setOpeningBalance} keyboardType="decimal-pad" />
           <TextInput style={styles.input} placeholder="Notes" placeholderTextColor={colors.muted} value={partnerNote} onChangeText={setPartnerNote} />
           <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => setPartnerModal(false)}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={savePartner}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : "Save partner"}</Text></Pressable></View>
         </View></View>
