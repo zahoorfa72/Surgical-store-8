@@ -361,7 +361,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     }
   } else if (entity === "partners") {
     if (method === "POST") {
-      const rec = { id: tempId, ...body, created_at: now(), balance: 0, pending: true };
+      const rec = { id: tempId, ...body, created_at: now(), balance: Number(body.opening_balance ?? 0), pending: true };
       queryClient.setQueryData<any[]>(["partners"], (old) => [rec, ...(old ?? [])]);
     } else if (method === "PUT" && id) {
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
