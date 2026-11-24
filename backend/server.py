@@ -4495,6 +4495,7 @@ class PartnerIn(BaseModel):
 class PartnerTransactionIn(BaseModel):
     partner_id: str
     kind: str = Field(pattern="^(cash_in|cash_out|profit_allocation|profit_payment)$")
+    source: str = Field(default="other", pattern="^(gross_profit|other)$")
     amount: float = Field(gt=0, allow_inf_nan=False)
     transaction_date: Optional[str] = None
     note: str = Field(default="", max_length=500)
@@ -4513,6 +4514,7 @@ def _partner_tx_public(row: dict) -> dict:
     return {
         "id": oid(row["_id"]), "partner_id": row.get("partner_id", ""),
         "partner_name": row.get("partner_name", ""), "kind": row.get("kind", ""),
+        "source": row.get("source", "other"),
         "amount": round(float(row.get("amount", 0) or 0), 2),
         "transaction_date": str(row.get("transaction_date") or row.get("created_at") or "")[:10],
         "note": row.get("note", ""), "user_name": row.get("user_name", ""),

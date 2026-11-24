@@ -13,7 +13,7 @@ import { todayIsoDate, money, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 
 type Partner = { id: string; name: string; phone?: string; address?: string; note?: string; balance: number; pending?: boolean };
-type PartnerTx = { id: string; partner_id: string; partner_name: string; kind: string; amount: number; transaction_date: string; note: string; created_at?: string; user_name?: string; pending?: boolean };
+type PartnerTx = { id: string; partner_id: string; partner_name: string; kind: string; source?: string; amount: number; transaction_date: string; note: string; created_at?: string; user_name?: string; pending?: boolean };
 type PartnerSummary = { gross_profit: number; allocated_profit: number; available_gross_profit: number; partners: Partner[] };
 
 const TX_TYPES = [
@@ -49,6 +49,7 @@ export default function Partners() {
   const [partnerNote, setPartnerNote] = useState("");
   const [openingBalance, setOpeningBalance] = useState("0");
   const [kind, setKind] = useState<string>("cash_in");
+  const [source, setSource] = useState<string>("other");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayIsoDate());
   const [note, setNote] = useState("");
@@ -69,6 +70,11 @@ export default function Partners() {
     }).reverse();
   }, [statement]);
   const totals = summaryQuery.data;
+  const cashTotal = (kind: string, source: string) => statement.reduce((sum, row) => sum + (row.kind === kind && (row.source ?? "other") === source ? Number(row.amount) : 0), 0);
+  const cashInGross = cashTotal("cash_in", "gross_profit");
+  const cashInOther = cashTotal("cash_in", "other");
+  const cashOutGross = cashTotal("cash_out", "gross_profit");
+  const cashOutOther = cashTotal("cash_out", "other");
   const reload = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["partners"] }),
@@ -98,7 +104,7 @@ export default function Partners() {
     if (!Number.isFinite(value) || value <= 0) return toast("Enter a valid amount", "error");
     setBusy(true);
     try {
-      await apiRequest(editingTx ? `/partner-transactions/${editingTx.id}` : "/partner-transactions", { method: editingTx ? "PUT" : "POST", body: { partner_id: selected.id, kind, amount: value, transaction_date: date, note: note.trim() } });
+      await apiRequest(editingTx ? `/partner-transactions/${editingTx.id}` : "/partner-transactions", { method: editingTx ? "PUT" : "POST", body: { partner_id: selected.id, kind, source: (kind === "cash_in" || kind === "cash_out") ? source : "gross_profit", amount: value, transaction_date: date, note: note.trim() } });
       setTxModal(false); setEditingTx(null); setAmount(""); setNote(""); setDate(todayIsoDate());
       await reload();
       toast("Partner transaction saved", "success");
@@ -109,8 +115,8 @@ export default function Partners() {
   const exportStatement = async () => {
     if (!selected) return;
     const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (ch) => { const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }; return entities[ch]; });
-    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
-    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='5'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are based on gross profit and are recorded separately from cash payments and operating expenses.</p></body></html>`;
+    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc((row.kind === "cash_in" || row.kind === "cash_out") ? (row.source === "gross_profit" ? "Gross Profit" : "Other") : "Gross Profit")}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
+    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='6'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are based on gross profit and are recorded separately from cash payments and operating expenses.</p></body></html>`;
     try {
       const file = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: `${selected.name} statement` });
@@ -121,6 +127,7 @@ export default function Partners() {
   const editTransaction = (row: PartnerTx) => {
     setEditingTx(row);
     setKind(row.kind);
+    setSource(row.source ?? "other");
     setAmount(String(row.amount));
     setDate(row.transaction_date);
     setNote(row.note ?? "");
@@ -168,10 +175,12 @@ export default function Partners() {
           <View style={styles.sectionHead}>
             <View><Text style={styles.sectionTitle}>{selected.name} statement</Text><Text style={styles.muted}>Date-wise account activity</Text></View>
             <View style={{ flexDirection: "row", gap: 7 }}><Pressable style={styles.exportSmall} onPress={exportStatement}><MaterialDesignIcons name="file-pdf-box" size={17} color={colors.brandPrimary} /><Text style={styles.exportText}>PDF</Text></Pressable>
-            <Pressable style={styles.primarySmall} onPress={() => { setEditingTx(null); setKind("cash_in"); setAmount(""); setDate(todayIsoDate()); setNote(""); setTxModal(true); }}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Entry</Text></Pressable></View>
+            <Pressable style={styles.primarySmall} onPress={() => { setEditingTx(null); setKind("cash_in"); setSource("other"); setAmount(""); setDate(todayIsoDate()); setNote(""); setTxModal(true); }}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Entry</Text></Pressable></View>
           </View>
           <View style={styles.accountCard}>
             <Text style={styles.cardEyebrow}>CURRENT PARTNER ACCOUNT</Text>
+            <Text style={styles.summaryLabel}>Cash In</Text><View style={styles.summaryRow}><Text style={styles.muted}>Gross Profit</Text><Text style={styles.availableValue}>{money(cashInGross)}</Text></View><View style={styles.summaryRow}><Text style={styles.muted}>Other</Text><Text style={styles.availableValue}>{money(cashInOther)}</Text></View>
+            <Text style={styles.summaryLabel}>Cash Out</Text><View style={styles.summaryRow}><Text style={styles.muted}>Gross Profit</Text><Text style={styles.summaryValue}>{money(cashOutGross)}</Text></View><View style={styles.summaryRow}><Text style={styles.muted}>Other</Text><Text style={styles.summaryValue}>{money(cashOutOther)}</Text></View>
             <Text style={styles.profitValue}>{money(selected.balance ?? 0)}</Text>
             <Text style={styles.helper}>Positive balance means the business owes this partner. Negative balance means the partner has withdrawn more than their recorded contributions and allocations.</Text>
           </View>
@@ -180,7 +189,7 @@ export default function Partners() {
             return <View key={row.id} style={styles.txRow}>
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.txTitle}>{txLabel(row.kind)}</Text>
-                <Text style={styles.muted}>{row.transaction_date} · {row.note || "No description"}</Text><Text style={styles.muted}>Running balance: {money(row.running_balance)}</Text>
+                <Text style={styles.muted}>{row.transaction_date} · {row.note || "No description"}</Text>{(row.kind === "cash_in" || row.kind === "cash_out") ? <Text style={styles.sourceText}>Source: {row.source === "gross_profit" ? "Gross Profit" : "Other"}</Text> : null}<Text style={styles.muted}>Running balance: {money(row.running_balance)}</Text>
                 {row.pending ? <Text style={styles.pending}>Waiting to sync</Text> : null}
               </View>
               <View style={{ alignItems: "flex-end", gap: 5 }}>
@@ -210,6 +219,7 @@ export default function Partners() {
           <Text style={styles.fieldLabel}>Transaction type</Text>
           <View style={styles.typeGrid}>{TX_TYPES.map((item) => <Pressable key={item.key} onPress={() => setKind(item.key)} style={[styles.typeOption, kind === item.key && styles.typeSelected]}><Text style={[styles.typeText, kind === item.key && styles.typeTextSelected]}>{item.label}</Text></Pressable>)}</View>
           <Text style={styles.helper}>{TX_TYPES.find((item) => item.key === kind)?.detail}</Text>
+          {(kind === "cash_in" || kind === "cash_out") && <><Text style={styles.fieldLabel}>Cash source</Text><View style={styles.typeGrid}>{[{ key: "gross_profit", label: "Gross Profit" }, { key: "other", label: "Other" }].map((item) => <Pressable key={item.key} onPress={() => setSource(item.key)} style={[styles.typeOption, source === item.key && styles.typeSelected]}><Text style={[styles.typeText, source === item.key && styles.typeTextSelected]}>{item.label}</Text></Pressable>)}</View></>}
           <TextInput style={styles.input} placeholder="Amount *" placeholderTextColor={colors.muted} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
           <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} />
           <TextInput style={[styles.input, styles.noteInput]} placeholder="Description / reference" placeholderTextColor={colors.muted} value={note} onChangeText={setNote} multiline />
@@ -247,6 +257,7 @@ const useStyles = makeStyles((colors) => ({
   empty: { padding: 24, alignItems: "center", backgroundColor: colors.surfaceSecondary, borderRadius: 14 },
   txRow: { flexDirection: "row", alignItems: "center", padding: 13, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, gap: 10 },
   txTitle: { color: colors.onSurface, fontSize: 13, fontWeight: "800" },
+  sourceText: { color: colors.brandPrimary, fontSize: 11, fontWeight: "700" },
   txAmount: { fontSize: 14, fontWeight: "900" },
   deleteText: { color: colors.error, fontSize: 11, fontWeight: "700" },
   editText: { color: colors.brandPrimary, fontSize: 11, fontWeight: "700" },
