@@ -376,6 +376,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
     } else if (method === "DELETE" && id) {
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).filter((p) => p.id !== id));
+      queryClient.setQueryData<any[]>(["partner-transactions"], (old) => (old ?? []).filter((row) => String(row.partner_id) !== id));
     }
   } else if (entity === "partner-transactions") {
     if (method === "POST") {
