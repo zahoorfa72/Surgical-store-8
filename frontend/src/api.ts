@@ -363,6 +363,15 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     if (method === "POST") {
       const rec = { id: tempId, ...body, created_at: now(), balance: Number(body.opening_balance ?? 0), pending: true };
       queryClient.setQueryData<any[]>(["partners"], (old) => [rec, ...(old ?? [])]);
+      const opening = Number(body.opening_balance ?? 0);
+      if (opening) {
+        const openingRow = {
+          id: `${tempId}-opening`, partner_id: tempId, partner_name: body.name,
+          kind: opening > 0 ? "cash_in" : "cash_out", amount: Math.abs(opening),
+          transaction_date: todayIsoDate(), note: "Opening balance", created_at: now(), pending: true,
+        };
+        queryClient.setQueryData<any[]>(["partner-transactions"], (old) => [openingRow, ...(old ?? [])]);
+      }
     } else if (method === "PUT" && id) {
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === id ? { ...p, ...body, pending: true } : p));
     } else if (method === "DELETE" && id) {
