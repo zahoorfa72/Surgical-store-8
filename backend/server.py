@@ -4639,6 +4639,40 @@ async def create_partner_transaction(body: PartnerTransactionIn, user: AdminOnly
     return _partner_tx_public(doc)
 
 
+@api.put("/partner-transactions/{transaction_id}")
+async def update_partner_transaction(transaction_id: str, body: PartnerTransactionIn, user: AdminOnly):
+    if not ObjectId.is_valid(transaction_id):
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    existing = await db["partner_transactions"].find_one({"_id": ObjectId(transaction_id), "deleted": {"$ne": True}})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not ObjectId.is_valid(body.partner_id):
+        raise HTTPException(status_code=404, detail="Partner not found")
+    partner = await db["partners"].find_one({"_id": ObjectId(body.partner_id), "deleted": {"$ne": True}})
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    if body.kind == "profit_allocation":
+        gross_profit = await _gross_profit_lifetime()
+        rows = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(100000)
+        allocated_other = sum(float(row.get("amount", 0) or 0) for row in rows if oid(row["_id"]) != transaction_id)
+        available = round(gross_profit - allocated_other, 2)
+        if body.amount > available + 0.005:
+            raise HTTPException(status_code=400, detail=f"Allocation exceeds available gross profit ({available:.2f}).")
+    if body.kind == "profit_payment":
+        rows = await db["partner_transactions"].find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
+        allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation")
+        paid_other = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment" and oid(row["_id"]) != transaction_id)
+        if body.amount > allocated - paid_other + 0.005:
+            raise HTTPException(status_code=400, detail=f"Payment exceeds unpaid allocated profit ({max(0, allocated-paid_other):.2f}).")
+    update = body.model_dump()
+    update["partner_name"] = partner.get("name", "")
+    update["transaction_date"] = normalize_transaction_date(body.transaction_date, existing.get("transaction_date") or existing.get("created_at"))
+    update["user_name"] = user.get("name", user.get("email", ""))
+    update["edited_at"] = now_iso()
+    await db["partner_transactions"].update_one({"_id": ObjectId(transaction_id)}, {"$set": update})
+    return _partner_tx_public(await db["partner_transactions"].find_one({"_id": ObjectId(transaction_id)}))
+
+
 @api.delete("/partner-transactions/{transaction_id}")
 async def delete_partner_transaction(transaction_id: str, _: AdminOnly):
     if not ObjectId.is_valid(transaction_id):
