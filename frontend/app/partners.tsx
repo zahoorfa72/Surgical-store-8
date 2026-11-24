@@ -14,7 +14,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 
 type Partner = { id: string; name: string; phone?: string; address?: string; note?: string; balance: number; pending?: boolean };
 type PartnerTx = { id: string; partner_id: string; partner_name: string; kind: string; source?: string; amount: number; transaction_date: string; note: string; created_at?: string; user_name?: string; pending?: boolean };
-type PartnerSummary = { gross_profit: number; allocated_profit: number; available_gross_profit: number; partners: Partner[] };
+type PartnerSummary = { gross_profit: number; profit_after_business_expenses: number; allocated_profit: number; available_gross_profit: number; partners: Partner[] };
 
 const TX_TYPES = [
   { key: "cash_in", label: "Cash In", detail: "Partner adds money to the business" },
@@ -151,8 +151,8 @@ export default function Partners() {
       <ScreenHeader title="Partner accounts" subtitle="Gross-profit allocations and partner ledger" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32, gap: 14 }}>
         <View style={styles.profitCard}>
-          <Text style={styles.cardEyebrow}>BUSINESS GROSS PROFIT · ALL TIME</Text>
-          <Text style={styles.profitValue}>{money(totals?.gross_profit ?? 0)}</Text>
+          <Text style={styles.cardEyebrow}>BUSINESS AMOUNT · ALL TIME</Text>
+          <Text style={styles.profitValue}>{money(totals?.profit_after_business_expenses ?? 0)}</Text>
           <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Allocated to partners</Text><Text style={styles.summaryValue}>{money(totals?.allocated_profit ?? 0)}</Text></View>
           <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Available for allocation</Text><Text style={styles.availableValue}>{money(totals?.available_gross_profit ?? 0)}</Text></View>
           <Text style={styles.helper}>Profit allocation is based on lifetime gross profit after sales returns. It is not recorded as an operating expense and does not change gross profit.</Text>

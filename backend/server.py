@@ -4589,11 +4589,23 @@ async def update_partner(partner_id: str, body: PartnerIn, _: AdminOnly):
 @api.get("/partners/summary")
 async def partner_summary(_: AdminOnly):
     gross_profit = await _gross_profit_lifetime()
+    # The headline amount is gross profit less all recorded business expenses.
+    # COGS and operating expenses are business expenses; personal expenses are
+    # excluded. Partner allocation availability intentionally remains based on
+    # gross profit, preserving the existing allocation rules.
+    expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(100000)
+    business_expenses = sum(
+        float(row.get("amount", 0) or 0)
+        for row in expenses
+        if row.get("bucket", "operating") in ("cogs", "operating")
+    )
+    profit_after_business_expenses = round(gross_profit - business_expenses, 2)
     txs = await db["partner_transactions"].find({"deleted": {"$ne": True}}).to_list(100000)
     allocated = sum(float(row.get("amount", 0) or 0) for row in txs if row.get("kind") == "profit_allocation")
     partners = await list_partners(_)
     return {
         "gross_profit": gross_profit,
+        "profit_after_business_expenses": profit_after_business_expenses,
         "allocated_profit": round(allocated, 2),
         "available_gross_profit": round(gross_profit - allocated, 2),
         "partners": partners,
