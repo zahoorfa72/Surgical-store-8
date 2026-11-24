@@ -155,11 +155,11 @@ export default function Partners() {
       <ScreenHeader title="Partner accounts" subtitle="Net-profit allocations and partner ledger" topInset={insets.top} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32, gap: 14 }}>
         <View style={styles.profitCard}>
-          <Text style={styles.cardEyebrow}>NET PROFIT · ALL TIME</Text>
+          <Text style={styles.cardEyebrow}>BUSINESS NET PROFIT · ALL TIME</Text>
           <Text style={styles.profitValue}>{money(totals?.net_profit ?? 0)}</Text>
           <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Allocated to partners</Text><Text style={styles.summaryValue}>{money(totals?.allocated_profit ?? 0)}</Text></View>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Available for allocation</Text><Text style={styles.availableValue}>{money(totals?.available_net_profit ?? 0)}</Text></View>
-          <Text style={styles.helper}>Partner allocations are deducted from lifetime Net Profit. Allocations reduce the amount remaining available to allocate.</Text>
+          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Remaining business net profit</Text><Text style={styles.availableValue}>{money(totals?.available_net_profit ?? 0)}</Text></View>
+          <Text style={styles.helper}>Every partner profit allocation is deducted from the business's available net profit. Editing or deleting an allocation recalculates the remaining amount.</Text>
         </View>
 
         <View style={styles.sectionHead}>
@@ -189,7 +189,7 @@ export default function Partners() {
             <Text style={styles.profitValue}>{money(selected.balance ?? 0)}</Text>
             <Text style={styles.helper}>Positive balance means the business owes this partner. Negative balance means the partner has withdrawn more than their recorded contributions and allocations.</Text>
           </View>
-          {statementWithBalance.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No transactions for this partner.</Text></View> : statementWithBalance.map((row) => {
+          {txQuery.isLoading ? <View style={styles.empty}><Text style={styles.muted}>Loading partner transactions…</Text></View> : txQuery.isError ? <View style={styles.empty}><Text style={styles.muted}>Could not load this partner's transactions. Check your connection and try again.</Text><Pressable onPress={() => txQuery.refetch()}><Text style={styles.editText}>Retry</Text></Pressable></View> : statementWithBalance.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No transaction entries were returned for this partner. The account balance is {money(selected.balance ?? 0)}; check legacy or pending-sync entries before adding a duplicate opening balance.</Text></View> : statementWithBalance.map((row) => {
             const positive = txEffect(row.kind, row.amount) >= 0;
             return <View key={row.id} style={styles.txRow}>
               <View style={{ flex: 1, gap: 4 }}>

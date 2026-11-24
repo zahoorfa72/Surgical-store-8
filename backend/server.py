@@ -4512,7 +4512,7 @@ def _partner_public(row: dict, balance: float = 0.0) -> dict:
 
 def _partner_tx_public(row: dict) -> dict:
     return {
-        "id": oid(row["_id"]), "partner_id": row.get("partner_id", ""),
+        "id": oid(row["_id"]), "partner_id": str(row.get("partner_id", "") or ""),
         "partner_name": row.get("partner_name", ""), "kind": row.get("kind", ""),
         "source": row.get("source", "other"),
         "amount": round(float(row.get("amount", 0) or 0), 2),
@@ -4533,7 +4533,13 @@ async def _gross_profit_lifetime() -> float:
 async def _partner_totals(partner_id: Optional[str] = None) -> dict:
     query = {"deleted": {"$ne": True}}
     if partner_id:
-        query["partner_id"] = partner_id
+        # Older records may have stored partner_id as a BSON ObjectId while
+        # newer records store it as a string. Include both representations so
+        # balances and the detailed ledger use the same complete history.
+        if ObjectId.is_valid(partner_id):
+            query["$or"] = [{"partner_id": partner_id}, {"partner_id": ObjectId(partner_id)}]
+        else:
+            query["partner_id"] = partner_id
     rows = await db["partner_transactions"].find(query).to_list(None)
     totals = {"cash_in": 0.0, "cash_out": 0.0, "profit_allocation": 0.0, "profit_payment": 0.0}
     for row in rows:
@@ -4624,7 +4630,11 @@ async def partner_summary(_: AdminOnly):
 async def list_partner_transactions(_: AdminOnly, partner_id: Optional[str] = None):
     query = {"deleted": {"$ne": True}}
     if partner_id:
-        query["partner_id"] = partner_id
+        # Match legacy ObjectId references as well as current string references.
+        if ObjectId.is_valid(partner_id):
+            query["$or"] = [{"partner_id": partner_id}, {"partner_id": ObjectId(partner_id)}]
+        else:
+            query["partner_id"] = partner_id
     rows = await db["partner_transactions"].find(query).sort([("transaction_date", -1), ("created_at", -1)]).to_list(None)
     return [_partner_tx_public(row) for row in rows]
 
