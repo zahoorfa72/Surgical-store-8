@@ -1689,18 +1689,28 @@ function getCachedUpdatedAt(path: string): string | undefined {
   return found?.updated_at ? String(found.updated_at) : undefined;
 }
 
+function cachedPartnerTransactions(): any[] {
+  const cached = queryClient.getQueriesData<any[]>({ queryKey: ["partner-transactions"] });
+  const unique = new Map<string, any>();
+  for (const [, rows] of cached) {
+    for (const row of rows ?? []) unique.set(String(row.id), row);
+  }
+  return [...unique.values()];
+}
+
 function localCacheForPath(path: string): any {
   const route = path.split("?")[0];
   if (route === "/partners") return queryClient.getQueryData(["partners"]);
   if (route === "/partner-transactions") {
-    const rows = queryClient.getQueryData<any[]>(["partner-transactions"]);
-    if (rows === undefined) return undefined;
+    const cachedRows = cachedPartnerTransactions();
+    if (!cachedRows.length && queryClient.getQueriesData({ queryKey: ["partner-transactions"] }).length === 0) return undefined;
+    const rows = cachedRows;
     const partnerId = new URLSearchParams(path.split("?")[1] ?? "").get("partner_id");
     return partnerId ? rows.filter((row) => String(row.partner_id) === partnerId) : rows;
   }
   if (route === "/partners/summary") {
     const partners = queryClient.getQueryData<any[]>(["partners"]) ?? [];
-    const transactions = (queryClient.getQueryData<any[]>(["partner-transactions"]) ?? []).filter((row) => !row.deleted);
+    const transactions = cachedPartnerTransactions().filter((row) => !row.deleted);
     const sales = (queryClient.getQueryData<any[]>(["sales"]) ?? []).filter((row) => !row.deleted);
     const returns = (queryClient.getQueryData<any[]>(["returns"]) ?? []).filter((row) => !row.deleted);
     const expenses = (queryClient.getQueryData<any[]>(["expenses", "all"]) ?? []).filter((row) => !row.deleted);
