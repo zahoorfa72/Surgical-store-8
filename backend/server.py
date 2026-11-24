@@ -4660,7 +4660,7 @@ async def update_partner_transaction(transaction_id: str, body: PartnerTransacti
             raise HTTPException(status_code=400, detail=f"Allocation exceeds available gross profit ({available:.2f}).")
     if body.kind == "profit_payment":
         rows = await db["partner_transactions"].find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
-        allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation")
+        allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation" and oid(row["_id"]) != transaction_id)
         paid_other = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment" and oid(row["_id"]) != transaction_id)
         if body.amount > allocated - paid_other + 0.005:
             raise HTTPException(status_code=400, detail=f"Payment exceeds unpaid allocated profit ({max(0, allocated-paid_other):.2f}).")
