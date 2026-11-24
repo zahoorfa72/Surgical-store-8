@@ -178,7 +178,7 @@ export default function Partners() {
   };
 
   const deleteTransaction = (row: PartnerTx) => {
-    Alert.alert("Delete transaction?", `Delete this ${txLabel(row.kind).toLowerCase()} entry of ${money(row.amount)}? The partner balance and available business net profit will be recalculated.`, [
+    Alert.alert("Delete transaction?", `Delete this ${txLabel(row.kind).toLowerCase()} entry of ${money(row.amount)}? The partner balance and available business net profit will be recalculated. If this is a profit allocation, any newer profit payments that are no longer covered by the remaining allocations will also be removed.`, [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
         try {
