@@ -42,6 +42,7 @@ export default function Partners() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [partnerModal, setPartnerModal] = useState(false);
   const [txModal, setTxModal] = useState(false);
+  const [editingTx, setEditingTx] = useState<PartnerTx | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -97,8 +98,8 @@ export default function Partners() {
     if (!Number.isFinite(value) || value <= 0) return toast("Enter a valid amount", "error");
     setBusy(true);
     try {
-      await apiRequest("/partner-transactions", { method: "POST", body: { partner_id: selected.id, kind, amount: value, transaction_date: date, note: note.trim() } });
-      setTxModal(false); setAmount(""); setNote(""); setDate(todayIsoDate());
+      await apiRequest(editingTx ? `/partner-transactions/${editingTx.id}` : "/partner-transactions", { method: editingTx ? "PUT" : "POST", body: { partner_id: selected.id, kind, amount: value, transaction_date: date, note: note.trim() } });
+      setTxModal(false); setEditingTx(null); setAmount(""); setNote(""); setDate(todayIsoDate());
       await reload();
       toast("Partner transaction saved", "success");
     } catch (e: any) { toast(e?.message || "Could not save transaction", "error"); }
@@ -115,6 +116,15 @@ export default function Partners() {
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: `${selected.name} statement` });
       else toast(`PDF created at ${file.uri}`, "success");
     } catch (e: any) { toast(e?.message || "Could not export statement", "error"); }
+  };
+
+  const editTransaction = (row: PartnerTx) => {
+    setEditingTx(row);
+    setKind(row.kind);
+    setAmount(String(row.amount));
+    setDate(row.transaction_date);
+    setNote(row.note ?? "");
+    setTxModal(true);
   };
 
   const deleteTransaction = async (row: PartnerTx) => {
@@ -175,7 +185,7 @@ export default function Partners() {
               </View>
               <View style={{ alignItems: "flex-end", gap: 5 }}>
                 <Text style={[styles.txAmount, { color: positive ? colors.success : colors.error }]}>{positive ? "+" : "−"}{money(row.amount)}</Text>
-                <Pressable onPress={() => deleteTransaction(row)} hitSlop={8}><Text style={styles.deleteText}>Delete</Text></Pressable>
+                <View style={{ flexDirection: "row", gap: 10 }}><Pressable onPress={() => editTransaction(row)} hitSlop={8}><Text style={styles.editText}>Edit</Text></Pressable><Pressable onPress={() => deleteTransaction(row)} hitSlop={8}><Text style={styles.deleteText}>Delete</Text></Pressable></View>
               </View>
             </View>;
           })}
@@ -196,14 +206,14 @@ export default function Partners() {
 
       <Modal visible={txModal} transparent animationType="slide" onRequestClose={() => setTxModal(false)}>
         <View style={styles.scrim}><View style={styles.modal}>
-          <Text style={styles.modalTitle}>New entry · {selected?.name}</Text>
+          <Text style={styles.modalTitle}>{editingTx ? "Edit entry" : "New entry"} · {selected?.name}</Text>
           <Text style={styles.fieldLabel}>Transaction type</Text>
           <View style={styles.typeGrid}>{TX_TYPES.map((item) => <Pressable key={item.key} onPress={() => setKind(item.key)} style={[styles.typeOption, kind === item.key && styles.typeSelected]}><Text style={[styles.typeText, kind === item.key && styles.typeTextSelected]}>{item.label}</Text></Pressable>)}</View>
           <Text style={styles.helper}>{TX_TYPES.find((item) => item.key === kind)?.detail}</Text>
           <TextInput style={styles.input} placeholder="Amount *" placeholderTextColor={colors.muted} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
           <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} />
           <TextInput style={[styles.input, styles.noteInput]} placeholder="Description / reference" placeholderTextColor={colors.muted} value={note} onChangeText={setNote} multiline />
-          <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => setTxModal(false)}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={saveTransaction}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : "Save entry"}</Text></Pressable></View>
+          <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => setTxModal(false)}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={saveTransaction}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : editingTx ? "Update entry" : "Save entry"}</Text></Pressable></View>
         </View></View>
       </Modal>
     </View>
@@ -239,6 +249,7 @@ const useStyles = makeStyles((colors) => ({
   txTitle: { color: colors.onSurface, fontSize: 13, fontWeight: "800" },
   txAmount: { fontSize: 14, fontWeight: "900" },
   deleteText: { color: colors.error, fontSize: 11, fontWeight: "700" },
+  editText: { color: colors.brandPrimary, fontSize: 11, fontWeight: "700" },
   pending: { color: colors.warning, fontSize: 10, fontWeight: "700" },
   scrim: { flex: 1, backgroundColor: "rgba(0,0,0,0.48)", justifyContent: "center", padding: 18 },
   modal: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, gap: 11 },
