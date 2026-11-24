@@ -57,11 +57,15 @@ export default function Partners() {
 
   const summaryQuery = useQuery({ queryKey: ["partners/summary"], queryFn: () => apiRequest<PartnerSummary>("/partners/summary"), enabled: admin });
   const partnersQuery = useQuery({ queryKey: ["partners"], queryFn: () => apiRequest<Partner[]>("/partners"), enabled: admin });
-  const txQuery = useQuery({ queryKey: ["partner-transactions"], queryFn: () => apiRequest<PartnerTx[]>("/partner-transactions"), enabled: admin });
   const partners = partnersQuery.data ?? summaryQuery.data?.partners ?? [];
+  const selected = partners.find((p) => p.id === selectedId) ?? null;
+  const txQuery = useQuery({
+    queryKey: ["partner-transactions", selectedId],
+    queryFn: () => apiRequest<PartnerTx[]>(`/partner-transactions?partner_id=${encodeURIComponent(selectedId as string)}`),
+    enabled: admin && !!selectedId && !!selected,
+  });
   const transactions = txQuery.data ?? [];
-  const selected = partners.find((p) => p.id === selectedId) ?? partners[0] ?? null;
-  const statement = useMemo(() => transactions.filter((row) => !selected || row.partner_id === selected.id), [transactions, selected?.id]);
+  const statement = useMemo(() => selected ? transactions.filter((row) => row.partner_id === selected.id) : [], [transactions, selected?.id]);
   const statementWithBalance = useMemo(() => {
     let running = 0;
     return [...statement].sort((a, b) => String(a.transaction_date).localeCompare(String(b.transaction_date)) || String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).map((row) => {
@@ -164,13 +168,14 @@ export default function Partners() {
         </View>
         {partners.length === 0 ? <View style={styles.empty}><Text style={styles.muted}>No partners added yet.</Text></View> : partners.map((p) => {
           const active = selected?.id === p.id;
-          return <Pressable key={p.id} onPress={() => setSelectedId(p.id)} style={[styles.partnerRow, active && styles.partnerActive]}>
+          return <Pressable key={p.id} onPress={() => setSelectedId(active ? null : p.id)} style={[styles.partnerRow, active && styles.partnerActive]}>
             <View style={styles.avatar}><MaterialDesignIcons name="account" size={22} color={colors.brandPrimary} /></View>
             <View style={{ flex: 1, gap: 3 }}><Text style={styles.partnerName}>{p.name}</Text><Text style={styles.muted}>{p.phone || "No phone number"}</Text></View>
             <View style={{ alignItems: "flex-end", gap: 3 }}><Text style={styles.balance}>{money(p.balance ?? 0)}</Text><Text style={styles.muted}>Account balance</Text></View>
           </Pressable>;
         })}
 
+        {!selected && partners.length > 0 && <View style={styles.empty}><Text style={styles.muted}>Select a partner above to view that partner's account balance, cash details and complete transaction history. No partner details are shown until an account is selected.</Text></View>}
         {selected && <>
           <View style={styles.sectionHead}>
             <View><Text style={styles.sectionTitle}>{selected.name} statement</Text><Text style={styles.muted}>Date-wise account activity</Text></View>
