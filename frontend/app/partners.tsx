@@ -70,8 +70,11 @@ export default function Partners() {
     }).reverse();
   }, [statement]);
   const totals = summaryQuery.data;
-  const cashInTotal = statement.reduce((sum, row) => sum + (row.kind === "cash_in" ? Number(row.amount) : 0), 0);
-  const cashOutTotal = statement.reduce((sum, row) => sum + (row.kind === "cash_out" ? Number(row.amount) : 0), 0);
+  const cashTotal = (kind: string, source: string) => statement.reduce((sum, row) => sum + (row.kind === kind && (row.source ?? "other") === source ? Number(row.amount) : 0), 0);
+  const cashInGross = cashTotal("cash_in", "gross_profit");
+  const cashInOther = cashTotal("cash_in", "other");
+  const cashOutGross = cashTotal("cash_out", "gross_profit");
+  const cashOutOther = cashTotal("cash_out", "other");
   const reload = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["partners"] }),
@@ -112,8 +115,8 @@ export default function Partners() {
   const exportStatement = async () => {
     if (!selected) return;
     const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (ch) => { const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }; return entities[ch]; });
-    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
-    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='5'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are based on gross profit and are recorded separately from cash payments and operating expenses.</p></body></html>`;
+    const rows = [...statementWithBalance].reverse().map((row) => `<tr><td>${esc(row.transaction_date)}</td><td>${esc(txLabel(row.kind))}</td><td>${esc((row.kind === "cash_in" || row.kind === "cash_out") ? (row.source === "gross_profit" ? "Gross Profit" : "Other") : "Gross Profit")}</td><td>${esc(row.note)}</td><td style="text-align:right">${Number(row.amount).toFixed(2)}</td><td style="text-align:right">${Number(row.running_balance).toFixed(2)}</td></tr>`).join("");
+    const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial;padding:24px;color:#172033}h1{font-size:22px}p{color:#526078}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d8dee9;padding:8px;text-align:left}th{background:#eef2f7} .total{font-size:18px;font-weight:bold}</style></head><body><h1>Partner Account Statement</h1><p><b>Partner:</b> ${esc(selected.name)}<br><b>Generated:</b> ${esc(todayIsoDate())}</p><p class="total">Current account balance: ${Number(selected.balance ?? 0).toFixed(2)}</p><table><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Description</th><th>Amount</th><th>Running balance</th></tr></thead><tbody>${rows || "<tr><td colspan='6'>No transactions</td></tr>"}</tbody></table><p>Profit allocations are based on gross profit and are recorded separately from cash payments and operating expenses.</p></body></html>`;
     try {
       const file = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: `${selected.name} statement` });
@@ -176,8 +179,8 @@ export default function Partners() {
           </View>
           <View style={styles.accountCard}>
             <Text style={styles.cardEyebrow}>CURRENT PARTNER ACCOUNT</Text>
-            <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total Cash In</Text><Text style={styles.availableValue}>{money(cashInTotal)}</Text></View>
-            <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total Cash Out</Text><Text style={styles.summaryValue}>{money(cashOutTotal)}</Text></View>
+            <Text style={styles.summaryLabel}>Cash In</Text><View style={styles.summaryRow}><Text style={styles.muted}>Gross Profit</Text><Text style={styles.availableValue}>{money(cashInGross)}</Text></View><View style={styles.summaryRow}><Text style={styles.muted}>Other</Text><Text style={styles.availableValue}>{money(cashInOther)}</Text></View>
+            <Text style={styles.summaryLabel}>Cash Out</Text><View style={styles.summaryRow}><Text style={styles.muted}>Gross Profit</Text><Text style={styles.summaryValue}>{money(cashOutGross)}</Text></View><View style={styles.summaryRow}><Text style={styles.muted}>Other</Text><Text style={styles.summaryValue}>{money(cashOutOther)}</Text></View>
             <Text style={styles.profitValue}>{money(selected.balance ?? 0)}</Text>
             <Text style={styles.helper}>Positive balance means the business owes this partner. Negative balance means the partner has withdrawn more than their recorded contributions and allocations.</Text>
           </View>
