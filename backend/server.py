@@ -4625,7 +4625,7 @@ async def list_partner_transactions(_: AdminOnly, partner_id: Optional[str] = No
     query = {"deleted": {"$ne": True}}
     if partner_id:
         query["partner_id"] = partner_id
-    rows = await db["partner_transactions"].find(query).sort("transaction_date", -1).to_list(5000)
+    rows = await db["partner_transactions"].find(query).sort([("transaction_date", -1), ("created_at", -1)]).to_list(100000)
     return [_partner_tx_public(row) for row in rows]
 
 
