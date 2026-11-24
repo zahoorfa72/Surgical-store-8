@@ -4731,10 +4731,14 @@ async def delete_partner(partner_id: str, _: AdminOnly):
     partner = await db["partners"].find_one({"_id": ObjectId(partner_id), "deleted": {"$ne": True}})
     if not partner:
         raise HTTPException(status_code=404, detail="Partner not found")
-    history = await db["partner_transactions"].find({"partner_id": partner_id, "deleted": {"$ne": True}}).to_list(1)
-    if history:
-        raise HTTPException(status_code=400, detail="This partner has account history. Keep the record instead of deleting it.")
-    await db["partners"].update_one({"_id": ObjectId(partner_id)}, {"$set": {"deleted": True}})
+    # Remove the partner and hide all of that partner's ledger entries together.
+    # Soft deletion preserves the audit trail while excluding its allocations
+    # from the active business allocation total and partner balances.
+    await db["partner_transactions"].update_many(
+        {"$or": [{"partner_id": partner_id}, {"partner_id": ObjectId(partner_id)}], "deleted": {"$ne": True}},
+        {"$set": {"deleted": True, "edited_at": now_iso()}},
+    )
+    await db["partners"].update_one({"_id": ObjectId(partner_id)}, {"$set": {"deleted": True, "edited_at": now_iso()}})
     return {"ok": True}
 
 app.include_router(api)
