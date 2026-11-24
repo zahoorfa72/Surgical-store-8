@@ -168,7 +168,7 @@ export default function Partners() {
           <View style={styles.sectionHead}>
             <View><Text style={styles.sectionTitle}>{selected.name} statement</Text><Text style={styles.muted}>Date-wise account activity</Text></View>
             <View style={{ flexDirection: "row", gap: 7 }}><Pressable style={styles.exportSmall} onPress={exportStatement}><MaterialDesignIcons name="file-pdf-box" size={17} color={colors.brandPrimary} /><Text style={styles.exportText}>PDF</Text></Pressable>
-            <Pressable style={styles.primarySmall} onPress={() => setTxModal(true)}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Entry</Text></Pressable></View>
+            <Pressable style={styles.primarySmall} onPress={() => { setEditingTx(null); setKind("cash_in"); setAmount(""); setDate(todayIsoDate()); setNote(""); setTxModal(true); }}><MaterialDesignIcons name="plus" size={17} color="#FFFFFF" /><Text style={styles.primarySmallText}>Entry</Text></Pressable></View>
           </View>
           <View style={styles.accountCard}>
             <Text style={styles.cardEyebrow}>CURRENT PARTNER ACCOUNT</Text>
@@ -204,7 +204,7 @@ export default function Partners() {
         </View></View>
       </Modal>
 
-      <Modal visible={txModal} transparent animationType="slide" onRequestClose={() => setTxModal(false)}>
+      <Modal visible={txModal} transparent animationType="slide" onRequestClose={() => { setTxModal(false); setEditingTx(null); }}>
         <View style={styles.scrim}><View style={styles.modal}>
           <Text style={styles.modalTitle}>{editingTx ? "Edit entry" : "New entry"} · {selected?.name}</Text>
           <Text style={styles.fieldLabel}>Transaction type</Text>
@@ -213,7 +213,7 @@ export default function Partners() {
           <TextInput style={styles.input} placeholder="Amount *" placeholderTextColor={colors.muted} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
           <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} />
           <TextInput style={[styles.input, styles.noteInput]} placeholder="Description / reference" placeholderTextColor={colors.muted} value={note} onChangeText={setNote} multiline />
-          <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => setTxModal(false)}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={saveTransaction}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : editingTx ? "Update entry" : "Save entry"}</Text></Pressable></View>
+          <View style={styles.modalActions}><Pressable style={styles.secondaryButton} onPress={() => { setTxModal(false); setEditingTx(null); }}><Text style={styles.secondaryText}>Cancel</Text></Pressable><Pressable disabled={busy} style={styles.primaryButton} onPress={saveTransaction}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : editingTx ? "Update entry" : "Save entry"}</Text></Pressable></View>
         </View></View>
       </Modal>
     </View>
