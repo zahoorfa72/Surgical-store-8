@@ -1452,6 +1452,17 @@ async function queueWrite(method: string, path: string, body: any, expectedUpdat
         queue[postIndex] = { ...queue[postIndex], body: { ...(queue[postIndex].body ?? {}), ...(body ?? {}) } };
       } else if (method === "DELETE") {
         queue.splice(postIndex, 1);
+        // If an unsynced partner is removed, also cancel its queued ledger
+        // entries. Otherwise they would replay with a partner ID that was
+        // deliberately never created on the server.
+        if (entityOf(path) === "partners") {
+          for (let index = queue.length - 1; index >= 0; index--) {
+            const op = queue[index];
+            if (entityOf(op.path) === "partner-transactions" && String(op.body?.partner_id ?? "") === targetId) {
+              queue.splice(index, 1);
+            }
+          }
+        }
       }
       await setWriteQueue(queue);
       await persistLiveCache();
