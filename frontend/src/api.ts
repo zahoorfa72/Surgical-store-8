@@ -1658,6 +1658,12 @@ export async function apiRequest<T = any>(
     return result;
   } catch (e) {
     if (e instanceof ApiError) throw e;
+    // Partner account screens are usable without a server connection when
+    // their previously synchronized local ledger is available.
+    if (method === "GET" && (path.startsWith("/partners") || path.startsWith("/partner-transactions"))) {
+      const local = localCacheForPath(path);
+      if (local !== undefined) return local as T;
+    }
     if (method !== "GET" && isQueueable(path)) {
       const queued = await queueWrite(method, path, options.body, expectedUpdatedAt);
       await recordLocalAudit(method, path, undefined, options.body);
