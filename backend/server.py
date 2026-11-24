@@ -4480,6 +4480,178 @@ async def root():
     return {"app": "Surgical Store Manager", "status": "ok"}
 
 
+
+# ---------------------------------------------------------------------------
+# Partner accounts and gross-profit allocations
+# ---------------------------------------------------------------------------
+class PartnerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    phone: str = Field(default="", max_length=40)
+    address: str = Field(default="", max_length=300)
+    note: str = Field(default="", max_length=500)
+
+
+class PartnerTransactionIn(BaseModel):
+    partner_id: str
+    kind: str = Field(pattern="^(cash_in|cash_out|profit_allocation|profit_payment)$")
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    transaction_date: Optional[str] = None
+    note: str = Field(default="", max_length=500)
+
+
+def _partner_public(row: dict, balance: float = 0.0) -> dict:
+    return {
+        "id": oid(row["_id"]), "name": row.get("name", ""),
+        "phone": row.get("phone", ""), "address": row.get("address", ""),
+        "note": row.get("note", ""), "created_at": row.get("created_at"),
+        "balance": round(float(balance), 2),
+    }
+
+
+def _partner_tx_public(row: dict) -> dict:
+    return {
+        "id": oid(row["_id"]), "partner_id": row.get("partner_id", ""),
+        "partner_name": row.get("partner_name", ""), "kind": row.get("kind", ""),
+        "amount": round(float(row.get("amount", 0) or 0), 2),
+        "transaction_date": str(row.get("transaction_date") or row.get("created_at") or "")[:10],
+        "note": row.get("note", ""), "user_name": row.get("user_name", ""),
+        "created_at": row.get("created_at"),
+    }
+
+
+async def _gross_profit_lifetime() -> float:
+    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(100000)
+    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(100000)
+    sold_profit = sum(float(row.get("profit", 0) or 0) for row in sales)
+    returned_profit = sum(float(row.get("refund_profit", 0) or 0) for row in returns)
+    return round(sold_profit - returned_profit, 2)
+
+
+async def _partner_totals(partner_id: Optional[str] = None) -> dict:
+    query = {"deleted": {"$ne": True}}
+    if partner_id:
+        query["partner_id"] = partner_id
+    rows = await db.partner_transactions.find(query).to_list(100000)
+    totals = {"cash_in": 0.0, "cash_out": 0.0, "profit_allocation": 0.0, "profit_payment": 0.0}
+    for row in rows:
+        kind = row.get("kind")
+        if kind in totals:
+            totals[kind] += float(row.get("amount", 0) or 0)
+    totals["balance"] = round(totals["cash_in"] + totals["profit_allocation"] - totals["cash_out"] - totals["profit_payment"], 2)
+    return totals
+
+
+@api.get("/partners")
+async def list_partners(_: AdminOnly):
+    partners = await db.partners.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(1000)
+    result = []
+    for partner in partners:
+        totals = await _partner_totals(oid(partner["_id"]))
+        result.append(_partner_public(partner, totals["balance"]))
+    return result
+
+
+@api.post("/partners", status_code=201)
+async def create_partner(body: PartnerIn, user: AdminOnly):
+    doc = body.model_dump()
+    doc.update({"deleted": False, "created_at": now_iso(), "created_by": user.get("name", user.get("email", ""))})
+    result = await db.partners.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return _partner_public(doc)
+
+
+@api.put("/partners/{partner_id}")
+async def update_partner(partner_id: str, body: PartnerIn, _: AdminOnly):
+    if not ObjectId.is_valid(partner_id):
+        raise HTTPException(status_code=404, detail="Partner not found")
+    existing = await db.partners.find_one({"_id": ObjectId(partner_id), "deleted": {"$ne": True}})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    await db.partners.update_one({"_id": ObjectId(partner_id)}, {"$set": {**body.model_dump(), "edited_at": now_iso()}})
+    updated = await db.partners.find_one({"_id": ObjectId(partner_id)})
+    totals = await _partner_totals(partner_id)
+    return _partner_public(updated, totals["balance"])
+
+
+@api.get("/partners/summary")
+async def partner_summary(_: AdminOnly):
+    gross_profit = await _gross_profit_lifetime()
+    txs = await db.partner_transactions.find({"deleted": {"$ne": True}}).to_list(100000)
+    allocated = sum(float(row.get("amount", 0) or 0) for row in txs if row.get("kind") == "profit_allocation")
+    partners = await list_partners(_)
+    return {
+        "gross_profit": gross_profit,
+        "allocated_profit": round(allocated, 2),
+        "available_gross_profit": round(gross_profit - allocated, 2),
+        "partners": partners,
+    }
+
+
+@api.get("/partner-transactions")
+async def list_partner_transactions(_: AdminOnly, partner_id: Optional[str] = None):
+    query = {"deleted": {"$ne": True}}
+    if partner_id:
+        query["partner_id"] = partner_id
+    rows = await db.partner_transactions.find(query).sort("transaction_date", -1).to_list(5000)
+    return [_partner_tx_public(row) for row in rows]
+
+
+@api.post("/partner-transactions", status_code=201)
+async def create_partner_transaction(body: PartnerTransactionIn, user: AdminOnly):
+    if not ObjectId.is_valid(body.partner_id):
+        raise HTTPException(status_code=404, detail="Partner not found")
+    partner = await db.partners.find_one({"_id": ObjectId(body.partner_id), "deleted": {"$ne": True}})
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    if body.kind == "profit_allocation":
+        gross_profit = await _gross_profit_lifetime()
+        existing = await db.partner_transactions.find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(100000)
+        allocated = sum(float(row.get("amount", 0) or 0) for row in existing)
+        available = round(gross_profit - allocated, 2)
+        if body.amount > available + 0.005:
+            raise HTTPException(status_code=400, detail=f"Allocation exceeds available gross profit ({available:.2f}).")
+    if body.kind == "profit_payment":
+        rows = await db.partner_transactions.find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
+        allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation")
+        paid = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment")
+        if body.amount > allocated - paid + 0.005:
+            raise HTTPException(status_code=400, detail=f"Payment exceeds unpaid allocated profit ({max(0, allocated-paid):.2f}).")
+    created_at = now_iso()
+    doc = body.model_dump()
+    doc["transaction_date"] = normalize_transaction_date(body.transaction_date, created_at)
+    doc.update({
+        "partner_name": partner.get("name", ""), "user_name": user.get("name", user.get("email", "")),
+        "created_at": created_at, "deleted": False,
+    })
+    result = await db.partner_transactions.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return _partner_tx_public(doc)
+
+
+@api.delete("/partner-transactions/{transaction_id}")
+async def delete_partner_transaction(transaction_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(transaction_id):
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    row = await db.partner_transactions.find_one({"_id": ObjectId(transaction_id), "deleted": {"$ne": True}})
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    await db.partner_transactions.update_one({"_id": ObjectId(transaction_id)}, {"$set": {"deleted": True, "edited_at": now_iso()}})
+    return {"ok": True}
+
+
+@api.delete("/partners/{partner_id}")
+async def delete_partner(partner_id: str, _: AdminOnly):
+    if not ObjectId.is_valid(partner_id):
+        raise HTTPException(status_code=404, detail="Partner not found")
+    partner = await db.partners.find_one({"_id": ObjectId(partner_id), "deleted": {"$ne": True}})
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    history = await db.partner_transactions.find({"partner_id": partner_id, "deleted": {"$ne": True}}).to_list(1)
+    if history:
+        raise HTTPException(status_code=400, detail="This partner has account history. Keep the record instead of deleting it.")
+    await db.partners.update_one({"_id": ObjectId(partner_id)}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
 app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
