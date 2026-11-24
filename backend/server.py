@@ -4586,28 +4586,36 @@ async def update_partner(partner_id: str, body: PartnerIn, _: AdminOnly):
     return _partner_public(updated, totals["balance"])
 
 
+async def _net_profit_lifetime() -> float:
+    # Use the same tested finance calculation as the Reports screen so the
+    # partner allocation pool matches the app's actual Net Profit figure.
+    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(100000)
+    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(100000)
+    expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(100000)
+    stock_adjustments = await db.inventory_adjustments.find({
+        "adjustment_type": {"$in": ["lost_product", "profit_product"]},
+        "deleted": {"$ne": True},
+    }).to_list(100000)
+    totals = calculate_finance_totals(
+        sales=sales,
+        returns=returns,
+        expenses=expenses,
+        payments=[],
+        stock_adjustments=stock_adjustments,
+    )
+    return round(float(totals["net_profit"]), 2)
+
+
 @api.get("/partners/summary")
 async def partner_summary(_: AdminOnly):
-    gross_profit = await _gross_profit_lifetime()
-    # The headline amount is gross profit less all recorded business expenses.
-    # COGS and operating expenses are business expenses; personal expenses are
-    # excluded. Partner allocation availability intentionally remains based on
-    # gross profit, preserving the existing allocation rules.
-    expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(100000)
-    business_expenses = sum(
-        float(row.get("amount", 0) or 0)
-        for row in expenses
-        if row.get("bucket", "operating") in ("cogs", "operating")
-    )
-    profit_after_business_expenses = round(gross_profit - business_expenses, 2)
+    net_profit = await _net_profit_lifetime()
     txs = await db["partner_transactions"].find({"deleted": {"$ne": True}}).to_list(100000)
     allocated = sum(float(row.get("amount", 0) or 0) for row in txs if row.get("kind") == "profit_allocation")
     partners = await list_partners(_)
     return {
-        "gross_profit": gross_profit,
-        "profit_after_business_expenses": profit_after_business_expenses,
+        "net_profit": net_profit,
         "allocated_profit": round(allocated, 2),
-        "available_gross_profit": round(gross_profit - allocated, 2),
+        "available_net_profit": round(net_profit - allocated, 2),
         "partners": partners,
     }
 
@@ -4629,12 +4637,12 @@ async def create_partner_transaction(body: PartnerTransactionIn, user: AdminOnly
     if not partner:
         raise HTTPException(status_code=404, detail="Partner not found")
     if body.kind == "profit_allocation":
-        gross_profit = await _gross_profit_lifetime()
+        net_profit = await _net_profit_lifetime()
         existing = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(100000)
         allocated = sum(float(row.get("amount", 0) or 0) for row in existing)
-        available = round(gross_profit - allocated, 2)
+        available = round(net_profit - allocated, 2)
         if body.amount > available + 0.005:
-            raise HTTPException(status_code=400, detail=f"Allocation exceeds available gross profit ({available:.2f}).")
+            raise HTTPException(status_code=400, detail=f"Allocation exceeds available net profit ({available:.2f}).")
     if body.kind == "profit_payment":
         rows = await db["partner_transactions"].find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
         allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation")
@@ -4668,12 +4676,12 @@ async def update_partner_transaction(transaction_id: str, body: PartnerTransacti
     if not partner:
         raise HTTPException(status_code=404, detail="Partner not found")
     if body.kind == "profit_allocation":
-        gross_profit = await _gross_profit_lifetime()
+        net_profit = await _net_profit_lifetime()
         rows = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(100000)
         allocated_other = sum(float(row.get("amount", 0) or 0) for row in rows if oid(row["_id"]) != transaction_id)
-        available = round(gross_profit - allocated_other, 2)
+        available = round(net_profit - allocated_other, 2)
         if body.amount > available + 0.005:
-            raise HTTPException(status_code=400, detail=f"Allocation exceeds available gross profit ({available:.2f}).")
+            raise HTTPException(status_code=400, detail=f"Allocation exceeds available net profit ({available:.2f}).")
     if body.kind == "profit_payment":
         rows = await db["partner_transactions"].find({"partner_id": body.partner_id, "deleted": {"$ne": True}}).to_list(100000)
         allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation" and oid(row["_id"]) != transaction_id)
