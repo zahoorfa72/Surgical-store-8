@@ -376,6 +376,17 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === body.partner_id
         ? { ...p, balance: Number(p.balance ?? 0) + (body.kind === "cash_in" || body.kind === "profit_allocation" ? Number(body.amount) : -Number(body.amount)) }
         : p));
+    } else if (method === "PUT" && id) {
+      const rows = queryClient.getQueryData<any[]>(["partner-transactions"]) ?? [];
+      const previous = rows.find((row) => row.id === id);
+      if (previous) {
+        const effect = (kind: string, amount: number) => kind === "cash_in" || kind === "profit_allocation" ? amount : -amount;
+        const delta = effect(body.kind, Number(body.amount)) - effect(previous.kind, Number(previous.amount));
+        queryClient.setQueryData<any[]>(["partner-transactions"], rows.map((row) => row.id === id ? { ...row, ...body, pending: true } : row));
+        queryClient.setQueryData<any[]>(["partners"], (old) => (old ?? []).map((p) => p.id === previous.partner_id
+          ? { ...p, balance: Number(p.balance ?? 0) + delta }
+          : p));
+      }
     } else if (method === "DELETE" && id) {
       const rows = queryClient.getQueryData<any[]>(["partner-transactions"]) ?? [];
       const removed = rows.find((row) => row.id === id);
