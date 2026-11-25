@@ -93,11 +93,11 @@ const WRITE_SEQ = "ssm.writeseq.v1";
 
 type WriteOp = { id: string; method: string; path: string; body: any; expected_updated_at?: string };
 
-const QUEUEABLE = ["/opening-budget-transactions", "/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments", "/partners", "/partner-transactions"];
+const QUEUEABLE = ["/opening-budget-transactions", "/products", "/parties", "/expenses", "/payments", "/returns", "/purchase-returns", "/budget", "/sales", "/purchases", "/users", "/settings", "/inventory-adjustments", "/stock-transfers", "/cash-shifts", "/attachments", "/partners", "/partner-transactions", "/customer-balance-transfers"];
 function isQueueable(path: string): boolean {
   return QUEUEABLE.some((p) => path === p || path.startsWith(p + "/"));
 }
-function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | "opening-budget-transactions" | "partners" | "partner-transactions" | null {
+function entityOf(path: string): "products" | "parties" | "expenses" | "payments" | "returns" | "purchase-returns" | "budget" | "sales" | "purchases" | "users" | "settings" | "inventory-adjustments" | "stock-transfers" | "cash-shifts" | "attachments" | "opening-budget-transactions" | "partners" | "partner-transactions" | "customer-balance-transfers" | null {
   if (path.startsWith("/opening-budget-transactions")) return "opening-budget-transactions";
   if (path.startsWith("/products")) return "products";
   if (path.startsWith("/parties")) return "parties";
@@ -116,6 +116,7 @@ function entityOf(path: string): "products" | "parties" | "expenses" | "payments
   if (path.startsWith("/attachments")) return "attachments";
   if (path.startsWith("/partners")) return "partners";
   if (path.startsWith("/partner-transactions")) return "partner-transactions";
+  if (path.startsWith("/customer-balance-transfers")) return "customer-balance-transfers";
   return null;
 }
 function idFromPath(path: string): string | null {
@@ -348,6 +349,47 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     } else if (method === "DELETE" && id) {
       ["customer", "supplier", "all"].forEach((t) => queryClient.setQueryData<any[]>(["parties", t], (old) => (old ?? []).filter((p) => p.id !== id)));
     }
+  } else if (entity === "customer-balance-transfers" && method === "POST") {
+    const customers = queryClient.getQueryData<any[]>(["parties", "customer"]) ?? [];
+    const source = customers.find((party) => String(party.id) === String(body.from_party_id));
+    const destination = customers.find((party) => String(party.id) === String(body.to_party_id));
+    const amount = Number(body.amount);
+    if (!source || !destination || source.id === destination.id) {
+      throw new Error("Both customers must be available locally before transferring a balance.");
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || amount > Math.abs(Number(source.balance ?? 0)) + 0.004) {
+      throw new Error("Transfer amount exceeds the source customer's locally available balance or credit.");
+    }
+    const sourceBefore = Number(source.balance ?? 0);
+    const destinationBefore = Number(destination.balance ?? 0);
+    const signedAmount = sourceBefore > 0 ? amount : -amount;
+    const record = {
+      id: tempId,
+      client_id: body.client_id,
+      from_party_id: source.id,
+      to_party_id: destination.id,
+      from_party_name: source.name,
+      to_party_name: destination.name,
+      amount: Math.round(amount * 100) / 100,
+      balance_amount: Math.round(signedAmount * 100) / 100,
+      balance_type: signedAmount > 0 ? "receivable" : "customer_credit",
+      source_balance_before: sourceBefore,
+      source_balance_after: Math.round((sourceBefore - signedAmount) * 100) / 100,
+      destination_balance_before: destinationBefore,
+      destination_balance_after: Math.round((destinationBefore + signedAmount) * 100) / 100,
+      note: String(body.note ?? ""),
+      user_name: "",
+      created_at: now(),
+      pending: true,
+    };
+    for (const key of [["parties", "customer"], ["parties", "all"]] as const) {
+      queryClient.setQueryData<any[]>(key, (rows) => (rows ?? []).map((party) =>
+        party.id === source.id ? { ...party, balance: sourceBefore - signedAmount, pending: true }
+          : party.id === destination.id ? { ...party, balance: destinationBefore + signedAmount, pending: true }
+          : party
+      ));
+    }
+    queryClient.setQueryData<any[]>(["customer-balance-transfers"], (rows) => [record, ...(rows ?? [])]);
   } else if (entity === "expenses") {
     const keys = [["expenses", "all"], ["expenses", "cogs"], ["expenses", "operating"], ["expenses", "personal"]];
     if (method === "POST") {
@@ -1441,7 +1483,10 @@ async function persistLiveCache() {
 async function queueWrite(method: string, path: string, body: any, expectedUpdatedAt?: string): Promise<any> {
   const seq = await nextSeq();
   const tempId = `local-${entityOf(path)}-${seq}`;
-  applyOptimistic(method, path, body, tempId);
+  const queuedBody = entityOf(path) === "customer-balance-transfers" && method === "POST"
+    ? { ...(body ?? {}), client_id: `offline-transfer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${seq}` }
+    : body;
+  applyOptimistic(method, path, queuedBody, tempId);
   invalidateDerivedReports();
   const queue = await getWriteQueue();
   const targetId = idFromPath(path);
@@ -1492,7 +1537,7 @@ async function queueWrite(method: string, path: string, body: any, expectedUpdat
       return { id: targetId, ...(body ?? {}), pending: true };
     }
   }
-  queue.push({ id: tempId, method, path, body, expected_updated_at: expectedUpdatedAt });
+  queue.push({ id: tempId, method, path, body: queuedBody, expected_updated_at: expectedUpdatedAt });
   await setWriteQueue(queue);
   await persistLiveCache();
   return { id: tempId, ...(body ?? {}), pending: true };
@@ -1741,6 +1786,7 @@ function localCacheForPath(path: string): any {
   if (path === "/purchase-returns") return queryClient.getQueryData(["purchase-returns"]);
   if (path === "/expenses") return queryClient.getQueryData(["expenses", "all"]);
   if (path.startsWith("/payments")) return queryClient.getQueryData(["payments", "all"]);
+  if (path === "/customer-balance-transfers") return queryClient.getQueryData(["customer-balance-transfers"]);
   if (path === "/budget") return queryClient.getQueryData(["budget"]);
   if (path === "/opening-budget-transactions") return queryClient.getQueryData(["opening-budget-transactions"]);
   if (path === "/users") return queryClient.getQueryData(["users"]);
