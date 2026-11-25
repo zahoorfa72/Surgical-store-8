@@ -397,6 +397,7 @@ class CustomerBalanceTransferIn(BaseModel):
     to_party_id: str
     amount: float = Field(gt=0, allow_inf_nan=False)
     note: str = Field(default="", max_length=500)
+    client_id: Optional[str] = Field(default=None, max_length=160)
 
 
 # ----- Budget model -----
@@ -2223,6 +2224,13 @@ async def list_customer_balance_transfers(_: Staff):
 async def create_customer_balance_transfer(body: CustomerBalanceTransferIn, user: AdminOnly):
     if not ObjectId.is_valid(body.from_party_id) or not ObjectId.is_valid(body.to_party_id):
         raise HTTPException(status_code=404, detail="Customer not found")
+    # Offline queue replay may retry after the server committed but before the
+    # client received the response. Return the original row instead of making
+    # a second balance movement.
+    if body.client_id:
+        existing_transfer = await db.customer_balance_transfers.find_one({"client_id": body.client_id})
+        if existing_transfer:
+            return customer_balance_transfer_public(existing_transfer)
     if body.from_party_id == body.to_party_id:
         raise HTTPException(status_code=400, detail="Choose two different customers")
 
@@ -2244,6 +2252,7 @@ async def create_customer_balance_transfer(body: CustomerBalanceTransferIn, user
     doc = {
         "from_party_id": body.from_party_id,
         "to_party_id": body.to_party_id,
+        "client_id": body.client_id,
         "from_party_name": source.get("name", ""),
         "to_party_name": destination.get("name", ""),
         "amount": round(float(body.amount), 2),
