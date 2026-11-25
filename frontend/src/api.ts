@@ -1786,6 +1786,7 @@ function localCacheForPath(path: string): any {
   if (path === "/purchase-returns") return queryClient.getQueryData(["purchase-returns"]);
   if (path === "/expenses") return queryClient.getQueryData(["expenses", "all"]);
   if (path.startsWith("/payments")) return queryClient.getQueryData(["payments", "all"]);
+  if (path.startsWith("/customer-balance-transfers")) return queryClient.getQueryData(["customer-balance-transfers"]);
   if (path === "/customer-balance-transfers") return queryClient.getQueryData(["customer-balance-transfers"]);
   if (path === "/budget") return queryClient.getQueryData(["budget"]);
   if (path === "/opening-budget-transactions") return queryClient.getQueryData(["opening-budget-transactions"]);
