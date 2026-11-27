@@ -222,7 +222,6 @@ export default function Sell() {
     if (!parsedSearch.query) return products ?? [];
     if (parsedSearch.query.length < 3 || parsedSearch.invalidQuantity) return [];
     return rankVoiceProductMatches(parsedSearch.query, products ?? [])
-      .slice(0, 8)
       .map((match) => match.product);
   }, [products, parsedSearch.query, parsedSearch.invalidQuantity]);
 
@@ -244,7 +243,7 @@ export default function Sell() {
       (products ?? []).filter((p) => !cartMap.has(p.id)),
       reviewSearch,
       [(p) => p.name, (p) => p.sku, (p) => p.barcode],
-      { limit: 30 },
+
     );
   }, [products, cartMap, reviewSearch]);
   const filteredHeldSales = useMemo(() => {
@@ -626,7 +625,7 @@ export default function Sell() {
       exactUnambiguous ||
       (best.score >= 0.9 && (!secondBest || best.score - secondBest.score >= 0.1))
     );
-    const candidates = selected.matches.slice(0, 4).map((match) => match.product);
+    const candidates = selected.matches.map((match) => match.product);
     const entry: VoiceDraftItem = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       transcript: selected.transcript,
@@ -657,7 +656,7 @@ export default function Sell() {
           .flatMap((product) => [product.name, product.sku ?? "", product.barcode ?? ""])
           .map((value) => String(value).trim())
           .filter((value) => value.length >= 2 && value.length <= 64),
-      )).slice(0, 100);
+      ));
       ExpoSpeechRecognitionModule.start({
         lang: voiceLanguage,
         interimResults: true,

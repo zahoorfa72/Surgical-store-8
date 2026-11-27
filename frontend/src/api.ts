@@ -1442,8 +1442,6 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
 }
 
 const AUDIT_KEY = "ssm.auditlog.v1";
-const AUDIT_MAX = 500;
-
 async function recordLocalAudit(method: string, path: string, status?: number, body?: any) {
   try {
     if (method === "GET") return;
@@ -1464,7 +1462,7 @@ async function recordLocalAudit(method: string, path: string, status?: number, b
       user_name: user?.name ?? user?.email ?? "",
       created_at: now(),
     };
-    await storage.setItem(AUDIT_KEY, [row, ...current].slice(0, AUDIT_MAX) as any);
+    await storage.setItem(AUDIT_KEY, [row, ...current] as any);
   } catch {
     // Audit logging must never block a business transaction.
   }

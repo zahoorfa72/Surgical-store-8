@@ -128,7 +128,7 @@ export default function Products() {
       return { product, soldInRange, averageDaily, targetStock, suggestedQuantity };
     }).filter((row) => row.suggestedQuantity > 0)
       .sort((a, b) => b.suggestedQuantity - a.suggestedQuantity)
-      .slice(0, 12);
+      ;
   }, [products, sales, replenishmentRange]);
 
   const expiryWatch = useMemo(() => {
@@ -326,7 +326,7 @@ export default function Products() {
                         <Text style={styles.usageEmpty}>No replenishment needed at current sales and stock levels.</Text>
                       ) : (
                         <>
-                          {replenishmentSuggestions.slice(0, 7).map((row) => (
+                          {replenishmentSuggestions.map((row) => (
                             <View key={row.product.id} style={styles.usageRow} testID={`replenishment-${row.product.id}`}>
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.usageName}>{row.product.name}</Text>
@@ -359,7 +359,7 @@ export default function Products() {
                       </View>
                       {expiryWatch.length === 0 ? (
                         <Text style={styles.usageEmpty}>No recorded batches expiring within 60 days.</Text>
-                      ) : expiryWatch.slice(0, 6).map((row, index) => (
+                      ) : expiryWatch.map((row, index) => (
                         <View key={row.product.id + row.batch + row.expiry + index} style={styles.usageRow}>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.usageName}>{row.product.name} · {row.batch}</Text>
@@ -676,7 +676,7 @@ export default function Products() {
                     {stockMovements.filter((movement) => movement.product_id === p.id).length === 0 && (
                       <Text style={styles.meta}>No recorded stock movements found.</Text>
                     )}
-                    {stockMovements.filter((movement) => movement.product_id === p.id).slice(0, 60).map((movement) => (
+                    {stockMovements.filter((movement) => movement.product_id === p.id).map((movement) => (
                       <View key={movement.id} style={styles.detailRow}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.detailName}>

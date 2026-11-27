@@ -97,7 +97,7 @@ export default function OfflineTools() {
         const remoteAttachments = await apiRequest<any[]>("/attachments");
         if (Array.isArray(remoteAttachments)) {
           const merged = [...remoteAttachments, ...(localAttachments || []).filter((x: any) => x.pending)];
-          const unique = Array.from(new Map(merged.map((x: any) => [x.client_id || x.id || x.created_at, x])).values()).slice(0, 100);
+          const unique = Array.from(new Map(merged.map((x: any) => [x.client_id || x.id || x.created_at, x])).values());
           await storage.setItem(ATTACH_KEY, unique);
           setAttachments(unique);
         }
@@ -110,7 +110,7 @@ export default function OfflineTools() {
   const to = products.find((p) => p.id === toId);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return products.filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.barcode || "").toLowerCase().includes(q)).slice(0, 50);
+    return products.filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.barcode || "").toLowerCase().includes(q));
   }, [products, search]);
 
   const expiry = useMemo(() => products.filter((p) => p.expiry_date && periodContains(p.expiry_date)).map((p) => {
@@ -201,7 +201,7 @@ export default function OfflineTools() {
       user: user?.name || "",
       pending: true,
     };
-    const next = [a, ...attachments].slice(0, 100);
+    const next = [a, ...attachments];
     await storage.setItem(ATTACH_KEY, next); setAttachments(next);
     try {
       const saved = await apiRequest<any>("/attachments", {
@@ -209,7 +209,7 @@ export default function OfflineTools() {
         body: { client_id: a.client_id, name: a.name, data_url: a.data_url, created_at: a.created_at, user: a.user },
       });
       const synced = { ...a, ...saved, pending: false, uri: saved?.data_url || a.uri };
-      const finalList = [synced, ...next.filter((x) => x.id !== a.id)].slice(0, 100);
+      const finalList = [synced, ...next.filter((x) => x.id !== a.id)];
       await storage.setItem(ATTACH_KEY, finalList);
       setAttachments(finalList);
       toast("Attachment saved and queued/synced", "success");
@@ -248,7 +248,7 @@ export default function OfflineTools() {
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 12 }}>
       {tool !== "analytics" && <Card><Text style={styles.title}>Date filter</Text><Text style={styles.hint}>Weekly, monthly, yearly and From–To filters apply to dated lists such as expiry dates and saved attachments.</Text><View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>{([{key:"week",label:"Weekly"},{key:"month",label:"Monthly"},{key:"year",label:"Yearly"},{key:"custom",label:"From–To"}] as const).map((item) => <Pressable key={item.key} onPress={() => setAnalyticsPeriod(item.key)} style={[styles.tab, { maxWidth: "48%", backgroundColor: analyticsPeriod === item.key ? colors.brandPrimary : colors.surfaceTertiary }]}><Text style={[styles.tabText, { color: analyticsPeriod === item.key ? colors.onBrandPrimary : colors.onSurface }]}>{item.label}</Text></Pressable>)}</View>{analyticsPeriod === "custom" && <><TextInput style={styles.input} value={analyticsFrom} onChangeText={setAnalyticsFrom} placeholder="From date (YYYY-MM-DD)" placeholderTextColor={colors.muted} autoCapitalize="none" /><TextInput style={styles.input} value={analyticsTo} onChangeText={setAnalyticsTo} placeholder="To date (YYYY-MM-DD)" placeholderTextColor={colors.muted} autoCapitalize="none" />{analyticsFromValid && analyticsToValid && analyticsFromValid > analyticsToValid && <Text style={styles.hint}>From date must be on or before To date.</Text>}</>}</Card>}
 
-      {tool === "adjust" && <Card><Text style={styles.title}>Stock Adjustment & Damage</Text><Text style={styles.hint}>Changes quantity and cost layers only. No sale, purchase or finance entry is created.</Text><TextInput style={styles.input} placeholder="Search product" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.slice(0, 8).map((p) => <Pressable key={p.id} onPress={() => setProductId(p.id)} style={[styles.row, productId === p.id && { backgroundColor: colors.brandTertiary }]}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} in stock</Text></Pressable>)}<TextInput style={styles.input} keyboardType="decimal-pad" placeholder="+10 or -5" placeholderTextColor={colors.muted} value={delta} onChangeText={setDelta} /><TextInput style={styles.input} placeholder="Reason" placeholderTextColor={colors.muted} value={reason} onChangeText={setReason} /><PrimaryButton label="Save adjustment" onPress={adjust} /></Card>}
+      {tool === "adjust" && <Card><Text style={styles.title}>Stock Adjustment & Damage</Text><Text style={styles.hint}>Changes quantity and cost layers only. No sale, purchase or finance entry is created.</Text><TextInput style={styles.input} placeholder="Search product" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.map((p) => <Pressable key={p.id} onPress={() => setProductId(p.id)} style={[styles.row, productId === p.id && { backgroundColor: colors.brandTertiary }]}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} in stock</Text></Pressable>)}<TextInput style={styles.input} keyboardType="decimal-pad" placeholder="+10 or -5" placeholderTextColor={colors.muted} value={delta} onChangeText={setDelta} /><TextInput style={styles.input} placeholder="Reason" placeholderTextColor={colors.muted} value={reason} onChangeText={setReason} /><PrimaryButton label="Save adjustment" onPress={adjust} /></Card>}
 
       {tool === "expiry" && <Card><Text style={styles.title}>Expiry Management</Text>{expiry.map(({ p, days }) => <View key={p.id} style={styles.row}><View style={{ flex: 1 }}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.quantity} units · {p.expiry_date}</Text></View><Badge text={days < 0 ? "Expired" : days <= 30 ? String(days) + "d left" : String(days) + "d"} tone={days < 0 ? "error" : days <= 30 ? "warning" : "success"} /></View>)}{!expiry.length && <Text style={styles.empty}>No expiry dates recorded.</Text>}</Card>}
 
@@ -256,7 +256,7 @@ export default function OfflineTools() {
 
       {tool === "search" && <Card><Text style={styles.title}>Intelligent Stock Search</Text><TextInput style={styles.input} placeholder="Name, barcode or partial text" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.map((p) => <View key={p.id} style={styles.row}><View style={{ flex: 1 }}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{p.barcode || "No barcode"} · {p.quantity} available</Text></View><Badge text={p.quantity <= p.low_stock_threshold ? "Low" : "OK"} tone={p.quantity <= p.low_stock_threshold ? "warning" : "success"} /></View>)}</Card>}
 
-      {tool === "transfer" && <Card><Text style={styles.title}>Stock Transfer</Text><Text style={styles.hint}>Moves quantity and historical cost layers without touching finance.</Text><TextInput style={styles.input} placeholder="Search products" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.slice(0, 12).map((p) => <Pressable key={p.id} onPress={() => !fromId ? setFromId(p.id) : setToId(p.id)} style={[styles.row, (fromId === p.id || toId === p.id) && { backgroundColor: colors.brandTertiary }]}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{fromId === p.id ? "SOURCE" : toId === p.id ? "DESTINATION" : String(p.quantity) + " available"}</Text></Pressable>)}<TextInput style={styles.input} keyboardType="decimal-pad" placeholder="Quantity" placeholderTextColor={colors.muted} value={transferQty} onChangeText={setTransferQty} /><TextInput style={styles.input} placeholder="Reason" placeholderTextColor={colors.muted} value={reason} onChangeText={setReason} /><PrimaryButton label="Transfer stock" onPress={transfer} /></Card>}
+      {tool === "transfer" && <Card><Text style={styles.title}>Stock Transfer</Text><Text style={styles.hint}>Moves quantity and historical cost layers without touching finance.</Text><TextInput style={styles.input} placeholder="Search products" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch} />{filtered.map((p) => <Pressable key={p.id} onPress={() => !fromId ? setFromId(p.id) : setToId(p.id)} style={[styles.row, (fromId === p.id || toId === p.id) && { backgroundColor: colors.brandTertiary }]}><Text style={styles.name}>{p.name}</Text><Text style={styles.meta}>{fromId === p.id ? "SOURCE" : toId === p.id ? "DESTINATION" : String(p.quantity) + " available"}</Text></Pressable>)}<TextInput style={styles.input} keyboardType="decimal-pad" placeholder="Quantity" placeholderTextColor={colors.muted} value={transferQty} onChangeText={setTransferQty} /><TextInput style={styles.input} placeholder="Reason" placeholderTextColor={colors.muted} value={reason} onChangeText={setReason} /><PrimaryButton label="Transfer stock" onPress={transfer} /></Card>}
 
       {tool === "quick" && <Card><Text style={styles.title}>Quick Actions</Text>{[["Sell","/sell","cart"],["New purchase","/purchase","truck-plus"],["Add product","/product-form","plus-box"],["Returns","/returns","cash-refund"],["Payments","/payments","cash-sync"],["Backup & Restore","/backup-restore","backup-restore"]].map(([label, route, icon]) => <Pressable key={route} style={styles.action} onPress={() => router.push(route as any)}><MaterialDesignIcons name={icon as any} size={21} color={colors.brandPrimary} /><Text style={styles.name}>{label}</Text><MaterialDesignIcons name="chevron-right" size={20} color={colors.muted} /></Pressable>)}</Card>}
 

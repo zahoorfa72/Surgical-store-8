@@ -284,7 +284,7 @@ export default function BusinessIntelligence() {
 
             <Card>
               <View style={styles.headRow}><Text style={styles.cardTitle}>Smart reorder</Text><Badge text={reorderRows.length ? `${reorderRows.length} items` : "Good"} tone={reorderRows.length ? "warning" : "success"} /></View>
-              {reorderRows.slice(0, 10).map((r) => (
+              {reorderRows.map((r) => (
                 <Pressable key={r.p.id} style={styles.listRow} onPress={() => { setSelectedProductId(r.p.id); setTab("stock"); }}>
                   <MaterialDesignIcons name="package-variant-closed" size={20} color={colors.warning} />
                   <View style={{ flex: 1 }}>
@@ -312,7 +312,7 @@ export default function BusinessIntelligence() {
               <Text style={styles.cardTitle}>Inventory intelligence</Text>
               <TextInput value={productSearch} onChangeText={setProductSearch} placeholder="Search name or barcode" placeholderTextColor={colors.muted} style={styles.input} />
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 8 }}>
-                {filteredProducts.slice(0, 30).map((p) => (
+                {filteredProducts.map((p) => (
                   <Pressable key={p.id} onPress={() => setSelectedProductId(p.id)} style={[styles.pill, selectedProductId === p.id && { backgroundColor: colors.brandPrimary }]}>
                     <Text numberOfLines={1} style={[styles.pillText, selectedProductId === p.id && { color: colors.onBrandPrimary }]}>{p.name}</Text>
                   </Pressable>
@@ -337,7 +337,7 @@ export default function BusinessIntelligence() {
                 </Card>
                 <Card>
                   <Text style={styles.cardTitle}>Stock movement timeline</Text>
-                  {stockMovements.slice(0, 60).map((r, i) => <View key={r.type + r.date + i} style={styles.historyRow}><View style={[styles.moveIcon, { backgroundColor: r.quantity >= 0 ? colors.success + "18" : colors.error + "18" }]}><MaterialDesignIcons name={r.quantity >= 0 ? "arrow-down-bold" : "arrow-up-bold"} size={17} color={r.quantity >= 0 ? colors.success : colors.error} /></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.type} · {r.quantity > 0 ? "+" : ""}{r.quantity}</Text><Text style={styles.rowSub}>{fmtDate(r.date)} · {r.detail}</Text></View></View>)}
+                  {stockMovements.map((r, i) => <View key={r.type + r.date + i} style={styles.historyRow}><View style={[styles.moveIcon, { backgroundColor: r.quantity >= 0 ? colors.success + "18" : colors.error + "18" }]}><MaterialDesignIcons name={r.quantity >= 0 ? "arrow-down-bold" : "arrow-up-bold"} size={17} color={r.quantity >= 0 ? colors.success : colors.error} /></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{r.type} · {r.quantity > 0 ? "+" : ""}{r.quantity}</Text><Text style={styles.rowSub}>{fmtDate(r.date)} · {r.detail}</Text></View></View>)}
                   {!stockMovements.length && <Text style={styles.empty}>No movement history.</Text>}
                 </Card>
               </>

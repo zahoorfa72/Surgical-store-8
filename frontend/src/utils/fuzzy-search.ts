@@ -60,7 +60,7 @@ export function fuzzyFilter<T>(
 ): T[] {
   const q = normalize(query);
   if (!q) return items;
-  const limit = options.limit ?? 50;
+  const limit = options.limit ?? items.length;
   const threshold = options.threshold ?? 0.42;
   const scored = items
     .map((item, index) => ({ item, index, score: fuzzyScore(q, item, fields) }))
@@ -74,6 +74,6 @@ export function fuzzyFilter<T>(
   return items
     .map((item, index) => ({ item, index, score: fuzzyScore(q, item, fields) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, Math.min(5, limit))
+    .slice(0, limit)
     .map((row) => row.item);
 }
