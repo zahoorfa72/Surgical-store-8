@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,6 +12,8 @@ import { EXPENSE_CATEGORIES, ExpenseBucket } from "@/src/models";
 import { Field, PrimaryButton, ScreenHeader, todayIsoDate, transactionDateIso, useToast } from "@/src/ui";
 import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useAuth } from "@/src/auth";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 export default function ExpenseForm() {
   const styles = useStyles();
@@ -20,27 +22,36 @@ export default function ExpenseForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const editing = !!id;
   const { data: expenses } = useExpenses();
 
-  const [title, setTitle] = useState("");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
-  const [bucket, setBucket] = useState<ExpenseBucket>("operating");
-  const [note, setNote] = useState("");
-  const [transactionDate, setTransactionDate] = useState(todayIsoDate());
+  const expenseDraftInitial = useMemo(() => ({
+    title: "", amount: "", category: EXPENSE_CATEGORIES[0], bucket: "operating" as ExpenseBucket,
+    note: "", transactionDate: todayIsoDate(),
+  }), []);
+  const expenseDraftKey = `ssm.form-draft.expense.v1.${user?.id ?? "device"}.${id ?? "new"}`;
+  const [expenseDraft, setExpenseDraft, draftReady, draftRestored, clearExpenseDraft] =
+    usePersistentDraft(expenseDraftKey, expenseDraftInitial);
+  const { title, amount, category, bucket, note, transactionDate } = expenseDraft;
+  const setTitle = draftFieldSetter(setExpenseDraft, "title");
+  const setAmount = draftFieldSetter(setExpenseDraft, "amount");
+  const setCategory = draftFieldSetter(setExpenseDraft, "category");
+  const setBucket = draftFieldSetter(setExpenseDraft, "bucket");
+  const setNote = draftFieldSetter(setExpenseDraft, "note");
+  const setTransactionDate = draftFieldSetter(setExpenseDraft, "transactionDate");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (editing && expenses) {
+    if (editing && expenses && draftReady && !draftRestored) {
       const e = expenses.find(x => x.id === id);
       if (e) {
         setTitle(e.title); setAmount(String(e.amount)); setCategory(e.category); setBucket(e.bucket); setNote(e.note);
         setTransactionDate(transactionDateIso(e.transaction_date, e.created_at));
       }
     }
-  }, [editing, id, expenses]);
+  }, [editing, id, expenses, draftReady, draftRestored]);
 
   const save = async () => {
     if (!title.trim()) return toast("Enter a title", "error");
@@ -55,6 +66,7 @@ export default function ExpenseForm() {
       await queryClient.invalidateQueries({ queryKey: qk.expenses(bucket) });
       await queryClient.invalidateQueries({ queryKey: qk.budget });
       await queryClient.invalidateQueries({ queryKey: ["report"] });
+      await clearExpenseDraft();
       toast(editing ? "Expense updated" : "Expense added", "success");
       router.back();
     } catch (e: any) {

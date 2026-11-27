@@ -16,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Animated, Dimensions, Modal, PanResponder, Pressable, ScrollView, Text, View } from "react-native";
+import { Animated, AppState, Dimensions, Modal, PanResponder, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import NetInfo from "@react-native-community/netinfo";
 import { dehydrate, hydrate } from "@tanstack/react-query";
@@ -65,27 +65,44 @@ function cacheDataSignature(): string {
 function startCachePersistence() {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastDataSignature = cacheDataSignature();
-  const save = () => {
+
+  const persistNow = async () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    const dumped = dehydrate(queryClient, {
+      shouldDehydrateQuery: (q) => q.state.status === "success",
+    });
+    const saved = await storage.setItem(CACHE_KEY, dumped as any);
+    if (!saved) return;
+    const nextSignature = cacheDataSignature();
+    if (nextSignature !== lastDataSignature) {
+      lastDataSignature = nextSignature;
+      scheduleAutomaticGoogleDriveBackup(7000);
+    }
+  };
+
+  const scheduleSave = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
-      const dumped = dehydrate(queryClient, {
-        shouldDehydrateQuery: (q) => q.state.status === "success",
-      });
-      void storage.setItem(CACHE_KEY, dumped as any);
-      const nextSignature = cacheDataSignature();
-      if (nextSignature !== lastDataSignature) {
-        lastDataSignature = nextSignature;
-        // Debounce from the latest real data change, not screen navigation.
-        scheduleAutomaticGoogleDriveBackup(7000);
-      }
-    }, 800);
+      timer = null;
+      void persistNow();
+    }, 220);
   };
+
   const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-    // Cache observer subscriptions are UI activity, not edits. Save only
-    // when the underlying query data has actually been updated.
-    if (event.type === "updated" && event.action.type === "success") save();
+    if (event.type === "updated" && event.action.type === "success") scheduleSave();
   });
-  return () => { unsubscribe(); if (timer) clearTimeout(timer); };
+  const appStateSubscription = AppState.addEventListener("change", (state) => {
+    if (state !== "active") void persistNow();
+  });
+
+  return () => {
+    unsubscribe();
+    appStateSubscription.remove();
+    if (timer) clearTimeout(timer);
+    timer = null;
+    void persistNow();
+  };
 }
 
 // ---------------------------------------------------------------------------

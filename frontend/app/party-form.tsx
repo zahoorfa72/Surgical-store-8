@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +10,8 @@ import { useParties, qk } from "@/src/data";
 import { PartyType } from "@/src/models";
 import { Field, PrimaryButton, ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles } from "@/src/theme";
+import { useAuth } from "@/src/auth";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 export default function PartyForm() {
   const styles = useStyles();
@@ -17,19 +19,25 @@ export default function PartyForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
   const { id, type } = useLocalSearchParams<{ id?: string; type: PartyType }>();
   const partyType: PartyType = type === "supplier" ? "supplier" : "customer";
   const isSupplier = partyType === "supplier";
   const editing = !!id;
 
   const { data: parties } = useParties(partyType);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  const partyDraftInitial = useMemo(() => ({ name: "", phone: "", address: "" }), []);
+  const partyDraftKey = `ssm.form-draft.party.v1.${user?.id ?? "device"}.${partyType}.${id ?? "new"}`;
+  const [partyDraft, setPartyDraft, draftReady, draftRestored, clearPartyDraft] =
+    usePersistentDraft(partyDraftKey, partyDraftInitial);
+  const { name, phone, address } = partyDraft;
+  const setName = draftFieldSetter(setPartyDraft, "name");
+  const setPhone = draftFieldSetter(setPartyDraft, "phone");
+  const setAddress = draftFieldSetter(setPartyDraft, "address");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (id && parties) {
+    if (id && parties && draftReady && !draftRestored) {
       const p = parties.find((x) => x.id === id);
       if (p) {
         setName(p.name);
@@ -37,7 +45,7 @@ export default function PartyForm() {
         setAddress(p.address);
       }
     }
-  }, [id, parties]);
+  }, [id, parties, draftReady, draftRestored]);
 
   const save = async () => {
     if (!name.trim()) {
@@ -50,6 +58,7 @@ export default function PartyForm() {
       if (editing) await apiRequest(`/parties/${id}`, { method: "PUT", body });
       else await apiRequest("/parties", { method: "POST", body });
       await queryClient.invalidateQueries({ queryKey: qk.parties(partyType) });
+      await clearPartyDraft();
       toast("Saved", "success");
       router.back();
     } catch (e: any) {

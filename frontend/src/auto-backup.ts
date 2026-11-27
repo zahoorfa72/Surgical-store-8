@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { dehydrate } from "@tanstack/react-query";
+import { AppState } from "react-native";
 import { storage } from "@/src/utils/storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { hasGoogleDriveConnection, uploadBackupToGoogleDrive } from "@/src/google-drive";
@@ -108,6 +109,11 @@ export async function getAutomaticBackupStatus(): Promise<{ status: AutoBackupSt
 }
 
 async function uploadLatestToDrive() {
+  if (AppState.currentState !== "active") {
+    driveDirty = true;
+    publishStatus("pending");
+    return;
+  }
   if (driveUploading) return;
   driveUploading = true;
   publishStatus("uploading");
@@ -159,5 +165,17 @@ export async function runDailyAutoBackup() {
 export function startDailyAutoBackup() {
   void runDailyAutoBackup();
   const timer = setInterval(() => void runDailyAutoBackup(), 60_000);
-  return () => clearInterval(timer);
+  const appStateSubscription = AppState.addEventListener("change", (state) => {
+    if (state === "active" && driveDirty && !driveUploading) {
+      if (driveTimer) clearTimeout(driveTimer);
+      driveTimer = setTimeout(() => {
+        driveTimer = null;
+        void uploadLatestToDrive();
+      }, 1500);
+    }
+  });
+  return () => {
+    clearInterval(timer);
+    appStateSubscription.remove();
+  };
 }
