@@ -259,7 +259,7 @@ export function OrderImageScannerModal({
 
       setItems(Array.from(grouped.values()));
       setUnmatched(misses);
-      setSuggestions(suggested.filter((x) => x.product.quantity > 0).slice(0, 20));
+      setSuggestions(suggested.filter((x) => x.product.quantity > 0));
     } catch (error: any) {
       Alert.alert("Could not read order", error?.message || "Please use a clearer image and try again.");
       reset();
