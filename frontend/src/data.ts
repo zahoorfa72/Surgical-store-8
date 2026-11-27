@@ -121,12 +121,13 @@ function uniqueStockAdjustmentRows<T extends {
 
 async function loadLocalStockAdjustments(): Promise<void> {
   const key = ["inventory-adjustments"] as const;
-  const cached = queryClient.getQueryData<any[]>(key) ?? [];
+  const cached = (queryClient.getQueryData<any[]>(key) ?? []).filter((row) => row && row.deleted !== true);
   const [lostRows, profitRows] = await Promise.all([
     storage.getItem<any[]>("ssm.lost-products.v1", []),
     storage.getItem<any[]>("ssm.profit-products.v1", []),
   ]);
-  queryClient.setQueryData(key, uniqueStockAdjustmentRows([...cached, ...(lostRows ?? []), ...(profitRows ?? [])]));
+  const activeLocalRows = [...(lostRows ?? []), ...(profitRows ?? [])].filter((row) => row && row.deleted !== true);
+  queryClient.setQueryData(key, uniqueStockAdjustmentRows([...cached, ...activeLocalRows]));
 }
 
 function localReport(range: string): ReportSummary {
@@ -189,7 +190,9 @@ function localReport(range: string): ReportSummary {
   const grossRevenue = sales.reduce((n, s) => n + Number(s.subtotal ?? s.total ?? 0), 0);
   const salesRevenue = sales.reduce((n, s) => n + Number(s.total ?? 0), 0);
   const returnsTotal = returns.reduce((n, r) => n + Number(r.refund_total ?? 0), 0);
-  const periodAdjustments = uniqueStockAdjustmentRows(filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? []).map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at }))));
+  const periodAdjustments = uniqueStockAdjustmentRows(filterRows((queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [])
+    .filter((row) => row && row.deleted !== true)
+    .map((row) => ({ ...row, created_at: row.date ? String(row.date) + "T00:00:00" : row.created_at }))));
   // Match Sell exactly: use the stored profit on each sale and reverse
   // returned profit. This keeps offline Remaining Balance identical to Sell.
   const storedSaleProfit = sales.reduce((n, s) => n + Number(s.profit ?? 0), 0);

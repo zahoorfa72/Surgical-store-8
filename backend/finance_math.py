@@ -29,7 +29,10 @@ def calculate_finance_totals(
     returns = list(returns)
     expenses = list(expenses)
     payments = list(payments)
-    stock_adjustments = list(stock_adjustments)
+    # A reversed inventory adjustment is a tombstone, not an active finance
+    # ledger entry. Filter here defensively so stale caches/callers cannot
+    # reapply a transfer after its stock transaction has been undone.
+    stock_adjustments = [row for row in stock_adjustments if row.get("deleted") is not True]
 
     gross_revenue = round(sum(_amount(row, "subtotal", _amount(row, "total")) for row in sales), 2)
     sales_revenue = round(sum(_amount(row, "total") for row in sales), 2)

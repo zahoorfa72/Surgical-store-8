@@ -1690,9 +1690,19 @@ export async function apiRequest<T = any>(
 
   try {
     const result = await rawRequest<T>(path, { ...options, headers: expectedUpdatedAt ? { "x-expected-updated-at": expectedUpdatedAt } : undefined });
-    // The two new inventory operations must update the local cache in ONLINE mode
-    // as well as OFFLINE mode. This keeps the UI identical before/after sync.
-    if (method === "POST" && (path === "/inventory-adjustments" || path === "/stock-transfers")) {
+    // Inventory adjustments must stay reversible in both online and offline
+    // modes. PUT reverses the previous ledger row before applying its replacement;
+    // DELETE removes the old ledger contribution and reverses the stock movement.
+    if (
+      (path === "/inventory-adjustments" || path.startsWith("/inventory-adjustments/")) &&
+      ["POST", "PUT", "DELETE"].includes(method)
+    ) {
+      applyOptimistic(method, path, options.body, method === "POST" ? "server" : "");
+      await persistLiveCache();
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
+      invalidateDerivedReports();
+    }
+    if (method === "POST" && path === "/stock-transfers") {
       applyOptimistic(method, path, options.body, "server");
       await persistLiveCache();
       await queryClient.invalidateQueries({ queryKey: ["products"] });
