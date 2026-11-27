@@ -32,6 +32,9 @@ export default function TrashScreen() {
           delete record.pending;
           await apiRequest(entry.path, { method: "POST", body: record });
           await removeTrashEntry(entry.id);
+          if (entry.path === "/inventory-adjustments") {
+            await queryClient.invalidateQueries({ queryKey: ["report"] });
+          }
           await refresh();
           toast("Entry restored. Check the original list to confirm it appears correctly.", "success");
         } catch (e: any) {
@@ -58,9 +61,11 @@ export default function TrashScreen() {
           queryClient.setQueryData<any[]>(["inventory-adjustments"], (rows = []) => rows.filter((row: any) =>
             ![row.id, row.client_id].some((value) => refs.has(String(value ?? "")))
           ));
-          await queryClient.invalidateQueries({ queryKey: ["report"] });
         }
         await removeTrashEntry(entry.id);
+        if (entry.path === "/inventory-adjustments") {
+          await queryClient.invalidateQueries({ queryKey: ["report"] });
+        }
         await refresh();
         toast("Removed from Trash", "success");
       })(); } },
