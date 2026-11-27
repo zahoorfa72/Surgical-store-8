@@ -150,6 +150,7 @@ export function retryAutomaticGoogleDriveBackup() {
 }
 
 export async function runDailyAutoBackup() {
+  if (AppState.currentState !== "active") return;
   try {
     const now = new Date();
     if (now.getHours() < 6) return;

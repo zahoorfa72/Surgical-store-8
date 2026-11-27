@@ -13,6 +13,7 @@ import { scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
 import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 import { useProfitVisibility } from "@/src/security/finance-security";
 import { ProfitVisibilityToggle } from "@/src/components/profit-visibility-toggle";
+import { useAuth } from "@/src/auth";
 import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 type WProduct = { id: string; name: string; sku: string; quantity: number; cost: number; price: number };
@@ -32,6 +33,7 @@ export default function WholesaleStore() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const fakeFinanceDisplay = useFakeFinanceDisplay();
   const { grossHidden, netHidden } = useProfitVisibility();
   const [state, setState] = useState<WState>(emptyState);
@@ -49,7 +51,7 @@ export default function WholesaleStore() {
     customFrom: new Date().toISOString().slice(0, 10), customTo: new Date().toISOString().slice(0, 10),
   }), []);
   const [wholesaleDraft, setWholesaleDraft] =
-    usePersistentDraft("ssm.form-draft.wholesale.v1", wholesaleDraftInitial);
+    usePersistentDraft(`ssm.form-draft.wholesale.v1.${user?.id ?? "device"}`, wholesaleDraftInitial);
   const { tab, name, sku, qty, cost, price, editingProduct, partyName, partyPhone, partyAddress,
     partyType, customer, cart, discount, discountMode, salePriceOverride, selectedProduct,
     saleQtyByProduct, restockAmounts, editingSale, range, expenseTitle, expenseAmount, expenseNote,

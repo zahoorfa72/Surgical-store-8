@@ -17,19 +17,30 @@ export function usePersistentDraft<T>(
   const valueRef = useRef(value);
   const readyRef = useRef(false);
   const clearedRef = useRef(false);
+  const interactedRef = useRef(false);
+  const keyRef = useRef(key);
+  if (keyRef.current !== key) {
+    keyRef.current = key;
+    readyRef.current = false;
+  }
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRef = useRef<() => Promise<void>>(async () => {});
   valueRef.current = value;
 
   const setDraftValue = useCallback<Dispatch<SetStateAction<T>>>((next) => {
+    interactedRef.current = true;
     clearedRef.current = false;
-    setValue((previous) => typeof next === "function"
-      ? (next as (value: T) => T)(previous)
-      : next);
+    setValue((previous) => {
+      const updated = typeof next === "function"
+        ? (next as (value: T) => T)(previous)
+        : next;
+      valueRef.current = updated;
+      return updated;
+    });
   }, []);
 
   const saveNow = useCallback(async () => {
-    if (!readyRef.current || clearedRef.current) return;
+    if (!readyRef.current || keyRef.current !== key || clearedRef.current) return;
     await storage.setItem(key, {
       version: 1,
       updatedAt: Date.now(),
@@ -42,6 +53,7 @@ export function usePersistentDraft<T>(
     let active = true;
     readyRef.current = false;
     clearedRef.current = false;
+    interactedRef.current = false;
     setReady(false);
     setRestored(false);
     valueRef.current = initialValue;
@@ -53,7 +65,7 @@ export function usePersistentDraft<T>(
       const valid = !!stored && stored.version === 1 && stored.value !== undefined &&
         Number.isFinite(stored.updatedAt) && stored.updatedAt <= now + 60_000 &&
         now - stored.updatedAt <= MAX_DRAFT_AGE_MS;
-      if (valid && stored) {
+      if (valid && stored && !interactedRef.current) {
         valueRef.current = stored.value;
         setValue(stored.value);
         setRestored(true);
@@ -101,7 +113,7 @@ export function usePersistentDraft<T>(
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
-    if (readyRef.current && !clearedRef.current) {
+    if (readyRef.current && keyRef.current === key && !clearedRef.current) {
       void storage.setItem(key, {
         version: 1,
         updatedAt: Date.now(),
