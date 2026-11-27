@@ -53,7 +53,7 @@ export default function SaleEdit() {
   const [productSearch, setProductSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
-  const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+  const showSellProfitDiscount = true;
   const [saleEditLockHours, setSaleEditLockHours] = useState(0);
   const setPendingBalanceAdjustment = draftFieldSetter(setSaleEditDraft, "pendingBalanceAdjustment");
   const setIncludePreviousBalance = draftFieldSetter(setSaleEditDraft, "includePreviousBalance");
@@ -63,9 +63,6 @@ export default function SaleEdit() {
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      void storage.getItem<boolean>("ssm.showSellProfitDiscount", true).then((value) => {
-        if (active) setShowSellProfitDiscount(value !== false);
-      });
       void storage.getItem<number>("ssm.saleEditLockHours", 0).then((value) => {
         if (active) setSaleEditLockHours(Math.max(0, Number(value ?? 0)));
       });
