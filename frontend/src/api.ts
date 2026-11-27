@@ -1332,7 +1332,7 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
     // Apply inventory adjustments optimistically so offline edits/reversals also
     // update stock and the FIFO layer cache, not just the history list.
     const records = queryClient.getQueryData<any[]>(["inventory-adjustments"]) ?? [];
-    const previous = id ? records.find((row: any) => row.id === id) : undefined;
+    const previous = id ? records.find((row: any) => row.id === id || (!!body?.client_id && String(row?.client_id ?? "") === String(body.client_id))) : undefined;
     const applyDelta = (
       pid: string,
       delta: number,
@@ -1407,10 +1407,10 @@ function applyOptimistic(method: string, path: string, body: any, tempId: string
       // Online POSTs receive the authoritative adjustment from the server and
       // the screen inserts it after the request; do not leave a fake "server" row.
       if (method !== "POST" || tempId !== "server") {
-        queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => method === "POST" ? [row, ...(old ?? []).filter((x: any) => x.id !== row.id)] : (old ?? []).map((x: any) => x.id === id ? row : x));
+        queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => method === "POST" ? [row, ...(old ?? []).filter((x: any) => x.id !== row.id && (!row.client_id || x.client_id !== row.client_id))] : (old ?? []).map((x: any) => x.id === id || (!!body?.client_id && String(x.client_id ?? "") === String(body.client_id)) ? row : x));
       }
     } else if (method === "DELETE" && id) {
-      queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => (old ?? []).filter((x: any) => x.id !== id));
+      queryClient.setQueryData<any[]>(["inventory-adjustments"], (old) => (old ?? []).filter((x: any) => x.id !== id && (!body?.client_id || String(x.client_id ?? "") !== String(body.client_id))));
     }
   } else if (entity === "stock-transfers") {
     if (method === "POST") {
@@ -1626,7 +1626,7 @@ function findLocalPartyDuplicate(body: any): any | null {
   }) ?? null;
 }
 
-function findRecordForDelete(path: string): any | null {
+function findRecordForDelete(path: string, clientId?: string): any | null {
   const match = path.match(/^\/(products|sales|purchases|parties|payments|expenses|returns|purchase-returns|users|inventory-adjustments|stock-transfers|cash-shifts|attachments)\/([^/?]+)/);
   if (!match) return null;
   const [, entity, id] = match;
@@ -1643,7 +1643,7 @@ function findRecordForDelete(path: string): any | null {
   for (const key of keys) {
     const value = queryClient.getQueryData<any>(key);
     if (Array.isArray(value)) {
-      const found = value.find((row) => String(row?.id) === id);
+      const found = value.find((row) => String(row?.id) === id || (!!clientId && String(row?.client_id ?? "") === clientId));
       if (found) return found;
     } else if (value && String(value.id) === id) return value;
   }
@@ -1659,7 +1659,7 @@ export async function apiRequest<T = any>(
   const expectedUpdatedAt = (method === "PUT" || method === "DELETE") ? getCachedUpdatedAt(path) : undefined;
   // Capture the exact pre-delete record before either online deletion or offline queueing.
   if (method === "DELETE") {
-    const record = findRecordForDelete(path);
+    const record = findRecordForDelete(path, options.body?.client_id ? String(options.body.client_id) : undefined);
     if (record) {
       const collectionPath = path.split("?")[0].replace(/\/[^/]+$/, "");
       await addToTrash(collectionPath, record);
@@ -1759,7 +1759,7 @@ function getCachedUpdatedAt(path: string): string | undefined {
     candidates.push(...(queryClient.getQueryData<any[]>(["parties", "supplier"]) ?? []));
     candidates.push(...(queryClient.getQueryData<any[]>(["parties", "customer"]) ?? []));
   }
-  const found = candidates.find((row) => row?.id === id);
+  const found = candidates.find((row) => row?.id === id || (!!clientId && String(row?.client_id ?? "") === clientId));
   return found?.updated_at ? String(found.updated_at) : undefined;
 }
 
