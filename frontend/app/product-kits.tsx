@@ -27,7 +27,7 @@ export default function ProductKitsScreen() {
 
   useEffect(() => { void storage.getItem<any>(PRODUCT_KITS_KEY, []).then((rows) => setKits(rows ?? [])); }, []);
   const selectedCount = Object.values(selected).filter((v) => Number(v) > 0).length;
-  const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.toLowerCase())).slice(0,100);
+  const filtered = products.filter((p) => (p.name+" "+(p.barcode || "")).toLowerCase().includes(search.toLowerCase()));
 
   const reset = () => { setName(""); setEditingId(""); setSelected({}); setSearch(""); };
   const save = async () => {

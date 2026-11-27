@@ -765,11 +765,11 @@ def _remove_purchase_lot(layers: list, quantity: float, purchase_id: str) -> lis
 
 async def _migrate_legacy_cost_layers() -> dict:
     """Reconstruct cost lots for existing products from historical transactions."""
-    products = await db.products.find({"deleted": {"$ne": True}}).to_list(10000)
-    purchases = await db.purchases.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
-    sales = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
-    returns = await db.returns.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
-    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(50000)
+    products = await db.products.find({"deleted": {"$ne": True}}).to_list(None)
+    purchases = await db.purchases.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(None)
+    sales = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(None)
+    returns = await db.returns.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(None)
+    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).sort("created_at", 1).to_list(None)
     purchases_by_product = {}
     events = {}
     for po in purchases:
@@ -1067,10 +1067,10 @@ async def save_cash_shift(payload: CashShiftIn, user: AnyUser):
 
 
 @api.get("/attachments")
-async def list_attachments(user: AnyUser, limit: int = Query(100, ge=1, le=500)):
+async def list_attachments(user: AnyUser):
     rows = await db["attachments"].find(
         {"user_id": oid(user["_id"]), "deleted": {"$ne": True}}
-    ).sort("created_at", -1).to_list(limit)
+    ).sort("created_at", -1).to_list(None)
     return [{**row, "id": oid(row["_id"])} for row in rows]
 
 
@@ -1104,8 +1104,8 @@ async def save_attachment(payload: AttachmentIn, user: AnyUser):
 # Audit log
 # ---------------------------------------------------------------------------
 @api.get("/audit")
-async def list_audit(_: AdminOnly, limit: int = Query(500, ge=1, le=1000)):
-    rows = await db["audit"].find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+async def list_audit(_: AdminOnly):
+    rows = await db["audit"].find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [
         {
             "id": oid(row["_id"]),
@@ -1220,7 +1220,7 @@ async def reset_password(body: ResetIn):
 # ---------------------------------------------------------------------------
 @api.get("/users", response_model=List[UserOut])
 async def list_users(_: AdminOnly):
-    docs = await db.users.find().sort("created_at", 1).to_list(500)
+    docs = await db.users.find().sort("created_at", 1).to_list(None)
     return [user_public(d) for d in docs]
 
 
@@ -1324,7 +1324,7 @@ def product_public(d: dict) -> ProductOut:
 
 @api.get("/products", response_model=List[ProductOut])
 async def list_products(_: AnyUser):
-    docs = await db.products.find({"deleted": {"$ne": True}}).sort("name", 1).to_list(2000)
+    docs = await db.products.find({"deleted": {"$ne": True}}).sort("name", 1).to_list(None)
     # Lazy one-time migration for legacy products; preserve manually chosen categories.
     for doc in docs:
         if not str(doc.get("category") or "").strip():
@@ -1426,8 +1426,8 @@ def _normalize_stock_accounting(
 
 
 @api.get("/stock-movements")
-async def list_stock_movements(_: Staff, product_id: Optional[str] = None, limit: int = Query(500, ge=1, le=5000)):
-    products = await db.products.find({}).to_list(10000)
+async def list_stock_movements(_: Staff, product_id: Optional[str] = None):
+    products = await db.products.find({}).to_list(None)
     product_names = {str(row["_id"]): str(row.get("name", "")) for row in products}
     movements = []
 
@@ -1450,49 +1450,49 @@ async def list_stock_movements(_: Staff, product_id: Optional[str] = None, limit
             "non_expiring": bool(non_expiring),
         })
 
-    purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(None)
     purchase_by_id = {str(row.get("_id")): row for row in purchases}
     for purchase in purchases:
         for item in purchase.get("items", []):
             add(item.get("product_id"), item.get("quantity", 0), "purchase", purchase.get("ref_no"), purchase.get("created_at"), purchase.get("user_name"), "Stock received", item.get("batch_number"), item.get("expiry_date"), item.get("non_expiring", False))
 
-    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(None)
     for sale in sales:
         for item in sale.get("items", []):
             lots = item.get("cost_layers_used") or [{"quantity": item.get("quantity", 0)}]
             for lot in lots:
                 add(item.get("product_id"), -float(lot.get("quantity", 0) or 0), "sale", sale.get("invoice_no"), sale.get("created_at"), sale.get("cashier_name"), "Stock sold", lot.get("batch_number"), lot.get("expiry_date"), lot.get("non_expiring", False))
 
-    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(None)
     for row in returns:
         for item in row.get("items", []):
             lots = item.get("cost_layers_used") or [{"quantity": item.get("quantity", 0)}]
             for lot in lots:
                 add(item.get("product_id"), lot.get("quantity", 0), "customer_return", row.get("ref_no") or row.get("sale_id"), row.get("created_at"), row.get("user_name"), row.get("reason", "Customer return"), lot.get("batch_number"), lot.get("expiry_date"), lot.get("non_expiring", False))
 
-    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(None)
     for row in purchase_returns:
         purchase = purchase_by_id.get(str(row.get("purchase_id")), {})
         for item in row.get("items", []):
             add(item.get("product_id"), -float(item.get("quantity", 0) or 0), "supplier_return", purchase.get("ref_no"), row.get("created_at"), row.get("user_name"), row.get("reason", "Supplier return"), item.get("batch_number"), item.get("expiry_date"), item.get("non_expiring", False))
 
-    adjustments = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).to_list(20000)
+    adjustments = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).to_list(None)
     for row in adjustments:
         add(row.get("product_id"), row.get("delta", 0), row.get("adjustment_type", "adjustment"), row.get("id") or str(row.get("_id")), row.get("created_at"), row.get("user_name"), row.get("reason", ""))
 
-    transfers = await db.stock_transfers.find({"deleted": {"$ne": True}}).to_list(20000)
+    transfers = await db.stock_transfers.find({"deleted": {"$ne": True}}).to_list(None)
     for row in transfers:
         ref = str(row.get("_id") or "")
         add(row.get("from_product_id"), -float(row.get("quantity", 0) or 0), "stock_transfer_out", ref, row.get("created_at"), row.get("user_name"), row.get("reason", "Product transfer"))
         add(row.get("to_product_id"), float(row.get("quantity", 0) or 0), "stock_transfer_in", ref, row.get("created_at"), row.get("user_name"), row.get("reason", "Product transfer"))
 
     movements.sort(key=lambda row: row.get("created_at", ""), reverse=True)
-    return movements[:limit]
+    return movements
 
 
 @api.get("/inventory-adjustments")
-async def list_inventory_adjustments(_: Staff, limit: int = Query(500, ge=1, le=1000)):
-    rows = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+async def list_inventory_adjustments(_: Staff):
+    rows = await db.inventory_adjustments.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [{
         "id": oid(row["_id"]), "product_id": row.get("product_id", ""), "product_name": row.get("product_name", ""), "delta": row.get("delta", 0),
         "reason": row.get("reason", ""), "adjustment_type": row.get("adjustment_type", "adjustment"),
@@ -1922,18 +1922,18 @@ async def _party_balances() -> dict:
     once here, separately from the sale total.
     """
     balances: dict = {}
-    purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchases = await db.purchases.find({"deleted": {"$ne": True}}).to_list(None)
     for p in purchases:
         sid = p.get("supplier_id")
         if sid:
             balances[sid] = balances.get(sid, 0.0) + p.get("total", 0)
     # Supplier returns reduce the amount still owed to the supplier.
-    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchase_returns = await db.purchase_returns.find({"deleted": {"$ne": True}}).to_list(None)
     for r in purchase_returns:
         sid = r.get("supplier_id")
         if sid:
             balances[sid] = balances.get(sid, 0.0) - r.get("refund_total", 0)
-    all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(None)
     for s in all_sales:
         cid = s.get("customer_id")
         if not cid:
@@ -1947,12 +1947,12 @@ async def _party_balances() -> dict:
             # Cash sales consume stored customer credit without inventing a cash receipt.
             balances[cid] = balances.get(cid, 0.0) + float(s.get("credit_applied", 0) or 0)
     # Customer returns reduce what the customer owes.
-    sales_returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(20000)
+    sales_returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(None)
     for r in sales_returns:
         cid = r.get("customer_id")
         if cid:
             balances[cid] = balances.get(cid, 0.0) - r.get("refund_total", 0)
-    payments = await db.payments.find({"deleted": {"$ne": True}}).to_list(20000)
+    payments = await db.payments.find({"deleted": {"$ne": True}}).to_list(None)
     for pay in payments:
         pid = pay.get("party_id")
         if not pid:
@@ -1968,7 +1968,7 @@ async def _party_balances() -> dict:
             amt = float(pay.get("amount", 0) or 0)
             adjustment = float(pay.get("adjustment", 0) or 0)
             balances[pid] = balances.get(pid, 0.0) + amt - adjustment
-    transfers = await db.customer_balance_transfers.find({"deleted": {"$ne": True}}).to_list(20000)
+    transfers = await db.customer_balance_transfers.find({"deleted": {"$ne": True}}).to_list(None)
     return apply_customer_balance_transfers(balances, transfers)
 
 
@@ -1977,7 +1977,7 @@ async def list_parties(_: AnyUser, type: Optional[PartyType] = None):
     q: dict = {"deleted": {"$ne": True}}
     if type:
         q["type"] = type.value
-    docs = await db.parties.find(q).sort("name", 1).to_list(2000)
+    docs = await db.parties.find(q).sort("name", 1).to_list(None)
     balances = await _party_balances()
     return [party_public(d, balances.get(oid(d["_id"]), 0.0)) for d in docs]
 
@@ -2004,7 +2004,7 @@ async def create_party(body: PartyIn, _: Staff):
     existing_rows = await db.parties.find({
         "type": body.type.value,
         "deleted": {"$ne": True},
-    }).to_list(10000)
+    }).to_list(None)
     for existing in existing_rows:
         existing_name_key = _party_name_key(str(existing.get("name", "")))
         existing_phone_key = _party_phone_key(str(existing.get("phone", "")))
@@ -2068,11 +2068,11 @@ def payment_public(d: dict) -> dict:
 
 
 @api.get("/payments")
-async def list_payments(_: Staff, party_id: Optional[str] = None, limit: int = Query(10000, le=10000)):
+async def list_payments(_: Staff, party_id: Optional[str] = None):
     q: dict = {"deleted": {"$ne": True}}
     if party_id:
         q["party_id"] = party_id
-    docs = await db.payments.find(q).sort("created_at", -1).to_list(limit)
+    docs = await db.payments.find(q).sort("created_at", -1).to_list(None)
     return [payment_public(d) for d in docs]
 
 
@@ -2098,11 +2098,11 @@ async def _validate_bill_payment_link(
             raise HTTPException(status_code=404, detail="Sales bill does not belong to this customer")
         if not bill.get("credit"):
             raise HTTPException(status_code=400, detail="Only credit sales can receive bill-linked customer installments")
-        sale_returns = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(1000)
+        sale_returns = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(None)
         returned_total = sum(float(row.get("refund_total", 0) or 0) for row in sale_returns)
         base_due = max(0.0, float(bill.get("amount_due", bill.get("total", 0)) or 0) - returned_total)
         ref = str(bill.get("invoice_no") or body.sale_id)
-        linked = await db.payments.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(10000)
+        linked = await db.payments.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(None)
     else:
         if party.get("type") != PartyType.supplier.value or body.kind != PaymentKind.pay:
             raise HTTPException(status_code=400, detail="Only supplier payments can be allocated to a purchase bill")
@@ -2111,10 +2111,10 @@ async def _validate_bill_payment_link(
         bill = await db.purchases.find_one({"_id": ObjectId(body.purchase_id), "deleted": {"$ne": True}})
         if not bill or str(bill.get("supplier_id") or "") != str(party["_id"]):
             raise HTTPException(status_code=404, detail="Purchase bill does not belong to this supplier")
-        refunds = await db.purchase_returns.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(1000)
+        refunds = await db.purchase_returns.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(None)
         base_due = max(0.0, float(bill.get("total", 0) or 0) - sum(float(row.get("refund_total", 0) or 0) for row in refunds))
         ref = str(bill.get("ref_no") or body.purchase_id)
-        linked = await db.payments.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(10000)
+        linked = await db.payments.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(None)
 
     already_paid = sum(
         float(row.get("amount", 0) or 0)
@@ -2216,7 +2216,7 @@ def customer_balance_transfer_public(doc: dict) -> dict:
 
 @api.get("/customer-balance-transfers")
 async def list_customer_balance_transfers(_: Staff):
-    rows = await db.customer_balance_transfers.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(5000)
+    rows = await db.customer_balance_transfers.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [customer_balance_transfer_public(row) for row in rows]
 
 
@@ -2287,7 +2287,7 @@ def opening_budget_public(doc: dict) -> dict:
 
 
 async def _opening_budget_total() -> float:
-    rows = await db.opening_budget_transactions.find({}).to_list(50000)
+    rows = await db.opening_budget_transactions.find({}).to_list(None)
     return round(sum(float(row.get("amount", 0) or 0) for row in rows), 2)
 
 
@@ -2303,7 +2303,7 @@ async def _save_opening_budget_total() -> float:
 
 @api.get("/opening-budget-transactions")
 async def list_opening_budget_transactions(_: Staff):
-    rows = await db.opening_budget_transactions.find({}).sort([("date", -1), ("created_at", -1)]).to_list(50000)
+    rows = await db.opening_budget_transactions.find({}).sort([("date", -1), ("created_at", -1)]).to_list(None)
     return [opening_budget_public(row) for row in rows]
 
 
@@ -2371,9 +2371,9 @@ async def get_budget(_: Staff):
     month_expenses = await db.expenses.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, None, 0),
-    }).to_list(10000)
+    }).to_list(None)
     spent = round(sum(e.get("amount", 0) for e in month_expenses), 2)
-    purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(20000)
+    purchase_docs = await db.purchases.find({"deleted": {"$ne": True}}).to_list(None)
     purchase_spent = round(sum(p.get("total", 0) for p in purchase_docs), 2)
     return {"monthly_amount": round(monthly, 2), "opening_amount": opening, "opening_transactions": opening_transactions, "spent_this_month": spent, "purchase_spent": purchase_spent, "purchase_remaining": round(max(0.0, opening - purchase_spent), 2)}
 
@@ -2417,8 +2417,8 @@ def sale_public(d: dict) -> dict:
 
 
 @api.get("/sales")
-async def list_sales(_: AnyUser, limit: int = Query(10000, le=10000)):
-    docs = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+async def list_sales(_: AnyUser):
+    docs = await db.sales.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [sale_public(d) for d in docs]
 
 
@@ -2430,7 +2430,7 @@ async def get_sale(sale_id: str, _: AnyUser):
     if not doc:
         raise HTTPException(status_code=404, detail="Sale not found")
     result = sale_public(doc)
-    rets = await db.returns.find({"sale_id": sale_id, "deleted": {"$ne": True}}).to_list(1000)
+    rets = await db.returns.find({"sale_id": sale_id, "deleted": {"$ne": True}}).to_list(None)
     returned: dict = {}
     for r in rets:
         for it in r.get("items", []):
@@ -2572,7 +2572,7 @@ async def create_sale(body: SaleIn, user: AnyUser):
 
 
 async def _sale_returned_map(sale_id: str) -> dict:
-    rets = await db.returns.find({"sale_id": sale_id, "deleted": {"$ne": True}}).to_list(1000)
+    rets = await db.returns.find({"sale_id": sale_id, "deleted": {"$ne": True}}).to_list(None)
     returned: dict = {}
     for r in rets:
         for it in r.get("items", []):
@@ -2925,8 +2925,8 @@ def purchase_public(d: dict) -> dict:
 
 
 @api.get("/purchases")
-async def list_purchases(_: Staff, limit: int = Query(200, le=1000)):
-    docs = await db.purchases.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+async def list_purchases(_: Staff):
+    docs = await db.purchases.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [purchase_public(d) for d in docs]
 
 
@@ -2938,7 +2938,7 @@ async def get_purchase(purchase_id: str, _: Staff):
     if not doc:
         raise HTTPException(status_code=404, detail="Purchase not found")
     result = purchase_public(doc)
-    rets = await db.purchase_returns.find({"purchase_id": purchase_id, "deleted": {"$ne": True}}).to_list(1000)
+    rets = await db.purchase_returns.find({"purchase_id": purchase_id, "deleted": {"$ne": True}}).to_list(None)
     returned: dict = {}
     for r in rets:
         for it in r.get("items", []):
@@ -3028,7 +3028,7 @@ async def create_purchase(body: PurchaseIn, user: Staff):
 async def _purchase_returned_map(purchase_id: str) -> dict:
     rets = await db.purchase_returns.find(
         {"purchase_id": purchase_id, "deleted": {"$ne": True}}
-    ).to_list(1000)
+    ).to_list(None)
     returned: dict = {}
     for r in rets:
         for it in r.get("items", []):
@@ -3150,7 +3150,7 @@ async def edit_purchase(purchase_id: str, body: PurchaseIn, _: AdminOnly):
     budget_doc = await db.budget.find_one({"_id": "singleton"})
     opening_budget = float(budget_doc.get("opening_amount", 0)) if budget_doc else 0.0
     if opening_budget > 0:
-        purchase_docs = await db.purchases.find({"deleted": {"$ne": True}, "_id": {"$ne": ObjectId(purchase_id)}}).to_list(20000)
+        purchase_docs = await db.purchases.find({"deleted": {"$ne": True}, "_id": {"$ne": ObjectId(purchase_id)}}).to_list(None)
         already_spent = sum(float(p.get("total", 0) or 0) for p in purchase_docs)
         if already_spent + total > opening_budget + 0.0001:
             raise HTTPException(status_code=400, detail=f"Purchase exceeds remaining opening budget of {max(0.0, opening_budget - already_spent):.2f}")
@@ -3224,7 +3224,7 @@ async def list_expenses(_: Staff, bucket: Optional[ExpenseBucket] = None):
     q: dict = {"deleted": {"$ne": True}}
     if bucket:
         q["bucket"] = bucket.value
-    docs = await db.expenses.find(q).sort("created_at", -1).to_list(1000)
+    docs = await db.expenses.find(q).sort("created_at", -1).to_list(None)
     return [expense_public(d) for d in docs]
 
 
@@ -3280,8 +3280,8 @@ def return_public(d: dict) -> dict:
 
 
 @api.get("/returns")
-async def list_returns(_: Staff, limit: int = Query(200, le=1000)):
-    docs = await db.returns.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+async def list_returns(_: Staff):
+    docs = await db.returns.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [return_public(d) for d in docs]
 
 
@@ -3294,7 +3294,7 @@ async def create_return(body: ReturnIn, user: Staff):
         raise HTTPException(status_code=404, detail="Sale not found")
 
     # How much was already returned per product on this sale
-    prev = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(1000)
+    prev = await db.returns.find({"sale_id": body.sale_id, "deleted": {"$ne": True}}).to_list(None)
     already: dict = {}
     for r in prev:
         for it in r.get("items", []):
@@ -3396,8 +3396,8 @@ def purchase_return_public(d: dict) -> dict:
 
 
 @api.get("/purchase-returns")
-async def list_purchase_returns(_: Staff, limit: int = Query(200, le=1000)):
-    docs = await db.purchase_returns.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(limit)
+async def list_purchase_returns(_: Staff):
+    docs = await db.purchase_returns.find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     return [purchase_return_public(d) for d in docs]
 
 
@@ -3409,7 +3409,7 @@ async def create_purchase_return(body: PurchaseReturnIn, user: Staff):
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
 
-    prev = await db.purchase_returns.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(1000)
+    prev = await db.purchase_returns.find({"purchase_id": body.purchase_id, "deleted": {"$ne": True}}).to_list(None)
     already: dict = {}
     for r in prev:
         for it in r.get("items", []):
@@ -3518,7 +3518,7 @@ async def edit_return(return_id: str, body: ReturnIn, _: AdminOnly):
         "sale_id": body.sale_id,
         "deleted": {"$ne": True},
         "_id": {"$ne": ObjectId(return_id)},
-    }).to_list(1000)
+    }).to_list(None)
     already: dict[str, float] = {}
     for previous_return in prev:
         for previous_item in previous_return.get("items", []):
@@ -3712,7 +3712,7 @@ async def edit_purchase_return(return_id: str, body: PurchaseReturnIn, _: AdminO
         "purchase_id": body.purchase_id,
         "deleted": {"$ne": True},
         "_id": {"$ne": ObjectId(return_id)},
-    }).to_list(1000)
+    }).to_list(None)
     already: dict[str, float] = {}
     for previous_return in prev:
         for previous_item in previous_return.get("items", []):
@@ -3938,10 +3938,10 @@ async def report_inventory_usage(
     sales = await db.sales.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, end, tz_offset_minutes),
-    }).to_list(20000)
-    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
-    products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
-    all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": {"$in": ["lost_product", "profit_product"]}, "deleted": {"$ne": True}}).to_list(20000)
+    }).to_list(None)
+    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(None)
+    products = await db.products.find({"deleted": {"$ne": True}}).to_list(None)
+    all_lost_adjustments = await db.inventory_adjustments.find({"adjustment_type": {"$in": ["lost_product", "profit_product"]}, "deleted": {"$ne": True}}).to_list(None)
 
     usage: dict[str, dict[str, Any]] = {}
     for product in products:
@@ -4044,21 +4044,21 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     sales = await db.sales.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, end, tz_offset_minutes),
-    }).to_list(10000)
-    all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(20000)
+    }).to_list(None)
+    all_sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(None)
     # Expenses are allocated to the month/day selected by the user.
     # Legacy expenses without transaction_date continue using created_at.
     expenses = await db.expenses.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, end, tz_offset_minutes),
-    }).to_list(10000)
+    }).to_list(None)
     purchases = await db.purchases.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, end, tz_offset_minutes),
-    }).to_list(10000)
-    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
-    purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(10000)
-    products = await db.products.find({"deleted": {"$ne": True}}).to_list(5000)
+    }).to_list(None)
+    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(None)
+    purchase_returns = await db.purchase_returns.find({**time_q, "deleted": {"$ne": True}}).to_list(None)
+    products = await db.products.find({"deleted": {"$ne": True}}).to_list(None)
 
     # Gross Revenue is before invoice discounts (subtotal); Revenue is the
     # actual billed sale total after invoice discounts and before returns.
@@ -4085,7 +4085,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     cogs_total = round(cogs_goods + cogs_expenses, 2)
     total_expenses = round(cogs_expenses + operating_expenses + personal_expenses, 2)
 
-    payments = await db.payments.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    payments = await db.payments.find({**time_q, "deleted": {"$ne": True}}).to_list(None)
     supplier_payments = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "pay"), 2)
     customer_receipts = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "receive"), 2)
     supplier_refunds = round(sum(p.get("amount", 0) for p in payments if p.get("kind") == "supplier_refund"), 2)
@@ -4099,7 +4099,7 @@ async def report_summary(_: Staff, range: str = "today", tz_offset_minutes: int 
     # Budgets are configured store-level values and are added exactly once
     # to the reported balance, including selected periods and All-Time.
     budget_doc = await db.budget.find_one({"_id": "singleton"})
-    opening_rows = await db.opening_budget_transactions.find({}).to_list(50000)
+    opening_rows = await db.opening_budget_transactions.find({}).to_list(None)
     # Use the user's local calendar dates for budget entries (the ledger stores
     # YYYY-MM-DD dates, not timestamps) so the amount is credited to its actual day.
     opening_period_start = None
@@ -4351,8 +4351,8 @@ async def report_customers(_: Staff, range: str = "all", tz_offset_minutes: int 
     sales = await db.sales.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, end, tz_offset_minutes),
-    }).to_list(20000)
-    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(20000)
+    }).to_list(None)
+    returns = await db.returns.find({**time_q, "deleted": {"$ne": True}}).to_list(None)
     agg: dict = {}
     for s in sales:
         key = s.get("customer_id") or "walkin"
@@ -4381,7 +4381,7 @@ async def report_day_close(user: AnyUser, range: str = "today", tz_offset_minute
     sales = await db.sales.find({
         "deleted": {"$ne": True},
         **transaction_date_query(start, end, tz_offset_minutes),
-    }).to_list(20000)
+    }).to_list(None)
 
     def summarize(rows):
         gross = round(sum(s.get("total", 0) for s in rows), 2)
@@ -4532,8 +4532,8 @@ def _partner_tx_public(row: dict) -> dict:
 
 
 async def _gross_profit_lifetime() -> float:
-    sales = await db["sales"].find({"deleted": {"$ne": True}}).to_list(100000)
-    returns = await db["returns"].find({"deleted": {"$ne": True}}).to_list(100000)
+    sales = await db["sales"].find({"deleted": {"$ne": True}}).to_list(None)
+    returns = await db["returns"].find({"deleted": {"$ne": True}}).to_list(None)
     sold_profit = sum(float(row.get("profit", 0) or 0) for row in sales)
     returned_profit = sum(float(row.get("refund_profit", 0) or 0) for row in returns)
     return round(sold_profit - returned_profit, 2)
@@ -4561,7 +4561,7 @@ async def _partner_totals(partner_id: Optional[str] = None) -> dict:
 
 @api.get("/partners")
 async def list_partners(_: AdminOnly):
-    partners = await db["partners"].find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(1000)
+    partners = await db["partners"].find({"deleted": {"$ne": True}}).sort("created_at", -1).to_list(None)
     result = []
     for partner in partners:
         totals = await _partner_totals(oid(partner["_id"]))
@@ -4604,13 +4604,13 @@ async def update_partner(partner_id: str, body: PartnerIn, _: AdminOnly):
 async def _net_profit_lifetime() -> float:
     # Use the same tested finance calculation as the Reports screen so the
     # partner allocation pool matches the app's actual Net Profit figure.
-    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(100000)
-    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(100000)
-    expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(100000)
+    sales = await db.sales.find({"deleted": {"$ne": True}}).to_list(None)
+    returns = await db.returns.find({"deleted": {"$ne": True}}).to_list(None)
+    expenses = await db.expenses.find({"deleted": {"$ne": True}}).to_list(None)
     stock_adjustments = await db.inventory_adjustments.find({
         "adjustment_type": {"$in": ["lost_product", "profit_product"]},
         "deleted": {"$ne": True},
-    }).to_list(100000)
+    }).to_list(None)
     totals = calculate_finance_totals(
         sales=sales,
         returns=returns,
@@ -4624,7 +4624,7 @@ async def _net_profit_lifetime() -> float:
 @api.get("/partners/summary")
 async def partner_summary(_: AdminOnly):
     net_profit = await _net_profit_lifetime()
-    txs = await db["partner_transactions"].find({"deleted": {"$ne": True}}).to_list(100000)
+    txs = await db["partner_transactions"].find({"deleted": {"$ne": True}}).to_list(None)
     allocated = sum(float(row.get("amount", 0) or 0) for row in txs if row.get("kind") == "profit_allocation")
     partners = await list_partners(_)
     return {
@@ -4657,14 +4657,14 @@ async def create_partner_transaction(body: PartnerTransactionIn, user: AdminOnly
         raise HTTPException(status_code=404, detail="Partner not found")
     if body.kind == "profit_allocation":
         net_profit = await _net_profit_lifetime()
-        existing = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(100000)
+        existing = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(None)
         allocated = sum(float(row.get("amount", 0) or 0) for row in existing)
         available = round(net_profit - allocated, 2)
         if body.amount > available + 0.005:
             raise HTTPException(status_code=400, detail=f"Allocation exceeds available net profit ({available:.2f}).")
     if body.kind == "profit_payment":
         partner_query = {"$or": [{"partner_id": body.partner_id}, {"partner_id": ObjectId(body.partner_id)}], "deleted": {"$ne": True}}
-        rows = await db["partner_transactions"].find(partner_query).to_list(100000)
+        rows = await db["partner_transactions"].find(partner_query).to_list(None)
         allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation")
         paid = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment")
         if body.amount > allocated - paid + 0.005:
@@ -4697,14 +4697,14 @@ async def update_partner_transaction(transaction_id: str, body: PartnerTransacti
         raise HTTPException(status_code=404, detail="Partner not found")
     if body.kind == "profit_allocation":
         net_profit = await _net_profit_lifetime()
-        rows = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(100000)
+        rows = await db["partner_transactions"].find({"kind": "profit_allocation", "deleted": {"$ne": True}}).to_list(None)
         allocated_other = sum(float(row.get("amount", 0) or 0) for row in rows if oid(row["_id"]) != transaction_id)
         available = round(net_profit - allocated_other, 2)
         if body.amount > available + 0.005:
             raise HTTPException(status_code=400, detail=f"Allocation exceeds available net profit ({available:.2f}).")
     if body.kind == "profit_payment":
         partner_query = {"$or": [{"partner_id": body.partner_id}, {"partner_id": ObjectId(body.partner_id)}], "deleted": {"$ne": True}}
-        rows = await db["partner_transactions"].find(partner_query).to_list(100000)
+        rows = await db["partner_transactions"].find(partner_query).to_list(None)
         allocated = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_allocation" and oid(row["_id"]) != transaction_id)
         paid_other = sum(float(row.get("amount", 0) or 0) for row in rows if row.get("kind") == "profit_payment" and oid(row["_id"]) != transaction_id)
         if body.amount > allocated - paid_other + 0.005:
@@ -4731,7 +4731,7 @@ async def delete_partner_transaction(transaction_id: str, _: AdminOnly):
         if ObjectId.is_valid(partner_id):
             partner_query["$or"].append({"partner_id": ObjectId(partner_id)})
         partner_query["deleted"] = {"$ne": True}
-        rows = await db["partner_transactions"].find(partner_query).to_list(100000)
+        rows = await db["partner_transactions"].find(partner_query).to_list(None)
         allocated_after = sum(float(item.get("amount", 0) or 0) for item in rows if item.get("kind") == "profit_allocation" and oid(item["_id"]) != transaction_id)
         payment_rows = [item for item in rows if item.get("kind") == "profit_payment"]
         paid = sum(float(item.get("amount", 0) or 0) for item in payment_rows)

@@ -281,7 +281,7 @@ export function rankVoiceProductMatches<T extends VoiceCatalogItem>(
         score: name === normalizedQuery ? 1 : Math.min(0.98, normalizedQuery.length / name.length),
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 8);
+      ;
   }
 
   return products
@@ -311,6 +311,6 @@ export function rankVoiceProductMatches<T extends VoiceCatalogItem>(
     })
     .filter((row) => row.score >= 0.34)
     .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, 8)
+    
     .map(({ product, score }) => ({ product, score }));
 }

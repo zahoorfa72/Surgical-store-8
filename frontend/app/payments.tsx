@@ -347,8 +347,7 @@ export default function Payments() {
   // Supplier purchases are payable ledger entries. They create the supplier
   // balance when purchased; only a recorded Pay entry settles/cuts cash.
   const supplierPurchases = safePurchases
-    .filter((p) => isSupplier && p.supplier_id && visiblePartyIds.has(p.supplier_id))
-    .slice(0, 12);
+    .filter((p) => isSupplier && p.supplier_id && visiblePartyIds.has(p.supplier_id));
 
   const refundBySale = useMemo(() => {
     const totals: Record<string, number> = {};
@@ -566,7 +565,7 @@ export default function Payments() {
               {!isSupplier && safeBalanceTransfers.length > 0 && (
                 <>
                   <Text style={styles.sectionTitle}>Customer balance transfer history</Text>
-                  {safeBalanceTransfers.slice(0, 100).map((transfer) => (
+                  {safeBalanceTransfers.map((transfer) => (
                     <View key={transfer.id} style={styles.ledgerRow} testID={`customer-transfer-${transfer.id}`}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.ledgerName}>

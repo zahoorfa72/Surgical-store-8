@@ -417,6 +417,9 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       await restoreCache();
       await refreshPending();
       unsub = startCachePersistence();
+      // Older app versions persisted truncated collection responses. Mark all
+      // cached queries stale so an online launch refreshes complete datasets.
+      await queryClient.invalidateQueries();
       setHydrated(true);
     })();
     return () => unsub?.();
@@ -433,7 +436,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       const isUp = !!(state.isConnected && state.isInternetReachable !== false);
       setOnline(isUp);
       if (isUp && !wasOnline.current) {
-        // Just came back online -> sync the outbox and retry the latest Drive backup.
+        // Refresh complete online lists after offline mode, then sync pending writes.
+        void queryClient.invalidateQueries();
         flush();
         retryAutomaticGoogleDriveBackup();
       }
