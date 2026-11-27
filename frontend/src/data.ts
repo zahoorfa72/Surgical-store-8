@@ -121,12 +121,13 @@ function uniqueStockAdjustmentRows<T extends {
 
 async function loadLocalStockAdjustments(): Promise<void> {
   const key = ["inventory-adjustments"] as const;
-  const cached = queryClient.getQueryData<any[]>(key) ?? [];
+  const cached = (queryClient.getQueryData<any[]>(key) ?? []).filter((row) => row && row.deleted !== true);
   const [lostRows, profitRows] = await Promise.all([
     storage.getItem<any[]>("ssm.lost-products.v1", []),
     storage.getItem<any[]>("ssm.profit-products.v1", []),
   ]);
-  queryClient.setQueryData(key, uniqueStockAdjustmentRows([...cached, ...(lostRows ?? []), ...(profitRows ?? [])]));
+  const activeLocalRows = [...(lostRows ?? []), ...(profitRows ?? [])].filter((row) => row && row.deleted !== true);
+  queryClient.setQueryData(key, uniqueStockAdjustmentRows([...cached, ...activeLocalRows]));
 }
 
 function localReport(range: string): ReportSummary {

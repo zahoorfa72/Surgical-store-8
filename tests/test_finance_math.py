@@ -87,6 +87,27 @@ class FinanceMathTests(unittest.TestCase):
         self.assertEqual(result["net_profit"], 14.66)
         self.assertEqual(result["remaining_balance"], 45.34)
 
+    def test_undoing_lost_or_profit_stock_transfer_restores_finance_totals(self):
+        transfer = {
+            "accounting_target": "net_profit_to_remaining_balance",
+            "net_profit_adjustment": -37.50,
+            "remaining_balance_adjustment": 37.50,
+        }
+        before = calculate_finance_totals(
+            self.sales, self.returns, self.expenses, self.payments, [],
+        )
+        while_active = calculate_finance_totals(
+            self.sales, self.returns, self.expenses, self.payments,
+            [{"adjustment_type": "lost_product", **transfer}],
+        )
+        after_undo = calculate_finance_totals(
+            self.sales, self.returns, self.expenses, self.payments, [],
+        )
+        self.assertEqual(while_active["net_profit"], before["net_profit"] - 37.50)
+        self.assertEqual(while_active["remaining_balance"], before["remaining_balance"] + 37.50)
+        self.assertEqual(after_undo["net_profit"], before["net_profit"])
+        self.assertEqual(after_undo["remaining_balance"], before["remaining_balance"])
+
     def test_customer_transfer_keeps_receivable_and_credit_signs(self):
         self.assertEqual(signed_customer_balance_transfer(8930, 2500), 2500)
         self.assertEqual(signed_customer_balance_transfer(-8930, 2500), -2500)
