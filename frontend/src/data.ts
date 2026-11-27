@@ -14,6 +14,7 @@ import {
 import { AppUser } from "@/src/api";
 import { notifyLowStock } from "@/src/low-stock-notifications";
 import { storage } from "@/src/utils/storage";
+import { getTrashEntries } from "@/src/trash";
 
 export const qk = {
   products: ["products"] as const,
@@ -121,12 +122,28 @@ function uniqueStockAdjustmentRows<T extends {
 
 async function loadLocalStockAdjustments(): Promise<void> {
   const key = ["inventory-adjustments"] as const;
-  const cached = (queryClient.getQueryData<any[]>(key) ?? []).filter((row) => row && row.deleted !== true);
+  const trashEntries = await getTrashEntries();
+  const trashedAdjustmentRefs = new Set<string>();
+  for (const entry of trashEntries) {
+    if (entry.path !== "/inventory-adjustments") continue;
+    for (const value of [entry.recordId, entry.record?.id, entry.record?.client_id]) {
+      const ref = String(value ?? "");
+      if (ref) trashedAdjustmentRefs.add(ref);
+    }
+  }
+  const isActive = (row: any) => {
+    if (!row || row.deleted === true) return false;
+    return ![row.id, row.client_id].some((value) => {
+      const ref = String(value ?? "");
+      return !!ref && trashedAdjustmentRefs.has(ref);
+    });
+  };
+  const cached = (queryClient.getQueryData<any[]>(key) ?? []).filter(isActive);
   const [lostRows, profitRows] = await Promise.all([
     storage.getItem<any[]>("ssm.lost-products.v1", []),
     storage.getItem<any[]>("ssm.profit-products.v1", []),
   ]);
-  const activeLocalRows = [...(lostRows ?? []), ...(profitRows ?? [])].filter((row) => row && row.deleted !== true);
+  const activeLocalRows = [...(lostRows ?? []), ...(profitRows ?? [])].filter(isActive);
   queryClient.setQueryData(key, uniqueStockAdjustmentRows([...cached, ...activeLocalRows]));
 }
 

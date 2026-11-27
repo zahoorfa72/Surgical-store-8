@@ -1699,6 +1699,21 @@ export async function apiRequest<T = any>(
     ) {
       applyOptimistic(method, path, options.body, method === "POST" ? "server" : "");
       await persistLiveCache();
+      if (method === "POST" && path === "/inventory-adjustments") {
+        const row = (result as any)?.adjustment;
+        if (row?.id && (row.adjustment_type === "lost_product" || row.adjustment_type === "profit_product")) {
+          queryClient.setQueryData<any[]>(["inventory-adjustments"], (old = []) => [
+            row,
+            ...old.filter((item: any) => item.id !== row.id && (!row.client_id || item.client_id !== row.client_id)),
+          ]);
+          const historyKey = row.adjustment_type === "lost_product" ? "ssm.lost-products.v1" : "ssm.profit-products.v1";
+          const history = await storage.getItem<any[]>(historyKey, []);
+          await storage.setItem(historyKey, [
+            row,
+            ...(history ?? []).filter((item: any) => item.id !== row.id && (!row.client_id || item.client_id !== row.client_id)),
+          ] as any);
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: ["products"] });
       invalidateDerivedReports();
     }

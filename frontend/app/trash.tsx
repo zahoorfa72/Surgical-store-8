@@ -7,6 +7,8 @@ import { getTrashEntries, removeTrashEntry, TrashEntry } from "@/src/trash";
 import { apiRequest } from "@/src/api";
 import { ScreenHeader, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { storage } from "@/src/utils/storage";
+import { queryClient } from "@/src/query-client";
 
 export default function TrashScreen() {
   const styles = useStyles();
@@ -43,6 +45,21 @@ export default function TrashScreen() {
     Alert.alert("Delete permanently?", `“${entry.label}” cannot be restored after this.`, [
       { text: "Cancel", style: "cancel" },
       { text: "Delete forever", style: "destructive", onPress: () => { void (async () => {
+        if (entry.path === "/inventory-adjustments") {
+          const refs = new Set([entry.recordId, entry.record?.id, entry.record?.client_id]
+            .map((value) => String(value ?? ""))
+            .filter(Boolean));
+          for (const key of ["ssm.lost-products.v1", "ssm.profit-products.v1"]) {
+            const rows = await storage.getItem<any[]>(key, []);
+            await storage.setItem(key, (rows ?? []).filter((row) =>
+              ![row.id, row.client_id].some((value) => refs.has(String(value ?? "")))
+            ) as any);
+          }
+          queryClient.setQueryData<any[]>(["inventory-adjustments"], (rows = []) => rows.filter((row: any) =>
+            ![row.id, row.client_id].some((value) => refs.has(String(value ?? "")))
+          ));
+          await queryClient.invalidateQueries({ queryKey: ["report"] });
+        }
         await removeTrashEntry(entry.id);
         await refresh();
         toast("Removed from Trash", "success");
