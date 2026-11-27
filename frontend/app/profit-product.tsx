@@ -60,7 +60,7 @@ export default function ProfitProductScreen() {
     accountingAmountText: "0",
   }), []);
   const profitProductDraftKey = `ssm.form-draft.profit-product.v1.${user?.id ?? "device"}`;
-  const [profitProductDraft, setProfitProductDraft, draftReady, draftRestored, clearProfitProductDraft] =
+  const [profitProductDraft, setProfitProductDraft, , , clearProfitProductDraft] =
     usePersistentDraft(profitProductDraftKey, profitProductDraftInitial);
   const { productId, search, quantityText, date, reason, accountingTarget, accountingAmountText } = profitProductDraft;
   const setProductId = draftFieldSetter(setProfitProductDraft, "productId");

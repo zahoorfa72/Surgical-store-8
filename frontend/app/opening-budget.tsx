@@ -30,7 +30,7 @@ export default function OpeningBudgetLedger() {
   const [items, setItems] = useState<OpeningBudgetTransaction[]>([]);
   const openingBudgetDraftInitial = useMemo(() => ({ amount: "", date: todayIso(), note: "", editingId: null as string | null }), []);
   const openingBudgetDraftKey = `ssm.form-draft.opening-budget.v1.${user?.id ?? "device"}`;
-  const [openingBudgetDraft, setOpeningBudgetDraft, draftReady, draftRestored, clearOpeningBudgetDraft] =
+  const [openingBudgetDraft, setOpeningBudgetDraft, , , clearOpeningBudgetDraft] =
     usePersistentDraft(openingBudgetDraftKey, openingBudgetDraftInitial);
   const { amount, date, note, editingId } = openingBudgetDraft;
   const setAmount = draftFieldSetter(setOpeningBudgetDraft, "amount");

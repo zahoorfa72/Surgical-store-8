@@ -60,7 +60,7 @@ export default function LostProductScreen() {
     accountingAmountText: "0",
   }), []);
   const lostProductDraftKey = `ssm.form-draft.lost-product.v1.${user?.id ?? "device"}`;
-  const [lostProductDraft, setLostProductDraft, draftReady, draftRestored, clearLostProductDraft] =
+  const [lostProductDraft, setLostProductDraft, , , clearLostProductDraft] =
     usePersistentDraft(lostProductDraftKey, lostProductDraftInitial);
   const { productId, search, quantityText, date, reason, accountingTarget, accountingAmountText } = lostProductDraft;
   const setProductId = draftFieldSetter(setLostProductDraft, "productId");

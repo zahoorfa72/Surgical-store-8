@@ -13,6 +13,7 @@ import { scheduleAutomaticGoogleDriveBackup } from "@/src/auto-backup";
 import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
 import { useProfitVisibility } from "@/src/security/finance-security";
 import { ProfitVisibilityToggle } from "@/src/components/profit-visibility-toggle";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 type WProduct = { id: string; name: string; sku: string; quantity: number; cost: number; price: number };
 type WParty = { id: string; name: string; phone: string; address: string; type: "customer" | "supplier" };
@@ -36,33 +37,50 @@ export default function WholesaleStore() {
   const [state, setState] = useState<WState>(emptyState);
   const [loaded, setLoaded] = useState(false);
   const firstPersist = useRef(true);
-  const [tab, setTab] = useState<"dashboard" | "products" | "sale" | "parties" | "history" | "expenses" | "settings">("dashboard");
-  const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
-  const [qty, setQty] = useState("1");
-  const [cost, setCost] = useState("");
-  const [price, setPrice] = useState("");
-  const [editingProduct, setEditingProduct] = useState<string | null>(null);
-  const [partyName, setPartyName] = useState("");
-  const [partyPhone, setPartyPhone] = useState("");
-  const [partyAddress, setPartyAddress] = useState("");
-  const [partyType, setPartyType] = useState<"customer" | "supplier">("customer");
-  const [customer, setCustomer] = useState("");
-  const [cart, setCart] = useState<WItem[]>([]);
-  const [discount, setDiscount] = useState("0");
-  const [discountMode, setDiscountMode] = useState<"amount" | "percentage">("amount");
-  const [salePriceOverride, setSalePriceOverride] = useState("");
-  const [selectedProduct, setSelectedProduct] = useState("");
-  const [saleQtyByProduct, setSaleQtyByProduct] = useState<Record<string, string>>({});
-  const [restockAmounts, setRestockAmounts] = useState<Record<string, string>>({});
-  const [editingSale, setEditingSale] = useState<string | null>(null);
-  const [range, setRange] = useState<"today" | "week" | "month" | "year" | "all" | "custom">("today");
+  const wholesaleDraftInitial = useMemo(() => ({
+    tab: "dashboard" as "dashboard" | "products" | "sale" | "parties" | "history" | "expenses" | "settings",
+    name: "", sku: "", qty: "1", cost: "", price: "", editingProduct: null as string | null,
+    partyName: "", partyPhone: "", partyAddress: "", partyType: "customer" as "customer" | "supplier",
+    customer: "", cart: [] as WItem[], discount: "0", discountMode: "amount" as "amount" | "percentage",
+    salePriceOverride: "", selectedProduct: "", saleQtyByProduct: {} as Record<string, string>,
+    restockAmounts: {} as Record<string, string>, editingSale: null as string | null,
+    range: "today" as "today" | "week" | "month" | "year" | "all" | "custom",
+    expenseTitle: "", expenseAmount: "", expenseNote: "",
+    customFrom: new Date().toISOString().slice(0, 10), customTo: new Date().toISOString().slice(0, 10),
+  }), []);
+  const [wholesaleDraft, setWholesaleDraft] =
+    usePersistentDraft("ssm.form-draft.wholesale.v1", wholesaleDraftInitial);
+  const { tab, name, sku, qty, cost, price, editingProduct, partyName, partyPhone, partyAddress,
+    partyType, customer, cart, discount, discountMode, salePriceOverride, selectedProduct,
+    saleQtyByProduct, restockAmounts, editingSale, range, expenseTitle, expenseAmount, expenseNote,
+    customFrom, customTo } = wholesaleDraft;
+  const setTab = draftFieldSetter(setWholesaleDraft, "tab");
+  const setName = draftFieldSetter(setWholesaleDraft, "name");
+  const setSku = draftFieldSetter(setWholesaleDraft, "sku");
+  const setQty = draftFieldSetter(setWholesaleDraft, "qty");
+  const setCost = draftFieldSetter(setWholesaleDraft, "cost");
+  const setPrice = draftFieldSetter(setWholesaleDraft, "price");
+  const setEditingProduct = draftFieldSetter(setWholesaleDraft, "editingProduct");
+  const setPartyName = draftFieldSetter(setWholesaleDraft, "partyName");
+  const setPartyPhone = draftFieldSetter(setWholesaleDraft, "partyPhone");
+  const setPartyAddress = draftFieldSetter(setWholesaleDraft, "partyAddress");
+  const setPartyType = draftFieldSetter(setWholesaleDraft, "partyType");
+  const setCustomer = draftFieldSetter(setWholesaleDraft, "customer");
+  const setCart = draftFieldSetter(setWholesaleDraft, "cart");
+  const setDiscount = draftFieldSetter(setWholesaleDraft, "discount");
+  const setDiscountMode = draftFieldSetter(setWholesaleDraft, "discountMode");
+  const setSalePriceOverride = draftFieldSetter(setWholesaleDraft, "salePriceOverride");
+  const setSelectedProduct = draftFieldSetter(setWholesaleDraft, "selectedProduct");
+  const setSaleQtyByProduct = draftFieldSetter(setWholesaleDraft, "saleQtyByProduct");
+  const setRestockAmounts = draftFieldSetter(setWholesaleDraft, "restockAmounts");
+  const setEditingSale = draftFieldSetter(setWholesaleDraft, "editingSale");
+  const setRange = draftFieldSetter(setWholesaleDraft, "range");
+  const setExpenseTitle = draftFieldSetter(setWholesaleDraft, "expenseTitle");
+  const setExpenseAmount = draftFieldSetter(setWholesaleDraft, "expenseAmount");
+  const setExpenseNote = draftFieldSetter(setWholesaleDraft, "expenseNote");
+  const setCustomFrom = draftFieldSetter(setWholesaleDraft, "customFrom");
+  const setCustomTo = draftFieldSetter(setWholesaleDraft, "customTo");
   const [storeName, setStoreName] = useState("Wholesale Store");
-  const [expenseTitle, setExpenseTitle] = useState("");
-  const [expenseAmount, setExpenseAmount] = useState("");
-  const [expenseNote, setExpenseNote] = useState("");
-  const [customFrom, setCustomFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [customTo, setCustomTo] = useState(new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     AsyncStorage.getItem(KEY).then(raw => {

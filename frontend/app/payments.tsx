@@ -16,6 +16,7 @@ import { ChipRow, ConfirmModal, EmptyState, Loader, ScreenHeader, formatDate, mo
 import { makeStyles, useTheme } from "@/src/theme";
 import { getHiddenSupplierIds, useFakeFinanceDisplay, fakePurchaseNetTotal, fakePaymentAmount, fakeDisplayAmount } from "@/src/utils/finance-display";
 import { addAppNotification } from "@/src/notification-center";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 function sanitizeNonNegativeAmount(value: string): string {
   const cleaned = String(value ?? "").replace(/[^0-9.]/g, "");
@@ -38,8 +39,20 @@ export default function Payments() {
   const router = useRouter();
   const toast = useToast();
   const queryClient = useQueryClient();
-
-  const [tab, setTab] = useState<string>("supplier");
+  const { user } = useAuth();
+  const paymentDraftInitial = useMemo(() => ({
+    tab: "supplier" as string, active: null as Party | null, editingPayment: null as Payment | null,
+    amount: "", selectedBill: null as BillOption | null, adjustment: "", note: "",
+    entryKind: "pay" as "pay" | "receive" | "supplier_refund" | "customer_refund",
+    transferOpen: false, transferFromId: "", transferToId: "", transferAmount: "", transferNote: "",
+    transferPicker: null as "from" | "to" | null, transferSearch: "",
+  }), []);
+  const paymentDraftKey = `ssm.form-draft.payments.v1.${user?.id ?? "device"}`;
+  const [paymentDraft, setPaymentDraft, , , clearPaymentDraft] =
+    usePersistentDraft(paymentDraftKey, paymentDraftInitial);
+  const { tab, active, editingPayment, amount, selectedBill, adjustment, note, entryKind,
+    transferOpen, transferFromId, transferToId, transferAmount, transferNote, transferPicker, transferSearch } = paymentDraft;
+  const setTab = draftFieldSetter(setPaymentDraft, "tab");
   const isSupplier = tab === "supplier";
   const { data: parties, isLoading } = useParties(isSupplier ? "supplier" : "customer");
   const { data: payments } = usePayments();
@@ -48,7 +61,6 @@ export default function Payments() {
   const { data: purchaseReturns } = usePurchaseReturns();
   const { data: sales } = useSales();
   const { data: salesReturns } = useReturns();
-  const { user } = useAuth();
   const admin = isAdmin(user?.role);
   const fakeFinanceDisplay = useFakeFinanceDisplay();
 
@@ -73,26 +85,26 @@ export default function Payments() {
     return m;
   }, [safePurchaseReturns]);
 
-  const [active, setActive] = useState<Party | null>(null);
-  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const setActive = draftFieldSetter(setPaymentDraft, "active");
+  const setEditingPayment = draftFieldSetter(setPaymentDraft, "editingPayment");
   const [deleting, setDeleting] = useState<{ id: string; party_name: string } | null>(null);
-  const [amount, setAmount] = useState("");
-  const [selectedBill, setSelectedBill] = useState<BillOption | null>(null);
-  const [adjustment, setAdjustment] = useState("");
-  const [note, setNote] = useState("");
-  const [entryKind, setEntryKind] = useState<"pay" | "receive" | "supplier_refund" | "customer_refund">("pay");
+  const setAmount = draftFieldSetter(setPaymentDraft, "amount");
+  const setSelectedBill = draftFieldSetter(setPaymentDraft, "selectedBill");
+  const setAdjustment = draftFieldSetter(setPaymentDraft, "adjustment");
+  const setNote = draftFieldSetter(setPaymentDraft, "note");
+  const setEntryKind = draftFieldSetter(setPaymentDraft, "entryKind");
   const [busy, setBusy] = useState(false);
   const [receiptPhoto, setReceiptPhoto] = useState<string | null>(null);
   const [receiptPhotos, setReceiptPhotos] = useState<Record<string, string>>({});
   const [hiddenSupplierIds, setHiddenSupplierIds] = useState<string[]>([]);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [transferFromId, setTransferFromId] = useState("");
-  const [transferToId, setTransferToId] = useState("");
-  const [transferAmount, setTransferAmount] = useState("");
-  const [transferNote, setTransferNote] = useState("");
+  const setTransferOpen = draftFieldSetter(setPaymentDraft, "transferOpen");
+  const setTransferFromId = draftFieldSetter(setPaymentDraft, "transferFromId");
+  const setTransferToId = draftFieldSetter(setPaymentDraft, "transferToId");
+  const setTransferAmount = draftFieldSetter(setPaymentDraft, "transferAmount");
+  const setTransferNote = draftFieldSetter(setPaymentDraft, "transferNote");
   const [transferBusy, setTransferBusy] = useState(false);
-  const [transferPicker, setTransferPicker] = useState<"from" | "to" | null>(null);
-  const [transferSearch, setTransferSearch] = useState("");
+  const setTransferPicker = draftFieldSetter(setPaymentDraft, "transferPicker");
+  const setTransferSearch = draftFieldSetter(setPaymentDraft, "transferSearch");
   useEffect(() => { void getHiddenSupplierIds().then(setHiddenSupplierIds).catch(() => setHiddenSupplierIds([])); }, []);
   useEffect(() => {
     void (async () => {
@@ -223,7 +235,9 @@ export default function Payments() {
       if (!editingPayment) void addAppNotification(isSupplier ? "Supplier payment made" : "Customer payment received", `${active!.name}: ${money(fakeFinanceDisplay ? fakeDisplayAmount(amt) : amt)}${note.trim() ? " · " + note.trim() : ""}`, "payment");
       else void addAppNotification("Payment entry updated", `${active?.name ?? "Party"}: ${money(fakeFinanceDisplay ? fakeDisplayAmount(amt) : amt)}`, "payment-updated");
       toast(editingPayment ? "Entry updated" : (isSupplier ? "Payment recorded" : "Receipt recorded"), "success");
+      await clearPaymentDraft();
       setActive(null); setEditingPayment(null); setSelectedBill(null);
+      setAmount(""); setAdjustment(""); setNote("");
     } catch (e: any) {
       toast(e?.message || "Could not record", "error");
     } finally {
@@ -302,9 +316,11 @@ export default function Payments() {
         `${selectedTransferFrom.name} → ${selectedTransferTo.name}: ${money(fakeFinanceDisplay ? fakeDisplayAmount(saved.amount) : saved.amount)}`,
         "customer-balance-transfer",
       );
+      await clearPaymentDraft();
       toast("Customer balance transferred and recorded in history", "success");
       setTransferOpen(false);
       setTransferPicker(null);
+      setTransferFromId(""); setTransferToId(""); setTransferAmount(""); setTransferNote(""); setTransferSearch("");
     } catch (e: any) {
       toast(e?.message || "Could not transfer customer balance", "error");
     } finally {
