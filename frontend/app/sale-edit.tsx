@@ -74,6 +74,10 @@ export default function SaleEdit() {
   );
 
   useEffect(() => {
+    if (draftReady && draftRestored && !prefilled) setPrefilled(true);
+  }, [draftReady, draftRestored, prefilled]);
+
+  useEffect(() => {
     if (sale && draftReady && !draftRestored && !prefilled) {
       setLines(
         sale.items.map((it) => ({

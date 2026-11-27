@@ -57,12 +57,12 @@ export default function LostProductScreen() {
   const lostProductDraftInitial = useMemo(() => ({
     productId: "", search: "", quantityText: "1", date: today(), reason: "",
     accountingTarget: "none" as "none" | "inventory_only" | "split_50_50" | "net_profit" | "remaining_balance" | "both" | "net_profit_to_remaining_balance",
-    accountingAmountText: "0",
+    accountingAmountText: "0", editingId: null as string | null,
   }), []);
   const lostProductDraftKey = `ssm.form-draft.lost-product.v1.${user?.id ?? "device"}`;
   const [lostProductDraft, setLostProductDraft, , , clearLostProductDraft] =
     usePersistentDraft(lostProductDraftKey, lostProductDraftInitial);
-  const { productId, search, quantityText, date, reason, accountingTarget, accountingAmountText } = lostProductDraft;
+  const { productId, search, quantityText, date, reason, accountingTarget, accountingAmountText, editingId } = lostProductDraft;
   const setProductId = draftFieldSetter(setLostProductDraft, "productId");
   const setSearch = draftFieldSetter(setLostProductDraft, "search");
   const setQuantityText = draftFieldSetter(setLostProductDraft, "quantityText");
@@ -70,9 +70,9 @@ export default function LostProductScreen() {
   const setReason = draftFieldSetter(setLostProductDraft, "reason");
   const setAccountingTarget = draftFieldSetter(setLostProductDraft, "accountingTarget");
   const setAccountingAmountText = draftFieldSetter(setLostProductDraft, "accountingAmountText");
+  const setEditingId = draftFieldSetter(setLostProductDraft, "editingId");
   const [history, setHistory] = useState<LossRow[]>([]);
   const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
   const editingRow = editingId ? history.find((row) => row.id === editingId) : undefined;

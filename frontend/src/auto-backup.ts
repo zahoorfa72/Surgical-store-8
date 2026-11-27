@@ -27,7 +27,7 @@ async function writeAutoBackup() {
     const liveCache = dehydrate(queryClient, { shouldDehydrateQuery: (q) => q.state.status === "success" });
     await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
   } catch {}
-  const keys = (await AsyncStorage.getAllKeys()).filter((k) => (k.startsWith(PREFIX) && !SESSION_KEYS.has(k)) || k === WHOLESALE_KEY);
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => (k.startsWith(PREFIX) && !SESSION_KEYS.has(k) && !k.startsWith("ssm.form-draft.")) || k === WHOLESALE_KEY);
   const pairs = await AsyncStorage.multiGet(keys);
   const saved: Record<string,string> = {};
   for (const [k,v] of pairs) if (v !== null) saved[k] = v;
@@ -68,7 +68,7 @@ async function buildBackupJson(): Promise<string> {
   });
   await AsyncStorage.setItem("ssm.qcache.v1", JSON.stringify(liveCache));
   const keys = (await AsyncStorage.getAllKeys()).filter(
-    (k) => (k.startsWith(PREFIX) && !SESSION_KEYS.has(k)) || k === WHOLESALE_KEY,
+    (k) => (k.startsWith(PREFIX) && !SESSION_KEYS.has(k) && !k.startsWith("ssm.form-draft.")) || k === WHOLESALE_KEY,
   );
   const pairs = await AsyncStorage.multiGet(keys);
   const saved: Record<string, string> = {};
