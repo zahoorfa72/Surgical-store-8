@@ -115,7 +115,7 @@ export default function Sell() {
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [addProductSearch, setAddProductSearch] = useState("");
   const [orderImageScanOpen, setOrderImageScanOpen] = useState(false);
-  const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
+  const showSellProfitDiscount = true;
   const [allowNegativeStock, setAllowNegativeStock] = useState(false);
   const [sellProductCreateOpen, setSellProductCreateOpen] = useState(false);
   const [newSellProductName, setNewSellProductName] = useState("");
@@ -196,15 +196,7 @@ export default function Sell() {
     });
   }, [cartDraftReady, cart, transactionDate, customerId, discount, credit, allowNegativeStock, includePreviousBalance, applyCustomerCredit, pendingBalanceAdjustment, activeHeldSaleId, saleDescription]);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      void storage.getItem<boolean>("ssm.showSellProfitDiscount", true).then((value) => {
-        if (active) setShowSellProfitDiscount(value !== false);
-      });
-      return () => { active = false; };
-    }, []),
-  );
+
 
   const onScanned = (value: string) => {
     setScanOpen(false);
