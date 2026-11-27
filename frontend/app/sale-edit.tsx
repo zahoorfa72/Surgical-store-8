@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,11 +32,11 @@ export default function SaleEdit() {
   const { data: customers } = useParties("customer");
   const { data: products } = useProducts();
 
-  const saleEditDraftInitial = {
+  const saleEditDraftInitial = useMemo(() => ({
     lines: [] as Line[], allowNegativeStock: false, transactionDate: "", discount: "0",
     credit: false, customerId: null as string | null, pendingBalanceAdjustment: 0,
     includePreviousBalance: false, applyCustomerCredit: false,
-  };
+  }), []);
   const saleEditDraftKey = `ssm.form-draft.sale-edit.v1.${user?.id ?? "device"}.${id ?? "unknown"}`;
   const [saleEditDraft, setSaleEditDraft, draftReady, draftRestored, clearSaleEditDraft] =
     usePersistentDraft(saleEditDraftKey, saleEditDraftInitial);

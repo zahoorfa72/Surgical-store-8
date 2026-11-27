@@ -21,6 +21,13 @@ export function usePersistentDraft<T>(
   const saveRef = useRef<() => Promise<void>>(async () => {});
   valueRef.current = value;
 
+  const setDraftValue = useCallback<Dispatch<SetStateAction<T>>>((next) => {
+    clearedRef.current = false;
+    setValue((previous) => typeof next === "function"
+      ? (next as (value: T) => T)(previous)
+      : next);
+  }, []);
+
   const saveNow = useCallback(async () => {
     if (!readyRef.current || clearedRef.current) return;
     await storage.setItem(key, {
@@ -110,7 +117,7 @@ export function usePersistentDraft<T>(
     await storage.removeItem(key);
   }, [key]);
 
-  return [value, setValue, ready, restored, clearDraft];
+  return [value, setDraftValue, ready, restored, clearDraft];
 }
 
 export function draftFieldSetter<T extends object, K extends keyof T>(

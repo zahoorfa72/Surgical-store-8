@@ -28,7 +28,7 @@ export default function ReturnForm() {
   const resolvedSaleId = sale_id ?? returnRows?.find((r: any) => r.id === return_id)?.sale_id ?? "";
   const { data: sale, isLoading } = useSale(resolvedSaleId);
 
-  const returnDraftInitial = { qtys: {} as Record<string, string>, reason: "" };
+  const returnDraftInitial = useMemo(() => ({ qtys: {} as Record<string, string>, reason: "" }), []);
   const returnDraftKey = `ssm.form-draft.return.v1.${user?.id ?? "device"}.${return_id ?? resolvedSaleId ?? "new"}`;
   const [returnDraft, setReturnDraft, draftReady, draftRestored, clearReturnDraft] =
     usePersistentDraft(returnDraftKey, returnDraftInitial);

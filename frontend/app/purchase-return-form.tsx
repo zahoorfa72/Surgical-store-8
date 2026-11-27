@@ -19,7 +19,7 @@ export default function PurchaseReturnForm() {
   const {data:products=[]}=useProducts();
   const {data:returnRows=[]}=usePurchaseReturns();
 
-  const purchaseReturnDraftInitial = { qtys: {} as Record<string, string>, reason: "" };
+  const purchaseReturnDraftInitial = useMemo(() => ({ qtys: {} as Record<string, string>, reason: "" }), []);
   const purchaseReturnDraftKey = `ssm.form-draft.purchase-return.v1.${user?.id ?? "device"}.${return_id ?? purchase_id ?? "new"}`;
   const [purchaseReturnDraft, setPurchaseReturnDraft, draftReady, draftRestored, clearPurchaseReturnDraft] =
     usePersistentDraft(purchaseReturnDraftKey, purchaseReturnDraftInitial);
