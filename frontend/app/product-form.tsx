@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,6 +12,8 @@ import { BarcodeScannerModal } from "@/src/components/barcode-scanner";
 import { Field, PrimaryButton, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useFakeFinanceDisplay, fakeDisplayAmount } from "@/src/utils/finance-display";
+import { useAuth } from "@/src/auth";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 export default function ProductForm() {
   const styles = useStyles();
@@ -21,24 +23,32 @@ export default function ProductForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { data: products } = useProducts();
   const { data: settings } = useSettings();
   const categoryOptions = Array.from(new Set([...(settings?.product_categories ?? []), ...(products ?? []).map((p) => String(p.category || "")).filter(Boolean)])).sort((a, b) => a.localeCompare(b));
   const editing = !!id;
 
-  const [name, setName] = useState("");
-  const [barcode, setBarcode] = useState("");
-  const [category, setCategory] = useState("");
-  const [purchase, setPurchase] = useState("0");
-  const [sale, setSale] = useState("0");
-  const [threshold, setThreshold] = useState("5");
-  const [expiryDate, setExpiryDate] = useState("");
+  const productDraftInitial = useMemo(() => ({
+    name: "", barcode: "", category: "", purchase: "0", sale: "0", threshold: "5", expiryDate: "",
+  }), []);
+  const productDraftKey = `ssm.form-draft.product.v1.${user?.id ?? "device"}.${id ?? "new"}`;
+  const [productDraft, setProductDraft, draftReady, draftRestored, clearProductDraft] =
+    usePersistentDraft(productDraftKey, productDraftInitial);
+  const { name, barcode, category, purchase, sale, threshold, expiryDate } = productDraft;
+  const setName = draftFieldSetter(setProductDraft, "name");
+  const setBarcode = draftFieldSetter(setProductDraft, "barcode");
+  const setCategory = draftFieldSetter(setProductDraft, "category");
+  const setPurchase = draftFieldSetter(setProductDraft, "purchase");
+  const setSale = draftFieldSetter(setProductDraft, "sale");
+  const setThreshold = draftFieldSetter(setProductDraft, "threshold");
+  const setExpiryDate = draftFieldSetter(setProductDraft, "expiryDate");
   const [busy, setBusy] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
 
   useEffect(() => {
-    if (id && products) {
+    if (id && products && draftReady && !draftRestored) {
       const p = products.find((x) => x.id === id);
       if (p) {
         setName(p.name);
@@ -50,7 +60,7 @@ export default function ProductForm() {
         setThreshold(String(p.low_stock_threshold));
       }
     }
-  }, [id, products]);
+  }, [id, products, draftReady, draftRestored]);
 
   const save = async () => {
     if (!name.trim()) {
@@ -91,6 +101,7 @@ export default function ProductForm() {
       if (editing) await apiRequest(`/products/${id}`, { method: "PUT", body });
       else await apiRequest("/products", { method: "POST", body });
       await queryClient.invalidateQueries({ queryKey: qk.products });
+      await clearProductDraft();
       toast(editing ? "Product updated" : "Product added", "success");
       router.back();
     } catch (e: any) {

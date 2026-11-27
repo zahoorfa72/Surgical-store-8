@@ -10,6 +10,7 @@ import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 type ProfitRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; profit_value: number; loss_cost?: number; edited_at?: string; net_profit_adjustment?: number; remaining_balance_adjustment?: number; accounting_target?: string; created_at: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.profit-products.v1";
@@ -53,16 +54,25 @@ export default function ProfitProductScreen() {
   const { user } = useAuth();
   const canAdjustAccounting = user?.role === "admin";
   const { data: products = [] } = useProducts();
-  const [productId, setProductId] = useState("");
-  const [search, setSearch] = useState("");
-  const [quantityText, setQuantityText] = useState("1");
-  const [date, setDate] = useState(today());
-  const [reason, setReason] = useState("");
-  const [accountingTarget, setAccountingTarget] = useState<"none" | "inventory_only" | "split_50_50" | "net_profit" | "remaining_balance" | "both">("none");
-  const [accountingAmountText, setAccountingAmountText] = useState("0");
+  const profitProductDraftInitial = useMemo(() => ({
+    productId: "", search: "", quantityText: "1", date: today(), reason: "",
+    accountingTarget: "none" as "none" | "inventory_only" | "split_50_50" | "net_profit" | "remaining_balance" | "both",
+    accountingAmountText: "0", editingId: null as string | null,
+  }), []);
+  const profitProductDraftKey = `ssm.form-draft.profit-product.v1.${user?.id ?? "device"}`;
+  const [profitProductDraft, setProfitProductDraft, , , clearProfitProductDraft] =
+    usePersistentDraft(profitProductDraftKey, profitProductDraftInitial);
+  const { productId, search, quantityText, date, reason, accountingTarget, accountingAmountText, editingId } = profitProductDraft;
+  const setProductId = draftFieldSetter(setProfitProductDraft, "productId");
+  const setSearch = draftFieldSetter(setProfitProductDraft, "search");
+  const setQuantityText = draftFieldSetter(setProfitProductDraft, "quantityText");
+  const setDate = draftFieldSetter(setProfitProductDraft, "date");
+  const setReason = draftFieldSetter(setProfitProductDraft, "reason");
+  const setAccountingTarget = draftFieldSetter(setProfitProductDraft, "accountingTarget");
+  const setAccountingAmountText = draftFieldSetter(setProfitProductDraft, "accountingAmountText");
+  const setEditingId = draftFieldSetter(setProfitProductDraft, "editingId");
   const [history, setHistory] = useState<ProfitRow[]>([]);
   const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const selected = products.find((p) => p.id === productId);
   const qty = Number(quantityText);
   const editingRow = editingId ? history.find((row) => row.id === editingId) : undefined;
@@ -123,6 +133,7 @@ export default function ProfitProductScreen() {
       await queryClient.invalidateQueries({ queryKey: ["report"] });
       setHistory((old) => mergeUniqueRows([row, ...old]));
       toast("Profit product recorded. Stock and cost lots increased.");
+      await clearProfitProductDraft();
       setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setAccountingTarget("none"); setAccountingAmountText("0"); setEditingId(null);
     } catch (e: any) {
       toast(e?.message || "Could not record profit product");

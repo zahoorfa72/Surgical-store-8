@@ -8,6 +8,7 @@ import { usePurchase, usePurchaseReturns, useProducts, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Field, Loader, PrimaryButton, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 export default function PurchaseReturnForm() {
   const styles=useStyles(); const {colors}=useTheme(); const insets=useSafeAreaInsets();
@@ -18,11 +19,18 @@ export default function PurchaseReturnForm() {
   const {data:products=[]}=useProducts();
   const {data:returnRows=[]}=usePurchaseReturns();
 
-  const [qtys,setQtys]=useState<Record<string,string>>({}); const [reason,setReason]=useState(""); const [busy,setBusy]=useState(false);
+  const purchaseReturnDraftInitial = useMemo(() => ({ qtys: {} as Record<string, string>, reason: "" }), []);
+  const purchaseReturnDraftKey = `ssm.form-draft.purchase-return.v1.${user?.id ?? "device"}.${return_id ?? purchase_id ?? "new"}`;
+  const [purchaseReturnDraft, setPurchaseReturnDraft, draftReady, draftRestored, clearPurchaseReturnDraft] =
+    usePersistentDraft(purchaseReturnDraftKey, purchaseReturnDraftInitial);
+  const { qtys, reason } = purchaseReturnDraft;
+  const setQtys = draftFieldSetter(setPurchaseReturnDraft, "qtys");
+  const setReason = draftFieldSetter(setPurchaseReturnDraft, "reason");
+  const [busy,setBusy]=useState(false);
   const existingReturn:any=returnRows?.find((r:any)=>r.id===return_id);
   const returned=(purchase as any)?.returned_items ?? {};
   const rows=useMemo(()=>!purchase?[]:purchase.items.map(it=>{const already=Number(returned[it.product_id]??0);const own=editing?Number(existingReturn?.items?.find((x:any)=>x.product_id===it.product_id)?.quantity??0):0;return {...it,already,remaining:Math.max(0,it.quantity-already+own)}}),[purchase,returned,editing,existingReturn]);
-  useEffect(()=>{if(editing&&existingReturn){const initial:any={};for(const it of existingReturn.items??[])initial[it.product_id]=String(it.quantity);setQtys(initial);setReason(existingReturn.reason??"");}},[editing,existingReturn]);
+  useEffect(()=>{if(editing&&existingReturn&&draftReady&&!draftRestored){const initial:any={};for(const it of existingReturn.items??[])initial[it.product_id]=String(it.quantity);setQtys(initial);setReason(existingReturn.reason??"");}},[editing,existingReturn,draftReady,draftRestored]);
   const total=rows.reduce((sum,row)=>sum+Math.min(parseFloat(qtys[row.product_id]||"0")||0,row.remaining)*Math.max(0,Number(row.unit_cost??0)),0);
   const submit=async()=>{
     const items=rows.map(r=>({product_id:r.product_id,quantity:Math.min(parseFloat(qtys[r.product_id]||"0")||0,r.remaining)})).filter(x=>x.quantity>0);
@@ -35,6 +43,7 @@ export default function PurchaseReturnForm() {
       await queryClient.invalidateQueries({queryKey:qk.purchase(purchase_id!)});
       await queryClient.invalidateQueries({queryKey:qk.purchaseReturns});
       await queryClient.invalidateQueries({queryKey:qk.parties("supplier")});
+      await clearPurchaseReturnDraft();
       toast(editing?"Purchase return updated":"Purchase return processed & stock reduced","success"); router.back();
     }catch(e:any){toast(e?.message||"Purchase return failed","error")}finally{setBusy(false)}
   };

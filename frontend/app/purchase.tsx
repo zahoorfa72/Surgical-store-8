@@ -14,6 +14,7 @@ import { EmptyState, ScreenHeader, money, todayIsoDate, transactionDateIso, useT
 import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 type Line = { id: string; name: string; quantity: number; unit_cost: number; batch_number: string; expiry_date: string; non_expiring: boolean };
 
@@ -34,10 +35,18 @@ export default function Purchase() {
   const { data: products } = useProducts();
   const { data: suppliers } = useParties("supplier");
 
-  const [lines, setLines] = useState<Line[]>([]);
-  // Keep the purchase-cost text separate from the numeric value so Android
-  // does not immediately turn "12." back into "12" while the user is typing.
-  const [costText, setCostText] = useState<Record<string, string>>({});
+  const purchaseDraftInitial = useMemo(() => ({
+    lines: [] as Line[],
+    costText: {} as Record<string, string>,
+    supplierId: null as string | null,
+    transactionDate: todayIsoDate(),
+  }), []);
+  const purchaseDraftKey = `ssm.form-draft.purchase.v1.${user?.id ?? "device"}.${editId ?? "new"}`;
+  const [purchaseDraft, setPurchaseDraft, draftReady, draftRestored, clearPurchaseDraft] =
+    usePersistentDraft(purchaseDraftKey, purchaseDraftInitial);
+  const { lines, costText, supplierId, transactionDate } = purchaseDraft;
+  const setLines = draftFieldSetter(setPurchaseDraft, "lines");
+  const setCostText = draftFieldSetter(setPurchaseDraft, "costText");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [productSearch, setProductSearch] = useState("");
@@ -50,8 +59,8 @@ export default function Purchase() {
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierPhone, setNewSupplierPhone] = useState("");
   const [newSupplierAddress, setNewSupplierAddress] = useState("");
-  const [supplierId, setSupplierId] = useState<string | null>(null);
-  const [transactionDate, setTransactionDate] = useState(todayIsoDate());
+  const setSupplierId = draftFieldSetter(setPurchaseDraft, "supplierId");
+  const setTransactionDate = draftFieldSetter(setPurchaseDraft, "transactionDate");
   const [busy, setBusy] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
   const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
@@ -62,7 +71,7 @@ export default function Purchase() {
 
   // Prefill the form once when editing an existing purchase.
   useEffect(() => {
-    if (isEdit && editing && !prefilled) {
+    if (isEdit && editing && draftReady && !draftRestored && !prefilled) {
       setLines(
         editing.items.map((it) => ({
           id: it.product_id,
@@ -79,10 +88,10 @@ export default function Purchase() {
       setTransactionDate(transactionDateIso(editing.transaction_date, editing.created_at));
       setPrefilled(true);
     }
-  }, [isEdit, editing, prefilled]);
+  }, [isEdit, editing, prefilled, draftReady, draftRestored]);
 
   useEffect(() => {
-    if (isEdit || suggestionsLoaded || !productIdsParam || !products?.length) return;
+    if (!draftReady || draftRestored || isEdit || suggestionsLoaded || lines.length > 0 || !productIdsParam || !products?.length) return;
     const quantities: Record<string, number> = {};
     const ids = String(productIdsParam).split(",").filter(Boolean).map((entry) => {
       const [id, quantity] = entry.split(":");
@@ -107,7 +116,7 @@ export default function Purchase() {
     setCostText(Object.fromEntries(suggested.map((product) => [product.id, String(product.purchase_price ?? 0)])));
     setSuggestionsLoaded(true);
     toast(`Added ${suggested.length} replenishment suggestions. Review quantities before saving.`, "info");
-  }, [isEdit, suggestionsLoaded, productIdsParam, products]);
+  }, [draftReady, draftRestored, lines.length, isEdit, suggestionsLoaded, productIdsParam, products]);
 
   const lineIds = useMemo(() => new Set(lines.map((l) => l.id)), [lines]);
   const total = lines.reduce((sum, line) => sum + line.quantity * Math.max(0, Number(line.unit_cost ?? 0)), 0);
@@ -261,12 +270,14 @@ export default function Purchase() {
         await queryClient.invalidateQueries({ queryKey: qk.products });
         await queryClient.invalidateQueries({ queryKey: qk.purchases });
         await queryClient.invalidateQueries({ queryKey: qk.purchase(editId!) });
+        await clearPurchaseDraft();
         toast("Purchase updated", "success");
         router.back();
       } else {
         const { queued } = await createPurchase(body, user?.name || user?.email || "Staff");
         await queryClient.invalidateQueries({ queryKey: qk.products });
         await queryClient.invalidateQueries({ queryKey: qk.purchases });
+        await clearPurchaseDraft();
         toast(queued ? "Saved offline — will sync when online" : "Stock purchased & updated", queued ? "info" : "success");
         router.back();
       }

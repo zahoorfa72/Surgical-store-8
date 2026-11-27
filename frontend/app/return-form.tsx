@@ -11,6 +11,7 @@ import { useSale, useReturns, qk } from "@/src/data";
 import { isAdmin, useAuth } from "@/src/auth";
 import { Field, Loader, PrimaryButton, ScreenHeader, money, useToast } from "@/src/ui";
 import { makeStyles, useTheme } from "@/src/theme";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 export default function ReturnForm() {
   const styles = useStyles();
@@ -27,8 +28,13 @@ export default function ReturnForm() {
   const resolvedSaleId = sale_id ?? returnRows?.find((r: any) => r.id === return_id)?.sale_id ?? "";
   const { data: sale, isLoading } = useSale(resolvedSaleId);
 
-  const [qtys, setQtys] = useState<Record<string, string>>({});
-  const [reason, setReason] = useState("");
+  const returnDraftInitial = useMemo(() => ({ qtys: {} as Record<string, string>, reason: "" }), []);
+  const returnDraftKey = `ssm.form-draft.return.v1.${user?.id ?? "device"}.${return_id ?? resolvedSaleId ?? "new"}`;
+  const [returnDraft, setReturnDraft, draftReady, draftRestored, clearReturnDraft] =
+    usePersistentDraft(returnDraftKey, returnDraftInitial);
+  const { qtys, reason } = returnDraft;
+  const setQtys = draftFieldSetter(setReturnDraft, "qtys");
+  const setReason = draftFieldSetter(setReturnDraft, "reason");
   const [busy, setBusy] = useState(false);
 
   const existingReturn: any = returnRows?.find((r: any) => r.id === return_id);
@@ -51,12 +57,12 @@ export default function ReturnForm() {
   }, 0);
 
   useEffect(() => {
-    if (editing && existingReturn) {
+    if (editing && existingReturn && draftReady && !draftRestored) {
       const initial: Record<string,string> = {};
       for (const it of existingReturn.items ?? []) initial[it.product_id] = String(it.quantity);
       setQtys(initial); setReason(existingReturn.reason ?? "");
     }
-  }, [editing, existingReturn]);
+  }, [editing, existingReturn, draftReady, draftRestored]);
 
   const submit = async () => {
     const items = rows
@@ -73,6 +79,7 @@ export default function ReturnForm() {
       await queryClient.invalidateQueries({ queryKey: qk.sales });
       await queryClient.invalidateQueries({ queryKey: qk.returns });
       await queryClient.invalidateQueries({ queryKey: qk.sale(resolvedSaleId) });
+      await clearReturnDraft();
       toast(editing ? "Return updated" : "Return processed & stock restored", "success");
       router.back();
     } catch (e: any) {

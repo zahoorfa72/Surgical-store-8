@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +13,7 @@ import { Loader, ScreenHeader, money, transactionDateIso, useToast } from "@/src
 import { TransactionDateField } from "@/src/components/date-calendar";
 import { makeStyles, useTheme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 type Line = { id: string; name: string; quantity: number; unit_price: number };
 
@@ -31,12 +32,22 @@ export default function SaleEdit() {
   const { data: customers } = useParties("customer");
   const { data: products } = useProducts();
 
-  const [lines, setLines] = useState<Line[]>([]);
-  const [allowNegativeStock, setAllowNegativeStock] = useState(false);
-  const [transactionDate, setTransactionDate] = useState("");
-  const [discount, setDiscount] = useState("0");
-  const [credit, setCredit] = useState(false);
-  const [customerId, setCustomerId] = useState<string | null>(null);
+  const saleEditDraftInitial = useMemo(() => ({
+    lines: [] as Line[], allowNegativeStock: false, transactionDate: "", discount: "0",
+    credit: false, customerId: null as string | null, pendingBalanceAdjustment: 0,
+    includePreviousBalance: false, applyCustomerCredit: false,
+  }), []);
+  const saleEditDraftKey = `ssm.form-draft.sale-edit.v1.${user?.id ?? "device"}.${id ?? "unknown"}`;
+  const [saleEditDraft, setSaleEditDraft, draftReady, draftRestored, clearSaleEditDraft] =
+    usePersistentDraft(saleEditDraftKey, saleEditDraftInitial);
+  const { lines, allowNegativeStock, transactionDate, discount, credit, customerId,
+    pendingBalanceAdjustment, includePreviousBalance, applyCustomerCredit } = saleEditDraft;
+  const setLines = draftFieldSetter(setSaleEditDraft, "lines");
+  const setAllowNegativeStock = draftFieldSetter(setSaleEditDraft, "allowNegativeStock");
+  const setTransactionDate = draftFieldSetter(setSaleEditDraft, "transactionDate");
+  const setDiscount = draftFieldSetter(setSaleEditDraft, "discount");
+  const setCredit = draftFieldSetter(setSaleEditDraft, "credit");
+  const setCustomerId = draftFieldSetter(setSaleEditDraft, "customerId");
   const [custPickerOpen, setCustPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
   const [productSearch, setProductSearch] = useState("");
@@ -44,9 +55,9 @@ export default function SaleEdit() {
   const [prefilled, setPrefilled] = useState(false);
   const [showSellProfitDiscount, setShowSellProfitDiscount] = useState(true);
   const [saleEditLockHours, setSaleEditLockHours] = useState(0);
-  const [pendingBalanceAdjustment, setPendingBalanceAdjustment] = useState(0);
-  const [includePreviousBalance, setIncludePreviousBalance] = useState(false);
-  const [applyCustomerCredit, setApplyCustomerCredit] = useState(false);
+  const setPendingBalanceAdjustment = draftFieldSetter(setSaleEditDraft, "pendingBalanceAdjustment");
+  const setIncludePreviousBalance = draftFieldSetter(setSaleEditDraft, "includePreviousBalance");
+  const setApplyCustomerCredit = draftFieldSetter(setSaleEditDraft, "applyCustomerCredit");
   const [balancePromptedFor, setBalancePromptedFor] = useState<string | null>(null);
 
   useFocusEffect(
@@ -63,7 +74,11 @@ export default function SaleEdit() {
   );
 
   useEffect(() => {
-    if (sale && !prefilled) {
+    if (draftReady && draftRestored && !prefilled) setPrefilled(true);
+  }, [draftReady, draftRestored, prefilled]);
+
+  useEffect(() => {
+    if (sale && draftReady && !draftRestored && !prefilled) {
       setLines(
         sale.items.map((it) => ({
           id: it.product_id,
@@ -80,7 +95,7 @@ export default function SaleEdit() {
       setAllowNegativeStock(Boolean(sale.allow_negative_stock));
       setPrefilled(true);
     }
-  }, [sale, prefilled]);
+  }, [sale, prefilled, draftReady, draftRestored]);
 
   const setQty = (lid: string, q: number) =>
     setLines((prev) => prev.map((l) => (l.id === lid ? { ...l, quantity: Math.max(0, q) } : l)));
@@ -210,6 +225,7 @@ export default function SaleEdit() {
           : balanceAdjustmentApplied ? "Sale updated and existing customer balance adjusted" : "Sale updated",
         balanceAdjustmentFailed ? "error" : "success",
       );
+      await clearSaleEditDraft();
       router.back();
     } catch (e: any) {
       toast(e?.message || "Could not update sale", "error");
