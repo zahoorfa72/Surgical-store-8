@@ -10,6 +10,7 @@ import { Product } from "@/src/models";
 import { storage } from "@/src/utils/storage";
 import { Card, ScreenHeader, useToast, money, formatDateTime } from "@/src/ui";
 import { useTheme } from "@/src/theme";
+import { draftFieldSetter, usePersistentDraft } from "@/src/utils/use-persistent-draft";
 
 type LossRow = { id: string; client_id?: string; product_id: string; product_name: string; delta: number; reason: string; date: string; loss_cost: number; cost_layers_used?: { quantity: number; unit_cost: number; purchase_id?: string | null }[]; net_profit_adjustment?: number; remaining_balance_adjustment?: number; gross_profit_adjustment?: number; accounting_target?: string; created_at: string; edited_at?: string; adjustment_type?: string; user_name?: string };
 const HISTORY_KEY = "ssm.lost-products.v1";
@@ -51,15 +52,24 @@ export default function LostProductScreen() {
   const queryClient = useQueryClient();
   const { colors } = useTheme();
   const { data: products = [] } = useProducts();
-  const [productId, setProductId] = useState("");
-  const [search, setSearch] = useState("");
-  const [quantityText, setQuantityText] = useState("1");
-  const [date, setDate] = useState(today());
-  const [reason, setReason] = useState("");
   const { user } = useAuth();
   const canAdjustAccounting = user?.role === "admin";
-  const [accountingTarget, setAccountingTarget] = useState<"none" | "inventory_only" | "split_50_50" | "net_profit" | "remaining_balance" | "both" | "net_profit_to_remaining_balance">("none");
-  const [accountingAmountText, setAccountingAmountText] = useState("0");
+  const lostProductDraftInitial = useMemo(() => ({
+    productId: "", search: "", quantityText: "1", date: today(), reason: "",
+    accountingTarget: "none" as "none" | "inventory_only" | "split_50_50" | "net_profit" | "remaining_balance" | "both" | "net_profit_to_remaining_balance",
+    accountingAmountText: "0",
+  }), []);
+  const lostProductDraftKey = `ssm.form-draft.lost-product.v1.${user?.id ?? "device"}`;
+  const [lostProductDraft, setLostProductDraft, draftReady, draftRestored, clearLostProductDraft] =
+    usePersistentDraft(lostProductDraftKey, lostProductDraftInitial);
+  const { productId, search, quantityText, date, reason, accountingTarget, accountingAmountText } = lostProductDraft;
+  const setProductId = draftFieldSetter(setLostProductDraft, "productId");
+  const setSearch = draftFieldSetter(setLostProductDraft, "search");
+  const setQuantityText = draftFieldSetter(setLostProductDraft, "quantityText");
+  const setDate = draftFieldSetter(setLostProductDraft, "date");
+  const setReason = draftFieldSetter(setLostProductDraft, "reason");
+  const setAccountingTarget = draftFieldSetter(setLostProductDraft, "accountingTarget");
+  const setAccountingAmountText = draftFieldSetter(setLostProductDraft, "accountingAmountText");
   const [history, setHistory] = useState<LossRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -139,6 +149,7 @@ export default function LostProductScreen() {
       await queryClient.invalidateQueries({ queryKey: ["report"] });
       setHistory((old) => mergeUniqueRows([row, ...old]));
       toast("Lost product recorded. Stock and FIFO cost lots updated.");
+      await clearLostProductDraft();
       setQuantityText("1"); setReason(""); setSearch(""); setProductId(""); setAccountingTarget("none"); setAccountingAmountText("0"); setEditingId(null);
     } catch (e: any) {
       toast(e?.message || "Could not record lost product");

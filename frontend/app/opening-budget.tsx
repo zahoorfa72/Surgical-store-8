@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import { storage } from "@/src/utils/storage";
 import { OpeningBudgetTransaction } from "@/src/models";
 import { money, ScreenHeader, useToast } from "@/src/ui";
 import { useTheme } from "@/src/theme";
+import { usePersistentDraft, draftFieldSetter } from "@/src/utils/use-persistent-draft";
 
 const STORAGE_KEY = "ssm.openingBudgetTransactions";
 const todayIso = () => {
@@ -27,10 +28,15 @@ export default function OpeningBudgetLedger() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [items, setItems] = useState<OpeningBudgetTransaction[]>([]);
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayIso());
-  const [note, setNote] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const openingBudgetDraftInitial = useMemo(() => ({ amount: "", date: todayIso(), note: "", editingId: null as string | null }), []);
+  const openingBudgetDraftKey = `ssm.form-draft.opening-budget.v1.${user?.id ?? "device"}`;
+  const [openingBudgetDraft, setOpeningBudgetDraft, draftReady, draftRestored, clearOpeningBudgetDraft] =
+    usePersistentDraft(openingBudgetDraftKey, openingBudgetDraftInitial);
+  const { amount, date, note, editingId } = openingBudgetDraft;
+  const setAmount = draftFieldSetter(setOpeningBudgetDraft, "amount");
+  const setDate = draftFieldSetter(setOpeningBudgetDraft, "date");
+  const setNote = draftFieldSetter(setOpeningBudgetDraft, "note");
+  const setEditingId = draftFieldSetter(setOpeningBudgetDraft, "editingId");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -107,6 +113,7 @@ export default function OpeningBudgetLedger() {
         queryClient.setQueryData(["opening-budget-transactions"], next);
         toast(created?.pending ? "Saved offline; will sync when connected" : "Opening budget added", "success");
       }
+      await clearOpeningBudgetDraft();
       resetForm();
     } catch (error: any) {
       toast(error?.message || "Could not save opening budget", "error");
