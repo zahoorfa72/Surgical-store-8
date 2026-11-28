@@ -1759,7 +1759,7 @@ function getCachedUpdatedAt(path: string): string | undefined {
     candidates.push(...(queryClient.getQueryData<any[]>(["parties", "supplier"]) ?? []));
     candidates.push(...(queryClient.getQueryData<any[]>(["parties", "customer"]) ?? []));
   }
-  const found = candidates.find((row) => row?.id === id || (!!clientId && String(row?.client_id ?? "") === clientId));
+  const found = candidates.find((row) => String(row?.id ?? "") === id);
   return found?.updated_at ? String(found.updated_at) : undefined;
 }
 
